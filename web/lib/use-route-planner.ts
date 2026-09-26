@@ -212,6 +212,8 @@ export function useRoutePlanner() {
     when, setWhen,
     /** Ingested events in the trip's time window, for the map. Empty while loading or if the feed failed. */
     mapEvents: context.events ?? [],
+    /** The trip span mapEvents were fetched for (leave → arrive, or just the departure before routes load). */
+    mapSpan: fetchSpan,
     /** Events near / conditions on the selected route (null = no route yet). */
     selectedContext: ctxFor(routes[sel]),
     whenText: when.mode === 'now' ? 'Leave now' : `${when.mode === 'depart' ? 'Leave' : 'Arrive by'} ${fmtWhen(when.at)}`,

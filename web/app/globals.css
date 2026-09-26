@@ -511,3 +511,30 @@ input::placeholder { color: var(--muted); }
   .sheet, .route, .switch, .switch i { transition: none; }
   .leaflet-zoom-anim .leaflet-zoom-animated { transition: none !important; }
 }
+
+/* ---------- snapmap experiment (lib/experiment.ts, app/snapmap-layers.ts) ----------
+   One event pin style for every event (importance only changes when it shows and a little size), an "Event activity"
+   heat canvas in our blue-green ramp (never traffic colours), and its legend. */
+.snap-heat { position: absolute; left: 0; top: 0; pointer-events: none; transition: opacity 0.3s ease; }
+.snap-pin-icon { background: none; border: none; }
+.snap-pin { position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px; box-sizing: border-box; border-radius: 50%;
+  background: #1A759F; border: 2px solid #FFFFFF; box-shadow: 0 1px 3px rgba(24, 78, 119, 0.4), 0 3px 10px rgba(24, 78, 119, 0.22);
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+  opacity: var(--o); transform: scale(var(--s)); transition: opacity 0.28s ease, transform 0.28s var(--ease-out), background-color 0.2s; }
+.snap-pin svg { width: 13px; height: 13px; fill: none; stroke: #FFFFFF; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.snap-pin.off { pointer-events: none; }
+.snap-pin.on { background: #184E77; box-shadow: 0 0 0 5px rgba(26, 117, 159, 0.3), 0 3px 10px rgba(24, 78, 119, 0.35); }
+:root[data-theme='dark'] .snap-pin { border-color: #EAF4EC; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5), 0 3px 10px rgba(0, 0, 0, 0.4); }
+:root[data-theme='dark'] .snap-pin.on { box-shadow: 0 0 0 5px rgba(108, 196, 224, 0.35), 0 3px 10px rgba(0, 0, 0, 0.45); }
+@media (hover: hover) { .snap-pin:not(.off):hover { background: #1E6091; } }
+.event-pop .cat { align-self: flex-start; width: fit-content; margin-bottom: 2px; padding: 1px 7px; border-radius: 6px; font-size: 11px; font-weight: 650; color: var(--action-text); background: var(--action-tint); }
+.event-pop .src { font-size: 11px; opacity: 0.85; }
+.activity-legend { position: absolute; left: 16px; bottom: 28px; z-index: 800; pointer-events: none; display: flex; flex-direction: column; gap: 5px;
+  padding: 8px 12px; border-radius: 12px; background: var(--sheet-bg); box-shadow: var(--shadow-sm); color: var(--ink); font: 550 12px var(--sans);
+  opacity: 0; transition: opacity 0.3s ease; }
+.activity-legend .ramp { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; }
+.activity-legend .ramp b { font-weight: 550; }
+.activity-legend .ramp i { width: 88px; height: 6px; border-radius: 3px;
+  background: linear-gradient(90deg, #D9ED92, #B5E48C, #99D98C, #76C893, #52B69A, #34A0A4, #168AAD, #1A759F, #1E6091, #184E77); }
+.mob .activity-legend { left: 12px; bottom: calc(var(--sheet-h, 22dvh) + 12px); }
+@media (prefers-reduced-motion: reduce) { .snap-pin, .snap-heat, .activity-legend { transition: none; } }
