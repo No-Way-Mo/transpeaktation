@@ -1,8 +1,9 @@
 'use client';
 import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { fmtDist, fmtWhen, fromPtInput, longerThanItLooks, mins, ptInput, RECENT, REPLAY, routeTag, stepIcon, type Place, type Route, type Step, type When } from '@/lib/route.ts';
-import { EVENT_KINDS, eventKind, type EventKind, type MapEvent } from '@/lib/context.ts';
-import { eventGlyph } from './map-view.tsx';
+import type { MapEvent } from '@/lib/context.ts';
+import { EVENT_GLYPH, IMPACT_LABEL, legendItems } from '@/lib/event-map.ts';
+import { hasRouteTraffic, TRAFFIC_COLORS, TRAFFIC_LABELS, TRAFFIC_LEVELS } from '@/lib/traffic.ts';
 import { smartSuggestions } from '@/lib/suggest.ts';
 import type { Card, useRoutePlanner } from '@/lib/use-route-planner.ts';
 import { useTheme } from '@/lib/use-theme.ts';
@@ -12,16 +13,28 @@ import { usePrivacy } from '@/lib/use-privacy.ts';
 
 type Planner = ReturnType<typeof useRoutePlanner>;
 
-/** Map key for the event pins: only the kinds on the map right now, biggest draws first. */
-export function EventLegend({ events }: { events: MapEvent[] }) {
-  const on = new Set(events.map(eventKind));
-  const kinds = (Object.keys(EVENT_KINDS) as EventKind[]).filter(k => on.has(k));
-  if (!kinds.length) return null;
+/** Compact map key: the universal event pin and its impact circle while events are on the map, plus the route's
+ *  traffic colours only when the selected route has real traffic readings (lib/event-map.ts legendItems). */
+export function MapLegend({ events, route }: { events: MapEvent[]; route?: Route }) {
+  const show = legendItems(events.length, hasRouteTraffic(route));
+  if (!show.events && !show.traffic) return null;
   return (
-    <ul className="legend" aria-label="Event types on the map">
-      {kinds.map(k => <li key={k}><i className={`event-pin k-${k}`} dangerouslySetInnerHTML={{ __html: eventGlyph(k) }} />{EVENT_KINDS[k].label}</li>)}
-      <li className="area"><i />Est. crowd impact area</li>
-    </ul>
+    <div className="legend">
+      {show.events && (
+        <ul aria-label="Map key">
+          <li><i className="event-pin" dangerouslySetInnerHTML={{ __html: EVENT_GLYPH }} />Event</li>
+          <li><i className="area" />{IMPACT_LABEL}</li>
+        </ul>
+      )}
+      {show.traffic && (
+        <details className="traffic-key" open>
+          <summary>Traffic on your route</summary>
+          <ul aria-label="Traffic on your route">
+            {TRAFFIC_LEVELS.map(l => <li key={l}><i className="swatch" style={{ background: TRAFFIC_COLORS[l] }} />{TRAFFIC_LABELS[l]}</li>)}
+          </ul>
+        </details>
+      )}
+    </div>
   );
 }
 

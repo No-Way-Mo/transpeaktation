@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { fmtDist, fmtWhen, mins, stepText, type LatLng } from '@/lib/route.ts';
 import { useRoutePlanner } from '@/lib/use-route-planner.ts';
 import MapView, { type MapHandle } from './map-view.tsx';
-import { AiButton, AiPrivacy, Compass, Endpoints, EventLegend, Icon, Logo, RouteList, SearchResults, ThemeToggle, TripNote, TurnIcon, WhenPicker, WhereTo } from './parts.tsx';
+import { AiButton, AiPrivacy, Compass, Endpoints, Icon, Logo, MapLegend, RouteList, SearchResults, ThemeToggle, TripNote, TurnIcon, WhenPicker, WhereTo } from './parts.tsx';
 
 export default function Desktop() {
   const p = useRoutePlanner();
@@ -112,7 +112,7 @@ export default function Desktop() {
       <main className="desk-map">
         <MapView ref={map} routes={p.routes} sel={p.sel} tp={p.choice.tp} labels={p.mapLabels} from={p.from} to={p.to} events={p.mapEvents} marker={marker}
           onSelect={p.setSel} pad={{ topLeft: [60, 60], bottomRight: [60, 60] }} />
-        <EventLegend events={p.mapEvents} />
+        <MapLegend events={p.mapEvents} route={p.selected} />
         <div className="map-ctrls">
           <Compass onPress={() => map.current?.fit()} />
           <div className="zoom">

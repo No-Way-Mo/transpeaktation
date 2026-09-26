@@ -240,20 +240,6 @@ export function stepIcon(s: Step): { name: 'arrow' | 'uturn' | 'flag'; rotate: n
   return { name: 'arrow', rotate: s.maneuver.type === 'depart' ? 0 : ANGLES[s.maneuver.modifier ?? ''] ?? 0 };
 }
 
-export type Slow = 'moderate' | 'heavy' | 'severe';
-/** Stretches of the route slower than free-flow, merged per level, for colouring over the route line. */
-export function trafficRuns(r: Route): { level: Slow; coords: LatLng[] }[] {
-  const out: { level: Slow; coords: LatLng[] }[] = [];
-  let cur: (typeof out)[number] | null = null;
-  (r.congestion ?? []).forEach((lvl, k) => {
-    const next = r.coords[k + 1];
-    if (!next || (lvl !== 'moderate' && lvl !== 'heavy' && lvl !== 'severe')) { cur = null; return; }
-    if (cur?.level === lvl) cur.coords.push(next);
-    else out.push((cur = { level: lvl, coords: [r.coords[k], next] }));
-  });
-  return out;
-}
-
 /** Tag for a route card: the first (fastest) route vs. how much slower each alternative is. */
 /** A normal route's card when api/'s estimate says it will take a minute or more longer than the provider's ETA:
  *  the tag and a line saying why. null = nothing to warn about. */

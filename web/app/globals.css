@@ -43,9 +43,6 @@
   --route-alt: #9CC6D8;
   --route-casing: #FFFFFF;
   --route-casing-sel: #184E77;
-  --traffic-moderate: #E9A23B;
-  --traffic-heavy: #E07B4F;
-  --traffic-severe: #C8313F;
   --origin: #34A0A4;
   --dest: #184E77;
   --marker-ring: #FFFFFF;
@@ -114,7 +111,6 @@
   --route-alt: #2A5673;
   --route-casing: #07131D;
   --route-casing-sel: #07131D;
-  --traffic-moderate: #E9B949;
   --dest: #D9ED92;
   --marker-ring: #0F2233;
   --ev-music: #845EF7;
@@ -230,14 +226,18 @@ input::placeholder { color: var(--muted); }
 .eta-bubble.on { color: var(--on-action); background: var(--action); }
 .eta-bubble.on.tp { color: var(--on-brand); background: var(--brand); }
 
-/* Ingested event pins + their popup (Leaflet divIcon / popup, restyled with the theme tokens) */
-.event-pin { box-sizing: border-box; border-radius: 50%; background: var(--k); border: 2px solid var(--marker-ring); box-shadow: var(--shadow-sm); display: flex; align-items: center; justify-content: center; }
-.event-pin svg { width: 62%; height: 62%; fill: none; stroke: #FFFFFF; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
-.event-pin.k-community, .event-pin.k-other { opacity: 0.85; }
+/* Event pins (Leaflet divIcon): the same pin for every event, it only says "an event is happening here". Fixed blue
+   (lib/event-map.ts EVENT_PIN_COLORS) with a white outline and a navy edge, so it reads on the light and dark basemap. */
+.event-pin { box-sizing: border-box; border-radius: 50%; background: #1A759F; border: 2px solid #FFFFFF; box-shadow: 0 0 0 1px #184E77, 0 2px 6px rgba(7, 19, 29, 0.35); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: box-shadow 0.15s ease; }
+.event-pin svg { width: 56%; height: 56%; fill: none; stroke: #FFFFFF; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.event-pin.on { box-shadow: 0 0 0 2px #184E77, 0 3px 10px rgba(7, 19, 29, 0.45); }
+/* Category colours: the detail card's category tag only (never the map pin). */
 .k-music { --k: var(--ev-music); } .k-sports { --k: var(--ev-sports); } .k-parade { --k: var(--ev-parade); }
 .k-festival { --k: var(--ev-festival); } .k-conference { --k: var(--ev-conference); } .k-market { --k: var(--ev-market); }
 .k-community { --k: var(--ev-community); } .k-other { --k: var(--ev-other); }
-.event-pop .kind { align-self: flex-start; width: fit-content; margin-bottom: 2px; padding: 1px 7px; border-radius: 6px; font-size: 11px; font-weight: 650; color: #FFFFFF; background: var(--k); }
+.event-pop .kind { align-self: flex-start; width: fit-content; margin: 1px 0 3px; padding: 2px 8px 2px 6px; border-radius: 6px; font-size: 11px; font-weight: 650; color: #FFFFFF; background: var(--k); display: inline-flex; align-items: center; gap: 4px; }
+.event-pop .kind svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.event-pop .name { font-size: 14px; }
 /* Start / destination (Leaflet divIcons; colours stay the --origin / --dest tokens) */
 .origin-pin { box-sizing: border-box; border-radius: 50%; background: var(--marker-ring); border: 5px solid var(--origin); box-shadow: 0 0 0 2px var(--marker-ring), var(--shadow-sm); }
 .dest-pin { background: none; border: none; }
@@ -294,12 +294,18 @@ input::placeholder { color: var(--muted); }
 .step .stack { flex: 1; padding-top: 1px; }
 .step-text { font-size: 14px; font-weight: 500; line-height: 1.3; text-wrap: pretty; }
 .desk-map { position: relative; flex: 1; min-width: 0; height: 100%; }
-.legend { position: absolute; left: 16px; bottom: 28px; z-index: 5; margin: 0; padding: 8px 12px; list-style: none; display: flex; flex-direction: column; gap: 5px; border-radius: 12px; background: var(--sheet-bg); box-shadow: var(--shadow-sm); font-size: 12px; font-weight: 550; color: var(--ink); }
+/* Compact map key: event pin + impact circle; the route's traffic colours only when it has real readings. */
+.legend { position: absolute; left: 16px; bottom: 28px; z-index: 5; display: flex; flex-direction: column; gap: 6px; padding: 8px 12px; border-radius: 12px; background: var(--sheet-bg); box-shadow: var(--shadow-sm); font-size: 12px; font-weight: 550; color: var(--ink); }
+.legend ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 5px; }
 .legend li { display: flex; align-items: center; gap: 8px; }
-.legend .area { margin-top: 3px; padding-top: 7px; border-top: 1px solid var(--line); color: var(--muted); }
-.legend .area i { width: 18px; height: 18px; border-radius: 50%; border: 1.5px dashed var(--muted); background: radial-gradient(circle, var(--fill-2) 45%, var(--fill) 46%); }
-.event-pop .impact { margin-top: 2px; }
-.legend .event-pin { width: 18px; height: 18px; border-width: 1.5px; box-shadow: none; opacity: 1; }
+.legend i { flex: none; }
+.legend .event-pin { width: 18px; height: 18px; border-width: 1.5px; box-shadow: 0 0 0 1px #184E77; cursor: default; }
+.legend .area { width: 18px; height: 18px; border-radius: 50%; border: 1px solid rgba(22, 138, 173, 0.55); background: rgba(82, 182, 154, 0.16); }
+.legend .swatch { width: 18px; height: 5px; border-radius: 3px; box-shadow: 0 0 0 1px var(--route-casing-sel); }
+.legend .traffic-key { border-top: 1px solid var(--line); padding-top: 6px; }
+.legend .traffic-key summary { cursor: pointer; color: var(--muted); font-weight: 650; }
+.legend .traffic-key[open] summary { margin-bottom: 5px; }
+.event-pop .impact { margin-top: 4px; font-size: 12px; font-weight: 650; }
 .map-ctrls { position: absolute; right: 16px; bottom: 28px; z-index: 5; display: flex; flex-direction: column; align-items: center; gap: 10px; }
 .zoom { display: flex; flex-direction: column; overflow: hidden; border-radius: 12px; background: var(--pop); box-shadow: var(--shadow); }
 .zoom button { width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: var(--ink); }

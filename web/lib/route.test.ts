@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 process.env.TZ = 'America/New_York'; // a device outside SF: every clock time must still be Pacific
-import { fmtDist, fmtWhen, fromPtInput, labelPoint, longerThanItLooks, mins, planPath, ptInput, ptTime, sfDays, routeTag, spokenTime, stepIcon, stepText, trafficRuns, voiceNote, type LatLng, type Prediction, type Route, type Step, type VoiceIntent } from './route.ts';
+import { fmtDist, fmtWhen, fromPtInput, labelPoint, longerThanItLooks, mins, planPath, ptInput, ptTime, sfDays, routeTag, spokenTime, stepIcon, stepText, voiceNote, type LatLng, type Prediction, type Route, type Step, type VoiceIntent } from './route.ts';
 
 const step = (type: string, modifier?: string, name = 'Market St'): Step =>
   ({ distance: 0, duration: 0, name, maneuver: { type, modifier, location: [0, 0] } });
@@ -68,16 +68,6 @@ test('map labels sit where routes split, not on the shared stretch', () => {
   // The neighbour is one long straight segment (vertices only at its ends): its middle still counts as close.
   const straight: LatLng[] = [a[0], a[29]];
   assert.ok(Math.abs(labelPoint([r(straight), r(b)], 1)[1] - -122.40) < 1e-9);
-});
-
-test('traffic: slow stretches merge per level; free-flowing and unknown ones are left to the route colour', () => {
-  const coords: LatLng[] = [[0, 0], [0, 1], [0, 2], [0, 3], [0, 4], [0, 5]];
-  const r: Route = { dur: 1, dist: 1, summary: '', coords, steps: [], congestion: ['low', 'heavy', 'heavy', 'unknown', 'severe'] };
-  assert.deepEqual(trafficRuns(r), [
-    { level: 'heavy', coords: [[0, 1], [0, 2], [0, 3]] },
-    { level: 'severe', coords: [[0, 4], [0, 5]] },
-  ]);
-  assert.deepEqual(trafficRuns({ ...r, congestion: null }), []);
 });
 
 test('spoken times pick the next occurrence', () => {

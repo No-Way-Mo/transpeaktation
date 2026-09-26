@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  contextNote, contextTag, DEFAULT_EVENT_MIN, eventImpact, eventKind, fmtCrowd, IMPACT_MAX_M, IMPACT_MIN_M, eventWindow, conditionWindow, fetchEvents, fmtCategory, fmtEventTime, NO_EVENTS,
+  categoryKind, contextNote, contextTag, DEFAULT_EVENT_MIN, DEFAULT_EVENT_RADIUS_METERS, eventRadius, eventWindow, conditionWindow, fetchEvents, fmtCategory, fmtEventTime, NO_EVENTS,
   routeContext, tripSpan, validCoord, type ContextData, type MapEvent, type RoadCondition,
 } from './context.ts';
 import { fromPtInput, type LatLng, type Route } from './route.ts';
@@ -165,37 +165,31 @@ test('validCoord + fmtCategory', () => {
   assert.equal(fmtCategory(null), '');
 });
 
-test('eventKind: real category wins, else the name decides (DataSF events are all special_event)', () => {
-  const k = (name: string, category: string | null = 'special_event') => eventKind({ name, category });
-  assert.equal(k('Portola Music Festival 2026'), 'music');        // music before festival
-  assert.equal(k('Block Party – 27th St. Block-Tober Fest'), 'community'); // block party before "fest"
-  assert.equal(k('Mission Community Market 2026'), 'market');
-  assert.equal(k('Folsom Street Fair 2026'), 'festival');
-  assert.equal(k('Dreamforce 2026'), 'conference');
-  assert.equal(k('San Francisco Fleet Week 2026'), 'parade');
-  assert.equal(k('Trick-or-Treat - Shotwell 2026'), 'community');
-  assert.equal(k('Vella Family Pumpkins'), 'other');
-  assert.equal(k('Giants vs Dodgers', 'Sports'), 'sports');
-  assert.equal(k('Some Show', 'concert'), 'music');
+test('categoryKind: the API category alone decides (never the name); unknown ones, like DataSF special_event, get the generic kind', () => {
+  assert.equal(categoryKind('concert'), 'music');
+  assert.equal(categoryKind('performing_arts'), 'music');
+  assert.equal(categoryKind('Sports'), 'sports');
+  assert.equal(categoryKind('conference'), 'conference');
+  assert.equal(categoryKind('special_event'), 'other');
+  assert.equal(categoryKind(null), 'other');
 });
 
-test('eventImpact: crowd grows with kind and closed blocks, radius clamped; big events count as near from further out', () => {
+test('eventRadius: the same visualization default for every event unless the API sends a real radius', () => {
   const blocks = (n: number) => Array.from({ length: n }, (_, i) => `c${i}`);
-  const party = eventImpact({ name: 'Block Party - 5th Ave', category: 'special_event', road_closure_ids: blocks(1) });
-  const fair1 = eventImpact({ name: 'Castro Street Fair', category: 'special_event', road_closure_ids: blocks(1) });
-  const fair16 = eventImpact({ name: 'Castro Street Fair', category: 'special_event', road_closure_ids: blocks(16) });
-  assert.equal(party.radius_m, IMPACT_MIN_M);
-  assert.ok(fair1.crowd < fair16.crowd && fair1.radius_m < fair16.radius_m);
-  assert.ok(eventImpact({ name: 'Folsom Street Fair', category: null, road_closure_ids: blocks(55) }).radius_m <= IMPACT_MAX_M);
-  assert.equal(fmtCrowd(63_871), '~64,000 people');
-  assert.equal(fmtCrowd(150), '~150 people');
-  // ~700 m off the line: a one-block party there doesn't touch the route, a 16-block fair's area does.
-  const mid: LatLng = [(coords[0][0] + coords[1][0]) / 2, (coords[0][1] + coords[1][1]) / 2], off: [number, number] = [mid[0] + 0.0045, mid[1] + 0.0045];
-  const ctx = routeContext(route, [
-    ev('party', ...off, { name: 'Block Party - 5th Ave' }),
-    ev('fair', ...off, { name: 'Castro Street Fair', road_closure_ids: blocks(16) }),
-  ], [], TRIP);
-  assert.deepEqual(ctx.events.map(e => e.id), ['fair']);
+  for (const e of [ev('party', 0, 0, { name: 'Block Party - 5th Ave' }), ev('fair', 0, 0, { name: 'Folsom Street Fair', road_closure_ids: blocks(55) }),
+    ev('game', 0, 0, { name: 'Giants vs Dodgers', category: 'sports' })]) {
+    assert.deepEqual(eventRadius(e), { meters: DEFAULT_EVENT_RADIUS_METERS, source: 'default' }, e.name); // no per-category sizes
+  }
+  assert.deepEqual(eventRadius(ev('x', 0, 0, { impactRadiusMeters: 1600 })), { meters: 1600, source: 'api' });
+  for (const bad of [0, -5, NaN, null, undefined]) assert.equal(eventRadius(ev('x', 0, 0, { impactRadiusMeters: bad as number })).source, 'default', String(bad));
+});
+
+test('routeContext: an event counts as near when the route crosses its drawn impact area (same radius as the map)', () => {
+  const mid: LatLng = [(coords[0][0] + coords[1][0]) / 2, (coords[0][1] + coords[1][1]) / 2];
+  const at = (m: number): [number, number] => [mid[0] + m / 111_320, mid[1]]; // ~m metres north of the line's middle
+  const inside = DEFAULT_EVENT_RADIUS_METERS * 0.6, outside = DEFAULT_EVENT_RADIUS_METERS * 1.6;
+  const ctx = routeContext(route, [ev('in', ...at(inside)), ev('out', ...at(outside)), ev('big', ...at(outside), { impactRadiusMeters: outside * 1.5 })], [], TRIP);
+  assert.deepEqual(ctx.events.map(e => e.id), ['in', 'big']);
 });
 
 test('fetchEvents drops records with bad coordinates or no name; API errors reject', async () => {

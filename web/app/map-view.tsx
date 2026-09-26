@@ -1,9 +1,11 @@
 'use client';
 import { useEffect, useImperativeHandle, useRef, type Ref } from 'react';
 import type * as Leaflet from 'leaflet';
-import { EVENT_KINDS, eventImpact, eventKind, fmtCrowd, fmtEventTime, type EventKind, type MapEvent } from '@/lib/context.ts';
-import { fmtDist, labelPoint, trafficRuns, type LatLng, type Place, type Route } from '@/lib/route.ts';
+import type { EventKind, MapEvent } from '@/lib/context.ts';
+import { eventDetail, eventPin, impactAreas, impactCircleStyle, innerRingStyle } from '@/lib/event-map.ts';
+import { labelPoint, type LatLng, type Place, type Route } from '@/lib/route.ts';
 import type { Theme } from '@/lib/theme.ts';
+import { getTrafficColor, routeTraffic } from '@/lib/traffic.ts';
 import { useTheme } from '@/lib/use-theme.ts';
 
 export type MapHandle = { fit(): void; focus(p: LatLng, zoom?: number): void; zoomIn(): void; zoomOut(): void };
@@ -29,7 +31,9 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
   const el = useRef<HTMLDivElement>(null);
   const L = useRef<typeof Leaflet>(null);
   const map = useRef<Leaflet.Map>(null);
-  const layer = useRef<Leaflet.LayerGroup>(null);
+  const layer = useRef<Leaflet.LayerGroup>(null);   // routes, ETA labels, turn marker, start / destination
+  const evLayer = useRef<Leaflet.LayerGroup>(null); // event impact circles + pins, redrawn on their own
+  const selected = useRef<string | null>(null);     // event whose detail card is open
   const base = useRef<Leaflet.TileLayer>(null);
   const { theme } = useTheme();
   const themeNow = useRef(theme); // Leaflet loads async: the tile layer must use the theme at that moment
@@ -56,22 +60,16 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
     zoomOut: () => map.current?.zoomOut(),
   }));
 
+  // Layer order, bottom → top: basemap · event impact circles ('eventAreas' pane) · route casing · route line ·
+  // traffic stretches · ETA labels / event pins · start / destination · popups.
   const draw = () => {
     const l = L.current, g = layer.current;
     if (!l || !g || !el.current) return;
-    const { routes, sel, tp, labels, from, to, marker, events } = latest.current;
+    const { routes, sel, tp, labels, from, to, marker } = latest.current;
     // Colours come from the CSS theme tokens, so light/dark and brand changes stay in globals.css.
     const cs = getComputedStyle(el.current), c = (n: string) => cs.getPropertyValue(n).trim();
     const casing = c('--route-casing'), line = c(tp ? '--brand-line' : '--route');
     g.clearLayers();
-    // Estimated impact areas under everything else: a faint dashed outer ring (where traffic may slow) and a
-    // stronger core. Biggest first so a small event's area stays visible on top of a big one.
-    [...(events ?? [])].map(ev => ({ ev, kind: eventKind(ev), r: eventImpact(ev).radius_m })).sort((a, b) => b.r - a.r)
-      .forEach(({ ev, kind, r }) => {
-        const col = c(`--ev-${kind}`), quiet = !EVENT_KINDS[kind].big;
-        l.circle([ev.lat, ev.lon], { radius: r, color: col, weight: 1.5, opacity: quiet ? 0.35 : 0.6, dashArray: '4 5', fillColor: col, fillOpacity: quiet ? 0.05 : 0.08, interactive: false }).addTo(g);
-        l.circle([ev.lat, ev.lon], { radius: r * 0.45, stroke: false, fillColor: col, fillOpacity: quiet ? 0.08 : 0.14, interactive: false }).addTo(g);
-      });
     routes.forEach((r, i) => {
       if (i === sel) return;
       const pick = () => latest.current.onSelect(i);
@@ -80,10 +78,11 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
     });
     const r = routes[sel];
     if (r) {
+      // One continuous route: navy casing + the normal line, then only the stretches with a real traffic reading
+      // painted over it (lib/traffic.ts). No reading = the normal line shows. Events never colour it.
       l.polyline(r.coords, { color: c('--route-casing-sel'), weight: 11, interactive: false }).addTo(g);
       l.polyline(r.coords, { color: line, weight: 7, interactive: false }).addTo(g);
-      // Live slowdowns painted over the route, like Apple/Google: amber, orange-red, deep red.
-      for (const run of trafficRuns(r)) l.polyline(run.coords, { color: c(`--traffic-${run.level}`), weight: 7, interactive: false }).addTo(g);
+      for (const run of routeTraffic(r)) l.polyline(run.coords, { color: getTrafficColor(run.level), weight: 7, interactive: false }).addTo(g);
     }
     // Labels sit above the lines; each one selects its route, like tapping the line.
     labels?.forEach((text, i) => {
@@ -93,19 +92,44 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
       l.marker(labelPoint(routes, i), { icon, keyboard: false, zIndexOffset: i === sel ? 1000 : 0, title: `Route ${i + 1}: ${text}` })
         .on('click', () => latest.current.onSelect(i)).addTo(g);
     });
-    // Event pins under the ETA labels; the popup is built from text nodes, never HTML from the data.
-    // Colour + glyph per kind; big draws (festivals, concerts, conferences...) larger than block parties and markets.
-    events?.forEach(ev => {
-      const kind = eventKind(ev), n = EVENT_KINDS[kind].big ? 24 : 18;
-      const icon = l.divIcon({ className: `event-pin k-${kind}`, iconSize: [n, n], html: eventGlyph(kind) });
-      l.marker([ev.lat, ev.lon], { icon, keyboard: false, zIndexOffset: EVENT_KINDS[kind].big ? -900 : -1000, title: `${EVENT_KINDS[kind].label}: ${ev.name}` })
-        .bindPopup(() => eventPopup(ev), { className: 'event-pop', closeButton: false, offset: [0, -2] }).addTo(g);
-    });
     const ring = c('--marker-ring');
     if (marker) l.circleMarker(marker, { radius: 7, color: line, weight: 3, fillColor: ring, fillOpacity: 1 }).addTo(g);
     // Map convention: start = hollow ring dot, destination = teardrop pin with its tip on the spot.
     if (from) l.marker([from.lat, from.lon], { icon: l.divIcon({ className: 'origin-pin', iconSize: [18, 18] }), keyboard: false, zIndexOffset: 1500, title: `Start: ${from.label}` }).addTo(g);
     if (to) l.marker([to.lat, to.lon], { icon: l.divIcon({ className: 'dest-pin', iconSize: [28, 36], iconAnchor: [14, 35], html: DEST_PIN }), keyboard: false, zIndexOffset: 2000, title: `Destination: ${to.label}` }).addTo(g);
+  };
+
+  // Events: the same pin for every event and one geographic circle (metres, so it scales with zoom) per event, never
+  // merged across places (impactAreas). Circles sit in their own pane under the route lines.
+  const drawEvents = () => {
+    const l = L.current, g = evLayer.current, m = map.current;
+    if (!l || !g || !m) return;
+    const { events, routes } = latest.current, routeActive = routes.length > 0, list = events ?? [];
+    g.clearLayers();
+    if (selected.current && !list.some(e => e.id === selected.current)) m.closePopup(); // its event left the window
+    for (const a of impactAreas(list, selected.current)) {
+      l.circle([a.lat, a.lon], { radius: a.radius, pane: 'eventAreas', interactive: false, ...impactCircleStyle({ selected: a.selected, routeActive }) }).addTo(g);
+      l.circle([a.lat, a.lon], { radius: a.radius / 2, pane: 'eventAreas', interactive: false, ...innerRingStyle({ routeActive }) }).addTo(g);
+    }
+    list.forEach(ev => {
+      const on = ev.id === selected.current, pin = eventPin(ev, on);
+      const icon = l.divIcon({ className: pin.className, iconSize: [pin.size, pin.size], html: pin.html });
+      l.marker([ev.lat, ev.lon], { icon, keyboard: false, zIndexOffset: on ? 800 : -900, title: pin.title })
+        .on('click', () => openEvent(ev)).addTo(g);
+    });
+  };
+
+  /** Select an event: bigger pin, stronger circle, and its detail card. Closing the card (×, a map click, another
+   *  event's pin) deselects it. */
+  const openEvent = (ev: MapEvent) => {
+    const l = L.current, m = map.current;
+    if (!l || !m) return;
+    l.popup({ className: 'event-pop', offset: [0, -14], maxWidth: 280, autoPanPadding: [24, 24] })
+      .setLatLng([ev.lat, ev.lon]).setContent(eventPopup(ev))
+      .on('remove', () => { if (selected.current === ev.id) { selected.current = null; drawEvents(); } })
+      .openOn(m); // closes the previous card first, which deselects that event
+    selected.current = ev.id;
+    drawEvents();
   };
 
   useEffect(() => {
@@ -116,7 +140,10 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
       const m = (map.current = l.map(el.current, { zoomControl: false }).setView([37.788, -122.4075], 14));
       m.attributionControl.setPrefix(false);
       base.current = l.tileLayer(tiles(themeNow.current), { attribution: 'Tiles © Esri', maxNativeZoom: 16, maxZoom: 18 }).addTo(m);
+      m.createPane('eventAreas').style.zIndex = '350'; // above the tiles (200), below the route lines (overlayPane, 400)
+      evLayer.current = l.layerGroup().addTo(m);
       layer.current = l.layerGroup().addTo(m);
+      drawEvents();
       draw();
       fit();
     });
@@ -127,9 +154,11 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
 
   // Light/dark switch (toggle, or the OS when nothing is saved): swap the basemap and repaint the lines and markers
   // in the new theme's colours. The first run just repeats what the map was created with.
-  useEffect(() => { base.current?.setUrl(tiles(theme)); draw(); }, [theme]);
+  useEffect(() => { base.current?.setUrl(tiles(theme)); draw(); drawEvents(); }, [theme]);
 
-  useEffect(draw, [routes, sel, tp, labels?.join(), from, to, marker, events]);
+  useEffect(draw, [routes, sel, tp, labels?.join(), from, to, marker]);
+  // Events redraw when they change or a route appears / goes (circles fade under a route), not on every route pick.
+  useEffect(drawEvents, [events, routes.length > 0]);
   // New routes or endpoints: frame them.
   useEffect(fit, [routes, from, to]);
 
@@ -138,7 +167,8 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
 
 const DEST_PIN = '<svg viewBox="0 0 28 36" aria-hidden="true"><path class="body" d="M14 34.5C14 34.5 26.5 21.8 26.5 13.5a12.5 12.5 0 0 0-25 0C1.5 21.8 14 34.5 14 34.5Z"/><circle class="hole" cx="14" cy="13.5" r="4.75"/></svg>';
 
-// 24×24 stroke glyphs (static strings, never data), drawn white inside the kind's coloured disc.
+// Category icons, used ONLY inside the detail card (the map pin is the same for every event). 24×24 stroke glyphs,
+// static strings, never data.
 const GLYPHS: Record<EventKind, string> = {
   music: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
   sports: '<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6M18 9h1.5a2.5 2.5 0 0 0 0-5H18M4 22h16M10 14.7V17c0 .6-.5 1-1 1.2C7.9 18.8 7 20.2 7 22M14 14.7V17c0 .6.5 1 1 1.2 1.1.6 2 2 2 3.8M18 2H6v7a6 6 0 0 0 12 0V2Z"/>',
@@ -149,21 +179,27 @@ const GLYPHS: Record<EventKind, string> = {
   community: '<path d="M3 11 12 3l9 8M5 9.5V21h14V9.5M10 21v-6h4v6"/>',
   other: '<circle cx="12" cy="12" r="3.5"/>',
 };
-export const eventGlyph = (k: EventKind) => `<svg viewBox="0 0 24 24" aria-hidden="true">${GLYPHS[k]}</svg>`;
 
-/** Event name, venue, time, kind: what we already have, nothing more. */
+/** Detail card: name, the API's category (with its icon), venue, time and the estimated impact area. Text comes in
+ *  as text nodes, never as HTML from the data. */
 function eventPopup(ev: MapEvent): HTMLElement {
-  const box = document.createElement('div');
-  const kind = eventKind(ev), tag = box.appendChild(document.createElement('div'));
-  tag.className = `kind k-${kind}`;
-  tag.textContent = EVENT_KINDS[kind].label;
-  const { crowd, radius_m } = eventImpact(ev);
-  const impact = `${fmtCrowd(crowd)} (est.) · may slow traffic within ${fmtDist(radius_m)}`;
-  for (const [cls, text] of [['name', ev.name], ['sub', ev.venue], ['sub', fmtEventTime(ev)], ['sub impact', impact]]) {
-    if (!text) continue;
-    const line = box.appendChild(document.createElement('div'));
-    line.className = cls!;
-    line.textContent = text;
+  const d = eventDetail(ev), box = document.createElement('div');
+  const line = (cls: string, text: string | null) => {
+    if (!text) return;
+    const n = box.appendChild(document.createElement('div'));
+    n.className = cls;
+    n.textContent = text;
+  };
+  line('name', d.name);
+  if (d.category) {
+    const tag = box.appendChild(document.createElement('div'));
+    tag.className = `kind k-${d.category.kind}`;
+    tag.innerHTML = `<svg viewBox="0 0 24 24" aria-hidden="true">${GLYPHS[d.category.kind]}</svg>`; // static glyph only
+    tag.appendChild(document.createTextNode(d.category.label));
   }
+  line('sub', d.venue);
+  line('sub', d.when);
+  line('impact', d.impact.label);
+  line('sub', d.impact.radius);
   return box;
 }
