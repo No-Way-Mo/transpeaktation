@@ -25,7 +25,7 @@ Check: `.venv/Scripts/python -m pull.check`
 | 10 | Utility excavation permits (active now → +30 days) | DataSF `smdf-6c45` (`excavation_permits`) | ✅ |
 | 11 | Temporary no-parking signs / street space permits | DataSF `sftu-nd43` (`parking_signs`) | ✅ |
 | 12 | Freeway and state-route lane closures | Caltrans D4 feed (`caltrans_lane_closures`) | ✅ |
-| 13 | Events: type, time, expected attendance | PredictHQ 🔑 (probably paid; check pricing). Fallback: Ticketmaster Discovery API 🔑 (free) | ⬜ (blocked on decision + key) |
+| 13 | Events: type, time, expected attendance | PredictHQ 🔑 `/v1/events` (`predicthq_events`: SF, yesterday → +30 days, rank ≥ 30, incl. deleted) | ✅ |
 
 ## 3. Live conditions (poll every 1–5 min)
 | # | What | Source (`pull` name) | Status |
@@ -82,11 +82,12 @@ Check: `.venv/Scripts/python -m pull.check`
 - ⬜ Mapbox tile ratios calibrated per road class (uses the uncalibrated 0.1 / 0.4 / 0.65 / 0.85 until then).
 - ✅ Closures/incidents → Mongo `road_incidents` (`python -m worker run incidents`): DataSF street closures, street-use + excavation permits, Caltrans lane closures, CHP, police dispatch (traffic calls only). `is_closure` = closed to traffic. Validation → `data/quarantine/<source>.jsonl`; cross-source dedupe; optional geocoding (`GEOCODER=mapbox`). Ported from `ingestion-workers-v1` with fixes (Caltrans keyed per closure window, non-traffic police calls dropped, parking signs not stored). Real run: 17.6k docs, 0 rejected.
 - ⬜ 511 traffic events + WZDx → `road_incidents` (events already collected by `pull.poll`).
-- ⬜ Events + venues (blocked on PredictHQ vs Ticketmaster).
+- ✅ Events + venues → Mongo `events`, `venues` (`python -m worker run events`, every 6 h under `schedule`, `PREDICTHQ_EVERY_MIN`): PredictHQ, `_id = evt_<sha1[:16]>`, venue capacity from `worker/seeds/venues.json`. Dry run on a real pull: 1,751 events → 1,707 in SF, 0 rejected.
+- ⬜ Merge 511 `SPECIAL_EVENT` + DataSF special-event closures into `events` (DESIGN.md §9); api/ still shows DataSF closures as separate events.
+- ⬜ Public holidays (no venue point; left out of the pull).
 - ⬜ Google forecasts, SUMO loader.
 
 ## Open decisions
-- PredictHQ vs Ticketmaster, depending on PredictHQ pricing.
 - Keep or drop the ~1-day-lagged feeds still in the DataSF registry but not pulled: fire/EMS calls (`nuek-vuh3`), 311 blocked-street/road-defect cases (`vw6y-z8j6`).
 
 ## Deferred

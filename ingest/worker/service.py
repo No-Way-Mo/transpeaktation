@@ -3,19 +3,21 @@ these, so there is one ingestion implementation.
 
     refresh(("incidents",))   # re-pull DataSF / Caltrans / CHP snapshots, normalize, dedupe, geocode -> Mongo
     refresh(("traffic",))     # pull.poll JSONL -> Tiger traffic_metrics (+ Mongo route_plans)
+    refresh(("events",))      # re-pull PredictHQ, normalize -> Mongo events + venues
 """
 from __future__ import annotations
 
 import json
 import re
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
 from pull import DATA_DIR, MANIFEST
 
 from .db import CombinedSink, ConfigError, DryRunSink, MongoSink, TigerSink
+from .events import SOURCE as EVENT_SOURCE, EventJob
 from .incidents import geocode
 from .incidents.job import SOURCES as INCIDENT_SOURCES, IncidentJob
 from .network import Network, road_segment_doc
@@ -23,7 +25,7 @@ from .state import STATE_DIR, State
 from .traffic import SOURCES, TrafficJob
 
 GRAPHML = DATA_DIR / "osm_drive_graph.graphml"
-JOBS = ("incidents", "traffic")
+JOBS = ("incidents", "traffic", "events")
 
 
 def graph_sig(path: Path) -> str:
@@ -82,14 +84,14 @@ def run_traffic(net: Network, sources: tuple[str, ...], dry_run: bool, state_dir
     return report
 
 
-def refresh_incident_snapshots() -> dict[str, dict]:
-    """Re-pull the incident feeds with `python -m pull`'s own code. Returns each feed's manifest entry
+def refresh_snapshots(sources: tuple[str, ...] = INCIDENT_SOURCES) -> dict[str, dict]:
+    """Re-pull feeds with `python -m pull`'s own code. Returns each feed's manifest entry
     (status ok | skip | fail, row count, seconds); a failed feed doesn't stop the others."""
     from pull.__main__ import main as pull_main
 
-    pull_main(list(INCIDENT_SOURCES))
+    pull_main(list(sources))
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8")) if MANIFEST.exists() else {}
-    return {name: manifest.get(name, {"status": "missing"}) for name in INCIDENT_SOURCES}
+    return {name: manifest.get(name, {"status": "missing"}) for name in sources}
 
 
 def run_incidents(net: Network | None, dry_run: bool, use_geocoder: bool = True) -> dict:
@@ -102,6 +104,24 @@ def run_incidents(net: Network | None, dry_run: bool, use_geocoder: bool = True)
     report["_geocoder"] = why
     if dry_run:
         report["_dry_run"] = {"would_write": dict(sink.counts), "sample": sink.samples.get("road_incidents", [])[:1]}
+    else:
+        report["_written"] = dict(sink.counts)
+    return report
+
+
+def events_due(every: timedelta, now: datetime | None = None) -> bool:
+    """True when the last PredictHQ pull attempt (any status, from the pull manifest) is older than `every`. Read from
+    disk, not kept in memory, so restarts (every redeploy) don't each spend a pull of the free tier."""
+    manifest = json.loads(MANIFEST.read_text(encoding="utf-8")) if MANIFEST.exists() else {}
+    last = (manifest.get(EVENT_SOURCE) or {}).get("pulled_at")
+    return last is None or (now or datetime.now(timezone.utc)) - datetime.fromisoformat(last) >= every
+
+
+def run_events(dry_run: bool) -> dict:
+    sink = DryRunSink() if dry_run else MongoSink()
+    report = EventJob(DATA_DIR, sink).run()
+    if dry_run:
+        report["_dry_run"] = {"would_write": dict(sink.counts), "sample": sink.samples.get("events", [])[:1]}
     else:
         report["_written"] = dict(sink.counts)
     return report
@@ -153,13 +173,31 @@ def refresh(jobs: Iterable[str] = ("incidents",), *, pull: bool = True, dry_run:
             if name == "incidents":
                 step: dict[str, Any] = {}
                 if pull:
-                    step["pulled"] = refresh_incident_snapshots()
+                    step["pulled"] = refresh_snapshots()
                     failures += [{"job": name, "source": s, "stage": "pull", "error": e.get("error", e["status"])}
                                  for s, e in step["pulled"].items() if e.get("status") in ("fail", "missing")]
                 step["report"] = run_incidents(cached_network(), dry_run, use_geocoder)
                 failures += [{"job": name, "source": s, "stage": "normalize", "error": r.get("error", r["status"])}
                              for s, r in step["report"].items()
                              if isinstance(r, dict) and r.get("status") in ("failed", "missing")]
+            elif name == "events":
+                step = {}
+                if pull:
+                    step["pulled"] = refresh_snapshots((EVENT_SOURCE,))
+                    got = step["pulled"][EVENT_SOURCE]
+                    if got.get("status") != "ok":  # skip (no token) or fail: keep what Mongo has, don't re-stamp it
+                        if got.get("status") != "skip":
+                            failures.append({"job": name, "source": EVENT_SOURCE, "stage": "pull",
+                                             "error": got.get("error", got.get("status"))})
+                        step["report"] = {"status": "not_run", "note": "no new pull; Mongo keeps the last one"}
+                        out["jobs"][name] = {"status": "ok", **step}
+                        continue
+                step["report"] = rep = run_events(dry_run)
+                if rep.get("status") == "failed":
+                    failures.append({"job": name, "source": EVENT_SOURCE, "stage": "normalize", "error": rep["error"]})
+                elif (rep.get("meta") or {}).get("truncated"):
+                    failures.append({"job": name, "source": EVENT_SOURCE, "stage": "pull",
+                                     "error": "truncated: more pages than PHQ_MAX_PAGES; vanished events not archived"})
             else:
                 net = cached_network()
                 if net is None:

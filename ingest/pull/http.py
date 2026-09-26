@@ -35,6 +35,7 @@ def fetch(
     *,
     params: dict[str, str] | None = None,
     data: dict[str, str] | None = None,
+    headers: dict[str, str] | None = None,
     timeout: float = 60,
     retries: int = 3,
     retry_on: frozenset[int] = frozenset(),
@@ -44,7 +45,7 @@ def fetch(
         url += ("&" if "?" in url else "?") + urllib.parse.urlencode(params)
     body = urllib.parse.urlencode(data).encode() if data else None
     # Some APIs (511.org) refuse uncompressed responses, so always ask for gzip.
-    req = urllib.request.Request(url, data=body, headers={"User-Agent": USER_AGENT, "Accept-Encoding": "gzip, deflate"})
+    req = urllib.request.Request(url, data=body, headers={"User-Agent": USER_AGENT, "Accept-Encoding": "gzip, deflate", **(headers or {})})
     for attempt in range(retries + 1):
         try:
             with urllib.request.urlopen(req, timeout=timeout, context=SSL_CONTEXT) as resp:

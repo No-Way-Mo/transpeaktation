@@ -45,7 +45,7 @@ Sources and status: `ingest/TODO.md`.
 
 | Input | What | Examples |
 |---|---|---|
-| Event sources | concerts, sports, festivals, holidays, venue calendars | PredictHQ or Ticketmaster (undecided) |
+| Event sources | concerts, sports, festivals, holidays, venue calendars | PredictHQ |
 | City + road data | closures, permits, restrictions, road conditions | DataSF, Caltrans, CHP, 511 |
 | Mobility data | live traffic, destination status | 511, Muni vehicles; destination demand is derived in `ml/` |
 | Map / baseline routing | road graph, candidate routes, baseline + live ETA, corridor speeds | OpenStreetMap (OSMnx), Mapbox Directions (`pull.poll`) |

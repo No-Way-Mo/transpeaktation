@@ -1,0 +1,16 @@
+{
+  "_note": "Approximate public capacities, verify before quoting in the demo. PredictHQ has no venue capacity; events it has attendance for use that instead. keys = words the api matches in route/venue text.",
+  "venues": [
+    {"slug": "oracle-park", "name": "Oracle Park", "aliases": ["AT&T Park", "Giants Ballpark"], "lat": 37.7786, "lon": -122.3893, "capacity": 41265, "keys": ["oracle", "giants", "ballpark"]},
+    {"slug": "chase-center", "name": "Chase Center", "aliases": [], "lat": 37.7680, "lon": -122.3877, "capacity": 18064, "keys": ["chase", "warriors", "mission bay"]},
+    {"slug": "moscone-center", "name": "Moscone Center", "aliases": ["Moscone North", "Moscone South", "Moscone West"], "lat": 37.7842, "lon": -122.4016, "capacity": 20000, "keys": ["moscone", "soma"]},
+    {"slug": "bill-graham-civic", "name": "Bill Graham Civic Auditorium", "aliases": ["Bill Graham Civic"], "lat": 37.7785, "lon": -122.4177, "capacity": 8500, "keys": ["bill graham", "civic center"]},
+    {"slug": "war-memorial-opera-house", "name": "War Memorial Opera House", "aliases": ["San Francisco Opera"], "lat": 37.7782, "lon": -122.4210, "capacity": 3146, "keys": ["opera house", "civic center"]},
+    {"slug": "davies-symphony-hall", "name": "Davies Symphony Hall", "aliases": ["Louise M. Davies Symphony Hall"], "lat": 37.7776, "lon": -122.4205, "capacity": 2743, "keys": ["davies", "symphony"]},
+    {"slug": "the-warfield", "name": "The Warfield", "aliases": ["Warfield Theatre"], "lat": 37.7826, "lon": -122.4101, "capacity": 2300, "keys": ["warfield", "market st"]},
+    {"slug": "the-fillmore", "name": "The Fillmore", "aliases": ["Fillmore Auditorium"], "lat": 37.7840, "lon": -122.4330, "capacity": 1315, "keys": ["fillmore"]},
+    {"slug": "sf-masonic", "name": "SF Masonic Auditorium", "aliases": ["Masonic Auditorium", "The Masonic"], "lat": 37.7912, "lon": -122.4130, "capacity": 3300, "keys": ["masonic", "nob hill"]},
+    {"slug": "kezar-stadium", "name": "Kezar Stadium", "aliases": [], "lat": 37.7667, "lon": -122.4555, "capacity": 10000, "keys": ["kezar"]},
+    {"slug": "ggp-polo-field", "name": "Golden Gate Park Polo Field", "aliases": ["Polo Field", "Outside Lands"], "lat": 37.7685, "lon": -122.4925, "capacity": 75000, "keys": ["polo field", "golden gate park", "outside lands"]}
+  ]
+}

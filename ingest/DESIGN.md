@@ -294,12 +294,12 @@ Kept from the reference: the midpoint-plus-direction segment matcher, the event 
 1. **Foundation.** `db.py`, `runlog.py`, `osm_segments`, `datasf_rules` (cnn link + speed limits), seeds, `bootstrap`. Agree the schema (§4–§6) with the team and land it as one `contracts/` PR first.
 2. **Traffic history.** `pull.poll` is already collecting, so this step is loaders: the four `traffic_*` jobs read `data/timeseries/*` (whole history on first run, then new lines) into `traffic_metrics`, `route_eta_metrics` and `route_plans`. Move `pull.poll` and the worker to the droplet here so collection stops depending on a laptop.
 3. **Closures.** `incidents_datasf`, `incidents_state`, `incidents_live`, and `incidents_511` (511 events are already being collected).
-4. **Events.** `predicthq` (or Ticketmaster), event dedupe, and hot/cold probing switches on.
+4. **Events.** `predicthq` (built: `worker/events.py`), event dedupe, and hot/cold probing switches on.
 5. **Extras.** Google forecasts, PredictHQ features, the SUMO loader for the before/after demo.
 
 ## 13. Open decisions
 
-- **PredictHQ or Ticketmaster.** Blocks step 4 (`TODO.md` #13). `events.py` is source-agnostic, so a Ticketmaster adapter is one normalize function.
+- ~~PredictHQ or Ticketmaster~~: PredictHQ. A Ticketmaster fallback would be one more `normalize` in `worker/events.py`.
 - **Schema sign-off (§4–§6).** `ml/` and `api/` read these tables, so agree on them before anything is created. Then update `contracts/tiger_schema.sql` and the `AGENTS.md` data-store tables to match.
 - **Google Routes spend.** Enable, or rely on Mapbox `duration_typical` as the "normal routing" baseline?
 - **Venue capacities in `seeds/venues.json`.** Approximate public figures; verify them before quoting them in the demo.
