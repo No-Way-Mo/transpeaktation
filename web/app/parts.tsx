@@ -1,6 +1,6 @@
 'use client';
 import { useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { fmtDist, fmtWhen, mins, RECENT, routeTag, stepIcon, type Place, type Route, type Step, type When } from '@/lib/route.ts';
+import { fmtDist, fmtWhen, fromPtInput, mins, ptInput, RECENT, REPLAY, routeTag, stepIcon, type Place, type Route, type Step, type When } from '@/lib/route.ts';
 import { smartSuggestions } from '@/lib/suggest.ts';
 import type { Card, useRoutePlanner } from '@/lib/use-route-planner.ts';
 import { useVoice } from '@/lib/use-voice.ts';
@@ -115,7 +115,7 @@ export function SearchResults({ p }: { p: Planner }) {
       </div>
     );
   }
-  const smart = smartSuggestions(q, results);
+  const smart = smartSuggestions(q, results, p.events);
   return (
     <>
       <div className="list">
@@ -225,7 +225,7 @@ export function PlaceRow({ place, onPick, plain }: { place: Place; onPick(): voi
  *  Directions button) goes inside the selected card. */
 export function RouteList({ p, action }: { p: Planner; action?: ReactNode }) {
   if (!p.tp || !p.routes.length) return null;
-  const { best, tag, note } = p.tp, as = action ? 'div' : 'button';
+  const { best, tag, note, advice } = p.tp, as = action ? 'div' : 'button';
   const fastest = p.routes[0].dur;
   return (
     <>
@@ -235,6 +235,7 @@ export function RouteList({ p, action }: { p: Planner; action?: ReactNode }) {
           note={note} selected={p.choice.tp} onPick={() => p.setChoice({ i: best, tp: true })} as={as}>
           {p.choice.tp && action}
         </RouteCard>
+        {advice && <button className="pill-btn advice" onClick={p.applyAdvice}>{`Leave at ${fmtWhen(Date.parse(advice.depart_at))}`}</button>}
       </section>
       <section className="route-sec" aria-label="Normal routes">
         <div className="label">Normal</div>
@@ -253,8 +254,6 @@ export function RouteList({ p, action }: { p: Planner; action?: ReactNode }) {
 }
 
 const MODES: [When['mode'], string][] = [['now', 'Leave now'], ['depart', 'Leave at'], ['arrive', 'Arrive by']];
-/** datetime-local's value format, in local time. */
-const localInput = (ms: number) => new Date(ms - new Date(ms).getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 
 /** "Leave now ▾" chip that opens Leave now / Leave at / Arrive by + a date-time. Applies on Done (one re-route). */
 export function WhenPicker({ p }: { p: Planner }) {
@@ -277,11 +276,11 @@ export function WhenPicker({ p }: { p: Planner }) {
           </div>
           {draft.mode !== 'now' && (
             <input type="datetime-local" aria-label={draft.mode === 'depart' ? 'Leave at' : 'Arrive by'} step={300}
-              value={localInput(draft.at)} min={localInput(Date.now())} max={localInput(Date.now() + 7 * 864e5)}
-              onChange={e => { const at = new Date(e.target.value).getTime(); if (at) setDraft({ ...draft, at }); }} />
+              value={ptInput(draft.at)} min={REPLAY ? undefined : ptInput(Date.now())} max={ptInput(Date.now() + 7 * 864e5)}
+              onChange={e => { const at = fromPtInput(e.target.value); if (at) setDraft({ ...draft, at }); }} />
           )}
           <div className="when-foot">
-            {draft.mode !== 'now' && <span className="sub">Estimates use typical traffic for that time.</span>}
+            {draft.mode !== 'now' && <span className="sub">San Francisco time. {draft.at < Date.now() ? 'Replay: uses the traffic and closures recorded then.' : 'Estimates use typical traffic for that time.'}</span>}
             <button className="pill-btn" onClick={() => { p.setWhen(draft); setDraft(null); }}>Done</button>
           </div>
         </div>
