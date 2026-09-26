@@ -1,15 +1,17 @@
 # Route decision: `api/` ↔ `ml/`
 
-How `ml/` plugs into trip planning. Two seams; neither needs changes in `web/` or `api/` when the model changes.
+How `ml/` plugs into trip planning. `api/` gathers everything known about the trip at the chosen time and sends it
+to `ml/`; `ml/` forecasts congestion from it (and from any history it reads itself), routes on that forecast plus
+demand, and returns the optimized route, which the rider sees as the transPEAKtation route. Changing the model
+never needs changes in `web/` or `api/`.
 
-1. **Congestion forecast → Tiger `prediction_metrics`** (DB). `ml/` writes `predicted_delay_sec` per
-   `road_segment_id` × `time` (the moment predicted for) with its `model_version`. `/plan` reads the rows for its
-   routes' segments around the trip (±15 min of each segment's arrival time) and uses them in place of the
-   event heuristic. Schema: `tiger_schema.sql`.
-2. **Route decision → `POST {ML_URL}/decide`** (HTTP). When `ML_URL` is set in `api/.env`, every `/plan` sends `ml/`
-   what it knows about the trip at the chosen time and uses `ml/`'s answer as the transPEAKtation route.
-   Unset, down, slower than 8 s, or an off-contract answer: `/plan` keeps its heuristic pick, and
-   `data.decision` in the `/plan` response says which one was used (`ml:<model>` or `heuristic (...)`).
+`POST {ML_URL}/decide`, called on every `/plan` when `ML_URL` is set in `api/.env`. Unset, down, slower than 8 s,
+or an off-contract answer: `/plan` keeps its own heuristic pick, and `data.decision` in the `/plan` response says
+which one was used (`ml:<model>` or `heuristic (...)`).
+
+Optional: `ml/` may also write its per-segment forecasts to Tiger `prediction_metrics` (schema:
+`tiger_schema.sql`) for the fleet dashboard / transparency page. `/plan` reads them back and sends them in
+`context.predictions`, so they are available to the decision too, but nothing requires them.
 
 ## Request (`api/` → `ml/`), JSON
 
@@ -41,7 +43,7 @@ How `ml/` plugs into trip planning. Two seams; neither needs changes in `web/` o
     "incidents": [{"source", "source_id", "category", "is_closure", "start_time", "end_time", "road_segment_ids", "details"}],
     "traffic": {"kind": "live" | "observed" | "typical",   // now / what was seen then (replay) / weekly average (future)
                 "rows": [{"road_segment_id", "source", "time", "speed_mph", "free_flow_speed_mph", "congestion_ratio"}]},
-    "predictions": [{"road_segment_id", "time", "predicted_delay_sec", "model_version"}],  // seam 1, if any
+    "predictions": [{"road_segment_id", "time", "predicted_delay_sec", "model_version"}],  // ml/'s own stored forecasts, if any
     "segment_lengths_m": {"65333347-6319310995-0": 84.2, ...}
   },
   "demand": {                                 // other riders going to about the same place (Mongo trips)
@@ -52,7 +54,8 @@ How `ml/` plugs into trip planning. Two seams; neither needs changes in `web/` o
 }
 ```
 
-Times are ISO 8601 with offset. `ml/` may also read Mongo / Tiger directly for anything else (history, fleet).
+Times are ISO 8601 with offset. The request carries data for the trip's time only; for forecasting, `ml/` reads the
+history it needs directly from Tiger (`traffic_metrics`, every 10 min per segment) and Mongo (`trips`, `events`).
 
 ## Response (`ml/` → `api/`), JSON, HTTP 200
 
