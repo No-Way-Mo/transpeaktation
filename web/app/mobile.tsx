@@ -1,9 +1,9 @@
 'use client';
 import { useRef, useState } from 'react';
-import { fmtDist, mins, RECENT, routeTag, stepArrow, stepText } from '@/lib/route.ts';
+import { fmtDist, fmtTime, mins, RECENT, stepArrow, stepText } from '@/lib/route.ts';
 import { useRoutePlanner } from '@/lib/use-route-planner.ts';
 import MapView, { type MapHandle } from './map-view.tsx';
-import { Endpoints, PlaceRow, RouteCard, SearchResults, TripNote, WhereTo } from './parts.tsx';
+import { Endpoints, PlaceRow, RouteList, SearchResults, TripNote, WhenPicker, WhereTo } from './parts.tsx';
 
 export default function Mobile() {
   const p = useRoutePlanner();
@@ -25,7 +25,7 @@ export default function Mobile() {
 
   return (
     <div className="mob">
-      <MapView ref={map} routes={p.routes} sel={p.sel} from={p.from} to={p.to} onSelect={p.setSel}
+      <MapView ref={map} routes={p.routes} sel={p.sel} labels={p.mapLabels} from={p.from} to={p.to} onSelect={p.setSel}
         pad={{ topLeft: [24, 190], bottomRight: [24, 420] }} />
 
       {p.screen === 'start' && (
@@ -64,6 +64,12 @@ export default function Mobile() {
           <div className="sheet">
             <div className="grabber" />
 
+            <div className="sheet-head">
+              <span className="title ellipsis">Routes to {p.to?.label}</span>
+              <button className="close-btn" aria-label="Close" onClick={close}>×</button>
+            </div>
+            <div className="chips"><span className="chip on">Drive</span><WhenPicker p={p} /></div>
+
             {p.loading && <div className="status">Finding routes…</div>}
 
             {p.error && (
@@ -75,20 +81,8 @@ export default function Mobile() {
 
             {p.routes.length > 0 && !p.loading && (
               <>
-                <div className="sheet-head">
-                  <span className="stack">
-                    <span className="title ellipsis">Routes to {p.to?.label}</span>
-                    <span className="sub">Drive · {p.leaveText}</span>
-                  </span>
-                  <button className="close-btn" aria-label="Close" onClick={close}>×</button>
-                </div>
                 <TripNote note={p.trip.note} />
-                <div className="list">
-                  {p.routes.map((rt, i) => (
-                    <RouteCard key={i} route={rt} tag={routeTag(i, rt.dur, p.routes[0].dur)} arrive={p.arrival(rt.dur)}
-                      selected={i === p.sel} onPick={() => p.setSel(i)} />
-                  ))}
-                </div>
+                <RouteList p={p} />
                 <button className="start" onClick={() => { setNav(true); setStep(0); if (r) map.current?.focus(r.coords[0]); }}>Start</button>
               </>
             )}
@@ -109,7 +103,7 @@ export default function Mobile() {
           <div className="nav-bar">
             <div className="nav-stats">
               <div><b className="good">{mins(remDur)}</b><span>min left</span></div>
-              <div><b>{p.arrival(remDur)}</b><span>arrival</span></div>
+              <div><b>{fmtTime(remDur)}</b><span>arrival</span></div>
               <div><b>{fmtDist(remDist)}</b><span>remaining</span></div>
             </div>
             <button className="end" onClick={() => { setNav(false); setStep(0); map.current?.fit(); }}>End</button>

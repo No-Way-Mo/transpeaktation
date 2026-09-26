@@ -125,13 +125,20 @@ def normalize_routes(data: dict) -> list[Route]:
     return out
 
 
-async def find_routes(client: httpx.AsyncClient, a: LonLat, b: LonLat) -> tuple[list[Route], str]:
+async def find_routes(client: httpx.AsyncClient, a: LonLat, b: LonLat,
+                      depart_at: str | None = None, arrive_by: str | None = None) -> tuple[list[Route], str]:
+    """No time = live traffic. depart_at / arrive_by (UTC 'YYYY-MM-DDThh:mm:ssZ') = Mapbox's historic-traffic
+    prediction for that time. Mapbox only takes arrive_by on the plain driving profile. OSRM ignores time."""
     coords = f"{a[0]},{a[1]};{b[0]},{b[1]}"
     common = {"alternatives": "true", "geometries": "geojson", "overview": "full", "steps": "true"}
     if mapbox_available():
+        if arrive_by:
+            profile, extra = "driving", {"arrive_by": arrive_by}
+        else:
+            profile, extra = "driving-traffic", {"annotations": "congestion", **({"depart_at": depart_at} if depart_at else {})}
         try:
-            data = await _get(client, f"https://api.mapbox.com/directions/v5/mapbox/driving-traffic/{coords}",
-                              {**common, "annotations": "congestion", "access_token": _token()})
+            data = await _get(client, f"https://api.mapbox.com/directions/v5/mapbox/{profile}/{coords}",
+                              {**common, **extra, "access_token": _token()})
         except ProviderError as e:  # transport/HTTP failure only; a valid "NoRoute" answer is not Mapbox's fault
             _mapbox_failed(getattr(e, "status", None))
         else:

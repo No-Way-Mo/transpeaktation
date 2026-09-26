@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useImperativeHandle, useRef, type Ref } from 'react';
 import type * as Leaflet from 'leaflet';
-import type { LatLng, Place, Route } from '@/lib/route.ts';
+import { labelPoint, type LatLng, type Place, type Route } from '@/lib/route.ts';
 
 export type MapHandle = { fit(): void; focus(p: LatLng, zoom?: number): void; zoomIn(): void; zoomOut(): void };
 
@@ -9,6 +9,7 @@ type Props = {
   ref?: Ref<MapHandle>;
   routes: Route[];
   sel: number;
+  labels?: string[];                // "12 min" bubble per route, pinned on its line
   from: Place | null;
   to: Place | null;
   marker?: LatLng | null;           // highlighted turn on the selected route
@@ -19,13 +20,13 @@ type Props = {
 const TILES = 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}';
 const CASING = '#060C16';
 
-export default function MapView({ ref, routes, sel, from, to, marker, onSelect, pad }: Props) {
+export default function MapView({ ref, routes, sel, labels, from, to, marker, onSelect, pad }: Props) {
   const el = useRef<HTMLDivElement>(null);
   const L = useRef<typeof Leaflet>(null);
   const map = useRef<Leaflet.Map>(null);
   const layer = useRef<Leaflet.LayerGroup>(null);
-  const latest = useRef({ routes, sel, from, to, pad, onSelect });
-  latest.current = { routes, sel, from, to, pad, onSelect };
+  const latest = useRef({ routes, sel, labels, from, to, pad, onSelect });
+  latest.current = { routes, sel, labels, from, to, pad, onSelect };
 
   const fit = () => {
     const { routes, sel, from, to, pad } = latest.current;
@@ -45,7 +46,7 @@ export default function MapView({ ref, routes, sel, from, to, marker, onSelect, 
   const draw = () => {
     const l = L.current, g = layer.current;
     if (!l || !g) return;
-    const { routes, sel, from, to } = latest.current;
+    const { routes, sel, labels, from, to } = latest.current;
     g.clearLayers();
     routes.forEach((r, i) => {
       if (i === sel) return;
@@ -59,6 +60,13 @@ export default function MapView({ ref, routes, sel, from, to, marker, onSelect, 
       l.polyline(r.coords, { color: CASING, weight: 10, interactive: false }).addTo(g);
       l.polyline(r.coords, { color: '#9D8CFF', weight: 6, interactive: false }).addTo(g);
     }
+    // Labels last so they sit above the lines; each one selects its route, like tapping the line.
+    labels?.forEach((text, i) => {
+      if (!routes[i]) return;
+      const icon = l.divIcon({ className: 'eta-pin', html: `<span class="eta-bubble${i === sel ? ' on' : ''}">${text}</span>` });
+      l.marker(labelPoint(routes, i), { icon, keyboard: false, zIndexOffset: i === sel ? 1000 : 0, title: `Route ${i + 1}: ${text}` })
+        .on('click', () => latest.current.onSelect(i)).addTo(g);
+    });
     if (marker) l.circleMarker(marker, { radius: 7, color: '#9D8CFF', weight: 3, fillColor: CASING, fillOpacity: 1 }).addTo(g);
     if (from) l.circleMarker([from.lat, from.lon], { radius: 8, color: CASING, weight: 3, fillColor: '#6FD3FF', fillOpacity: 1 }).addTo(g);
     if (to) l.circleMarker([to.lat, to.lon], { radius: 8, color: CASING, weight: 3, fillColor: '#E7EDF6', fillOpacity: 1 }).addTo(g);
@@ -81,7 +89,7 @@ export default function MapView({ ref, routes, sel, from, to, marker, onSelect, 
     return () => { cancelled = true; ro.disconnect(); map.current?.remove(); map.current = null; };
   }, []);
 
-  useEffect(draw, [routes, sel, from, to, marker]);
+  useEffect(draw, [routes, sel, labels?.join(), from, to, marker]);
   // New routes or endpoints: frame them.
   useEffect(fit, [routes, from, to]);
 

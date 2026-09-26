@@ -72,6 +72,23 @@ class Fallback(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(calls, ["api.mapbox.com", "router.project-osrm.org", "router.project-osrm.org"])  # no 2nd Mapbox hit
         providers._mapbox_off_until = 0.0
 
+    async def test_depart_at_keeps_traffic_profile_arrive_by_switches_to_driving(self):
+        seen = []
+
+        def handler(req: httpx.Request):
+            seen.append((req.url.path.split("/")[4], dict(req.url.params)))
+            return httpx.Response(200, json=MAPBOX_ROUTE)
+
+        providers._mapbox_off_until = 0.0
+        with mock.patch.dict("os.environ", {"MAPBOX_TOKEN": "pk.test"}):
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as c:
+                await providers.find_routes(c, (-122.41, 37.78), (-122.40, 37.79), depart_at="2026-09-27T02:00:00Z")
+                await providers.find_routes(c, (-122.41, 37.78), (-122.40, 37.79), arrive_by="2026-09-27T02:00:00Z")
+        (p1, q1), (p2, q2) = seen
+        self.assertEqual((p1, q1["depart_at"], q1["annotations"]), ("driving-traffic", "2026-09-27T02:00:00Z", "congestion"))
+        self.assertEqual((p2, q2["arrive_by"]), ("driving", "2026-09-27T02:00:00Z"))
+        self.assertNotIn("annotations", q2)  # congestion is driving-traffic only
+
 
 class Api(unittest.TestCase):
     def setUp(self):
@@ -97,6 +114,20 @@ class Api(unittest.TestCase):
         self.assertEqual(fake.await_count, 1)
         self.assertEqual(body["source"], "mapbox")
         self.assertIn("road_segment_ids", body["routes"][0])
+
+    def test_time_is_validated_and_sent_as_utc(self):
+        from datetime import datetime, timedelta, timezone
+        soon = (datetime.now(timezone.utc) + timedelta(hours=2)).astimezone(timezone(timedelta(hours=-7)))
+        fake = mock.AsyncMock(return_value=(providers.normalize_routes(MAPBOX_ROUTE), "mapbox"))
+        ab = {"from": "-122.41,37.78", "to": "-122.40,37.79"}
+        with mock.patch.object(providers, "find_routes", fake):
+            self.assertEqual(self.client.get("/routes", params={**ab, "depart_at": soon.isoformat()}).status_code, 200)
+            for bad in ({"depart_at": "tonight"}, {"depart_at": "2026-09-26T19:00"},             # no offset
+                        {"depart_at": "2020-01-01T00:00:00Z"}, {"arrive_by": "2099-01-01T00:00:00Z"},
+                        {"depart_at": soon.isoformat(), "arrive_by": soon.isoformat()}):
+                self.assertEqual(self.client.get("/routes", params={**ab, **bad}).status_code, 400, bad)
+        dep = fake.await_args.args[3]
+        self.assertEqual(dep, soon.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
 
     def test_no_route_is_404(self):
         with mock.patch.object(providers, "find_routes", mock.AsyncMock(side_effect=providers.NoRoute())):

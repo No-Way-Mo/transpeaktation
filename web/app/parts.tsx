@@ -1,8 +1,8 @@
 'use client';
-import type { KeyboardEvent, ReactNode } from 'react';
-import { fmtDist, mins, RECENT, type Place, type Route } from '@/lib/route.ts';
+import { useState, type KeyboardEvent, type ReactNode } from 'react';
+import { fmtDist, fmtWhen, mins, RECENT, routeTag, type Place, type Route, type When } from '@/lib/route.ts';
 import { smartSuggestions } from '@/lib/suggest.ts';
-import type { useRoutePlanner } from '@/lib/use-route-planner.ts';
+import type { Card, useRoutePlanner } from '@/lib/use-route-planner.ts';
 
 type Planner = ReturnType<typeof useRoutePlanner>;
 
@@ -118,23 +118,95 @@ export function PlaceRow({ place, onPick, plain }: { place: Place; onPick(): voi
   );
 }
 
-export function RouteCard({ route, tag, arrive, selected, onPick, as = 'button', children }: {
-  route: Route; tag: string; arrive: string; selected: boolean; onPick(): void; as?: 'button' | 'div'; children?: ReactNode;
+/** The two route sections: transPEAKtation's event-aware pick, then the normal alternatives. `action` (e.g. a
+ *  Directions button) goes inside the selected card. */
+export function RouteList({ p, action }: { p: Planner; action?: ReactNode }) {
+  if (!p.tp || !p.routes.length) return null;
+  const { best, tag, note } = p.tp, as = action ? 'div' : 'button';
+  const fastest = p.routes[0].dur;
+  return (
+    <>
+      <section className="route-sec" aria-label="transPEAKtation route">
+        <div className="smart-head"><Logo size={15} stroke={3} /><span>transPEAKtation</span></div>
+        <RouteCard route={p.routes[best]} card={p.card(best, true)} when={p.when} tag={tag} tone={tag === 'Clear' ? 'fast' : 'tp'}
+          note={note} selected={p.choice.tp} onPick={() => p.setChoice({ i: best, tp: true })} as={as}>
+          {p.choice.tp && action}
+        </RouteCard>
+      </section>
+      <section className="route-sec" aria-label="Normal routes">
+        <div className="label">Normal</div>
+        {p.routes.map((rt, i) => {
+          const t = routeTag(i, rt.dur, fastest), on = !p.choice.tp && p.choice.i === i;
+          return (
+            <RouteCard key={i} route={rt} card={p.card(i, false)} when={p.when} tag={t} tone={i === 0 ? 'fast' : ''}
+              selected={on} onPick={() => p.setChoice({ i, tp: false })} as={as}>
+              {on && action}
+            </RouteCard>
+          );
+        })}
+      </section>
+    </>
+  );
+}
+
+const MODES: [When['mode'], string][] = [['now', 'Leave now'], ['depart', 'Leave at'], ['arrive', 'Arrive by']];
+/** datetime-local's value format, in local time. */
+const localInput = (ms: number) => new Date(ms - new Date(ms).getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+
+/** "Leave now ▾" chip that opens Leave now / Leave at / Arrive by + a date-time. Applies on Done (one re-route). */
+export function WhenPicker({ p }: { p: Planner }) {
+  const [draft, setDraft] = useState<When | null>(null);
+  const soon = () => Math.ceil((Date.now() + 60000) / 9e5) * 9e5; // next quarter hour
+  const setMode = (mode: When['mode']) => setDraft(d => ({ mode, at: d && d.at > Date.now() ? d.at : soon() }));
+  return (
+    <div className="when">
+      <button className={`chip${p.when.mode !== 'now' ? ' on' : ''}`} aria-expanded={!!draft}
+        onClick={() => setDraft(draft ? null : p.when)}>
+        <span aria-hidden="true">◷</span> {p.whenText} <span aria-hidden="true">▾</span>
+      </button>
+      {draft && (
+        <div className="when-pop">
+          <div className="seg" role="radiogroup" aria-label="Departure">
+            {MODES.map(([m, label]) => (
+              <button key={m} role="radio" aria-checked={draft.mode === m} className={draft.mode === m ? 'on' : ''}
+                onClick={() => setMode(m)}>{label}</button>
+            ))}
+          </div>
+          {draft.mode !== 'now' && (
+            <input type="datetime-local" aria-label={draft.mode === 'depart' ? 'Leave at' : 'Arrive by'} step={300}
+              value={localInput(draft.at)} min={localInput(Date.now())} max={localInput(Date.now() + 7 * 864e5)}
+              onChange={e => { const at = new Date(e.target.value).getTime(); if (at) setDraft({ ...draft, at }); }} />
+          )}
+          <div className="when-foot">
+            {draft.mode !== 'now' && <span className="sub">Estimates use typical traffic for that time.</span>}
+            <button className="pill-btn" onClick={() => { p.setWhen(draft); setDraft(null); }}>Done</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function RouteCard({ route, card, when, tag, tone, note, selected, onPick, as = 'button', children }: {
+  route: Route; card: Card; when: When; tag: string; tone: 'fast' | 'tp' | ''; note?: string;
+  selected: boolean; onPick(): void; as?: 'button' | 'div'; children?: ReactNode;
 }) {
   const Tag = as;
+  const [label, time] = when.mode === 'arrive' ? ['Leave by', card.leave] : ['Arrive', card.arrive];
   return (
-    <Tag className={`route${selected ? ' on' : ''}`} onClick={onPick} aria-pressed={selected}
+    <Tag className={`route${selected ? ' on' : ''}${card.tp ? ' tp' : ''}`} onClick={onPick} aria-pressed={selected}
       {...(as === 'div' ? { role: 'button', tabIndex: 0, onKeyDown: (e: KeyboardEvent) => e.key === 'Enter' && onPick() } : {})}>
       <span className="route-row">
         <span className="stack grow">
           <span className="eta">
-            <b>{mins(route.dur)}</b><span className="unit">min</span>
-            <span className={`tag${tag === 'Fastest' ? ' fast' : ''}`}>{tag}</span>
+            <b>{mins(card.dur)}</b><span className="unit">min</span>
+            <span className={`tag ${tone}`}>{tag}</span>
           </span>
           <span className="sub ellipsis">{route.summary ? `via ${route.summary}` : 'Direct route'} · {fmtDist(route.dist)}</span>
         </span>
-        <span className="arrive"><span className="sub">Arrive</span><b>{arrive}</b></span>
+        <span className="arrive"><span className="sub">{label}</span><b>{fmtWhen(time)}</b></span>
       </span>
+      {note && <span className="route-note">{note}</span>}
       {children}
     </Tag>
   );

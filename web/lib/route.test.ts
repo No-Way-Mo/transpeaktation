@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fmtDist, mins, routeTag, stepArrow, stepText, type Step } from './route.ts';
+import { fmtDist, fmtWhen, labelPoint, mins, routeTag, stepArrow, stepText, type LatLng, type Route, type Step } from './route.ts';
 
 const step = (type: string, modifier?: string, name = 'Market St'): Step =>
   ({ distance: 0, duration: 0, name, maneuver: { type, modifier, location: [0, 0] } });
@@ -29,4 +29,22 @@ test('turn-by-turn text', () => {
   assert.equal(stepArrow(step('turn', 'sharp left')), '↰');
   assert.equal(stepArrow(step('arrive')), '■');
   assert.equal(stepArrow(step('turn', 'weird')), '↑');
+});
+
+test('departure times', () => {
+  const now = new Date(2026, 8, 26, 15, 0).getTime();
+  assert.match(fmtWhen(new Date(2026, 8, 26, 19, 15).getTime(), now), /^7:15\sPM$/);
+  assert.match(fmtWhen(new Date(2026, 8, 27, 8, 0).getTime(), now), /^Tomorrow 8:00\sAM$/);
+  assert.match(fmtWhen(new Date(2026, 8, 29, 8, 0).getTime(), now), /^Tue 8:00\sAM$/);
+});
+
+test('map labels sit where routes split, not on the shared stretch', () => {
+  // Both routes share the first and last thirds; the second bows east in the middle.
+  const lat = (i: number) => 37.77 + i * 0.001;
+  const a: LatLng[] = Array.from({ length: 30 }, (_, i) => [lat(i), -122.41]);
+  const b: LatLng[] = a.map(([la, lo], i) => [la, i >= 10 && i < 20 ? lo + 0.01 : lo]);
+  const r = (coords: LatLng[]): Route => ({ dur: 600, dist: 2000, summary: '', coords, steps: [] });
+  const p = labelPoint([r(a), r(b)], 1);
+  assert.ok(Math.abs(p[1] - -122.40) < 1e-9, String(p));    // on the bowed-out stretch
+  assert.deepEqual(labelPoint([r(a)], 0), a[15]);           // single route: middle
 });

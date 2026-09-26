@@ -9,6 +9,7 @@ import os
 import threading
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -74,6 +75,22 @@ def lonlat(raw: str) -> tuple[float, float]:
     return lon, lat
 
 
+def when(raw: str | None) -> str | None:
+    """ISO time with offset → Mapbox's UTC form. Must be from now to 7 days out (a few minutes of slack)."""
+    if raw is None:
+        return None
+    try:
+        t = datetime.fromisoformat(raw)
+    except ValueError:
+        raise HTTPException(400, "expected an ISO 8601 time, e.g. 2026-09-26T19:00:00-07:00")
+    if t.tzinfo is None:
+        raise HTTPException(400, "time needs a UTC offset")
+    now = datetime.now(timezone.utc)
+    if not now - timedelta(minutes=5) <= t <= now + timedelta(days=7):
+        raise HTTPException(400, "time must be between now and 7 days from now")
+    return max(t, now).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 @app.get("/places")
 async def places(q: str = Query(min_length=1, max_length=120, description="Search text")):
     q = " ".join(q.split())
@@ -93,13 +110,19 @@ async def places(q: str = Query(min_length=1, max_length=120, description="Searc
 async def routes(
     from_: str = Query(alias="from", description="Start as 'lon,lat'"),
     to: str = Query(description="Destination as 'lon,lat'"),
+    depart_at: str | None = Query(None, description="Leave at (ISO 8601 with offset); omit for live traffic now"),
+    arrive_by: str | None = Query(None, description="Arrive by (ISO 8601 with offset)"),
 ):
     a, b = lonlat(from_), lonlat(to)
-    key = ("routes", *(round(x, 4) for x in (*a, *b)))  # ~10 m; nearby taps share a cached answer
+    if depart_at and arrive_by:
+        raise HTTPException(400, "pass depart_at or arrive_by, not both")
+    dep, arr = when(depart_at), when(arrive_by)
+    # ~10 m, to the minute: nearby taps / re-renders share a cached answer
+    key = ("routes", *(round(x, 4) for x in (*a, *b)), dep and dep[:16], arr and arr[:16])
     if (hit := _cached(key)) is not None:
         return hit
     try:
-        found, source = await providers.find_routes(state["http"], a, b)
+        found, source = await providers.find_routes(state["http"], a, b, dep, arr)
     except providers.NoRoute:
         raise HTTPException(404, "no drivable route between these points")
     except providers.ProviderError:

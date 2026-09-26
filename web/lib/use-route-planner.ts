@@ -1,10 +1,14 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { fetchRoutes, fmtTime, ORIGIN, searchPlaces, type Place, type Route } from './route.ts';
+import { fetchRoutes, fmtWhen, mins, ORIGIN, searchPlaces, type Place, type Route, type When } from './route.ts';
+import { transPeakPick } from './suggest.ts';
 
 type Field = 'from' | 'to';
 export type Screen = 'start' | 'search' | 'route';
-type Trip = { note: string; leaveMin: number }; // set when the trip came from a transPEAKtation suggestion
+type Trip = { note: string; leaveMin?: number }; // set when the trip came from a transPEAKtation suggestion
+/** One route card: route `i` with the normal estimate or the transPEAKtation (event-aware) one. Times in epoch ms. */
+export type Card = { i: number; tp: boolean; dur: number; leave: number; arrive: number };
+const NOW: When = { mode: 'now', at: 0 };
 
 /** Debounced place search. The latest text wins; slower, older responses are dropped. */
 function usePlaceSearch() {
@@ -29,7 +33,7 @@ function usePlaceSearch() {
   return { q, results, searching, run };
 }
 
-/** Screens (start → search → route), searches, and route alternatives. Shared by desktop and mobile. */
+/** Screens (start → search → route), searches, departure time, and route cards. Shared by desktop and mobile. */
 export function useRoutePlanner() {
   const [screen, setScreen] = useState<Screen>('start');
   const [from, setFrom] = useState<Place | null>(ORIGIN);
@@ -38,24 +42,25 @@ export function useRoutePlanner() {
   const [active, setActive] = useState<Field | null>(null);
   const search = usePlaceSearch();       // "Where to?" on the start/search screens
   const fieldSearch = usePlaceSearch();  // from/to boxes on the route screen
-  const [trip, setTrip] = useState<Trip>({ note: '', leaveMin: 0 });
+  const [trip, setTrip] = useState<Trip>({ note: '' });
+  const [when, setWhenState] = useState<When>(NOW);
   const [routes, setRoutes] = useState<Route[]>([]);
-  const [sel, setSel] = useState(0);
+  const [choice, setChoice] = useState({ i: 0, tp: true }); // selected card; transPEAKtation's by default
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const inflight = useRef<AbortController>(undefined);
   useEffect(() => () => inflight.current?.abort(), []);
 
   // Abort the previous request so a slow response can't overwrite a newer trip.
-  const route = async (a = from, b = to) => {
+  const route = async (a = from, b = to, w = when) => {
     inflight.current?.abort();
     setRoutes([]); setError('');
     if (!a || !b) return setLoading(false);
     const ctl = (inflight.current = new AbortController());
     setLoading(true);
     try {
-      const rs = await fetchRoutes(a, b, ctl.signal);
-      setRoutes(rs); setSel(0);
+      const rs = await fetchRoutes(a, b, w, ctl.signal);
+      setRoutes(rs); setChoice({ i: 0, tp: true });
     } catch {
       if (!ctl.signal.aborted) setError("Couldn't load routes.");
     } finally {
@@ -64,14 +69,16 @@ export function useRoutePlanner() {
   };
 
   /** Start/search screen → route screen for `dest`, from the current start point. */
-  const go = (dest: Place, opts: Partial<Trip> = {}) => {
+  const go = (dest: Place, opts: Trip = { note: '' }) => {
     const f = from ?? ORIGIN;
     setFrom(f); setTo(dest);
     setQuery({ from: f.label, to: dest.label });
     setActive(null); search.run('');
-    setTrip({ note: opts.note ?? '', leaveMin: opts.leaveMin ?? 0 });
+    setTrip(opts);
+    const w: When = opts.leaveMin ? { mode: 'depart', at: Date.now() + opts.leaveMin * 60000 } : NOW;
+    setWhenState(w);
     setScreen('route');
-    route(f, dest);
+    route(f, dest, w);
   };
 
   const goStart = () => {
@@ -79,7 +86,7 @@ export function useRoutePlanner() {
     search.run(''); fieldSearch.run('');
     setTo(null); setQuery(q => ({ ...q, to: '' }));
     setRoutes([]); setError(''); setLoading(false); setActive(null);
-    setTrip({ note: '', leaveMin: 0 });
+    setTrip({ note: '' }); setWhenState(NOW);
     setScreen('start');
   };
 
@@ -93,7 +100,7 @@ export function useRoutePlanner() {
     setFrom(nf); setTo(nt);
     setQuery(q => ({ ...q, [field]: p.label }));
     setActive(null); fieldSearch.run('');
-    setTrip({ note: '', leaveMin: 0 }); // hand-picked endpoint: the suggestion's advice no longer applies
+    setTrip({ note: '' }); // hand-picked endpoint: the suggestion's advice no longer applies
     route(nf, nt);
   };
   const swap = () => {
@@ -101,10 +108,22 @@ export function useRoutePlanner() {
     setQuery(q => ({ from: q.to, to: q.from }));
     route(to, from);
   };
+  const setWhen = (w: When) => { setWhenState(w); route(from, to, w); };
+
+  // Departure per estimate: now, the chosen time, or (arrive-by) the chosen time minus that estimate.
+  const now = Date.now();
+  const leaveFor = (dur: number) => when.mode === 'arrive' ? when.at - dur * 1000 : when.mode === 'depart' ? Math.max(when.at, now) : now;
+  const tp = routes.length ? transPeakPick(routes, routes.map(r => leaveFor(r.dur))) : null;
+  const card = (i: number, isTp: boolean): Card => {
+    const dur = isTp && tp ? tp.preds[i].dur : routes[i].dur, leave = leaveFor(dur);
+    return { i, tp: isTp, dur, leave, arrive: leave + dur * 1000 };
+  };
+  const sel = choice.tp && tp ? tp.best : choice.i;
+  /** Map taps pick that route's normal card, unless it's the route the selected transPEAKtation card shows. */
+  const setSel = (i: number) => { if (!(choice.tp && i === sel)) setChoice({ i, tp: false }); };
 
   // Empty "from" box offers "Current location" back.
   const suggestions = active === 'from' && !query.from.trim() ? [ORIGIN] : fieldSearch.results;
-  const leaveAt = trip.leaveMin ? fmtTime(trip.leaveMin * 60) : '';
 
   return {
     screen, setScreen, go, goStart,
@@ -112,10 +131,12 @@ export function useRoutePlanner() {
     from, to, query, active, setActive, focusField, onQuery, pick, swap,
     suggestions, searching: fieldSearch.searching,
     showSuggest: !!active && (suggestions.length > 0 || fieldSearch.searching),
-    routes, sel, setSel, loading, error, retry: () => route(),
+    routes, sel, setSel, choice, setChoice, tp, card, loading, error, retry: () => route(),
     selected: routes[sel] as Route | undefined,
-    leaveText: leaveAt ? `Leave at ${leaveAt}` : 'Leave now',
-    /** Clock time `sec` after departure (which is later than now for "leave at" suggestions). */
-    arrival: (sec: number) => fmtTime(trip.leaveMin * 60 + sec),
+    selectedCard: routes.length ? card(sel, choice.tp) : undefined,
+    when, setWhen,
+    whenText: when.mode === 'now' ? 'Leave now' : `${when.mode === 'depart' ? 'Leave' : 'Arrive by'} ${fmtWhen(when.at)}`,
+    /** "12 min" per route on the map, in whichever estimate (normal / transPEAKtation) is selected. */
+    mapLabels: routes.map((_, i) => `${mins(card(i, choice.tp).dur)} min`),
   };
 }
