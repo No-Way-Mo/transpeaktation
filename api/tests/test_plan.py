@@ -49,6 +49,9 @@ class EventImpact(unittest.TestCase):
         now = at(9)
         p = model.plan([PAST, AROUND], [at(18, 30)] * 2, "depart", CTX, now=now)  # Giants crowd on PAST
         self.assertEqual((p["best"], p["preds"][0]["dur"], p["advice"]), (0, PAST["dur"], None))  # no re-pick/re-time
+        est = p["preds"][0]["estimate"]                          # api/'s estimate: shown on the normal route only
+        self.assertEqual((round(est["dur"]), est["delay"]), (PAST["dur"] + 482, 482))
+        self.assertEqual(est["why"], ["Giants vs. Dodgers at Oracle Park"])
         self.assertEqual(p["tag"], "Events on the way")
         self.assertIn("Giants vs. Dodgers at Oracle Park", p["note"])
         self.assertEqual(model.plan([PAST, AROUND], [at(12)] * 2, "depart", CTX, now=now)["tag"], "Clear")

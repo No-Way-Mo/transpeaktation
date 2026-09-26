@@ -232,9 +232,11 @@ def plan(routes: list[dict], departs: list[datetime], mode: str, ctx: dict, *, n
          ml: dict | None = None) -> dict:
     """The transPEAKtation card. Its route and time are ml/'s decision (app/ml.py: best, dur, model, reasons);
     without one, the provider's fastest route and ETA, unchanged: api/ doesn't re-pick or re-time routes.
-    preds carry what is on each route (events, closures, stored traffic) for the explanation; the event-impact
-    estimate goes to ml/ as `heuristic` (main.py) and is never applied here."""
-    preds = [{**x, "dur": r["dur"], "delay": 0, "model": "provider ETA"}
+    preds carry what is on each route (events, closures, stored traffic) for the explanation, and api/'s own
+    event-impact `estimate`, which web shows on the normal routes ("longer than it looks") and ml/ gets as
+    `heuristic` (main.py); it never changes the transPEAKtation pick or time."""
+    preds = [{**x, "dur": r["dur"], "delay": 0, "model": "provider ETA",
+              "estimate": {"dur": x["dur"], "delay": x["delay"], "why": x["events"] + [i["label"] for i in x["incidents"]]}}
              for r, x in zip(routes, (predict_route(r, d, ctx, now=now) for r, d in zip(routes, departs)))]
     best = ml["best"] if ml else 0
     if ml:

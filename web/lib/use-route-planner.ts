@@ -171,7 +171,8 @@ export function useRoutePlanner() {
   // Each route is judged over its own leave → arrive, not the union used for fetching.
   const ctxFor = (r: Route | undefined) => r ? routeContext(r, context.events ?? [], context.conditions ?? [], spanFor(r.dur)) : null;
   const card = (i: number, isTp: boolean): Card => {
-    const dur = isTp && tp ? tp.preds[i].dur : routes[i].dur, leave = leaveFor(dur);
+    // Normal cards: api/'s estimate (provider ETA + events/closures) when there is one; transPEAKtation: its own.
+    const dur = isTp && tp ? tp.preds[i].dur : tp?.preds[i]?.estimate?.dur ?? routes[i].dur, leave = leaveFor(dur);
     return { i, tp: isTp, dur, leave, arrive: leave + dur * 1000 };
   };
   const sel = choice.tp && tp ? tp.best : choice.i;

@@ -1,6 +1,6 @@
 'use client';
 import { useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { fmtDist, fmtWhen, fromPtInput, mins, ptInput, RECENT, REPLAY, routeTag, stepIcon, type Place, type Route, type Step, type When } from '@/lib/route.ts';
+import { fmtDist, fmtWhen, fromPtInput, longerThanItLooks, mins, ptInput, RECENT, REPLAY, routeTag, stepIcon, type Place, type Route, type Step, type When } from '@/lib/route.ts';
 import { smartSuggestions } from '@/lib/suggest.ts';
 import type { Card, useRoutePlanner } from '@/lib/use-route-planner.ts';
 import { useTheme } from '@/lib/use-theme.ts';
@@ -256,9 +256,10 @@ export function RouteList({ p, action }: { p: Planner; action?: ReactNode }) {
         <div className="label">Normal</div>
         {p.routes.map((rt, i) => {
           if (rt.by === 'ml') return null; // ml/'s own route only appears as the transPEAKtation pick
-          const t = routeTag(i, rt.dur, fastest), on = !p.choice.tp && p.choice.i === i;
+          const longer = longerThanItLooks(rt, p.tp?.preds[i]), on = !p.choice.tp && p.choice.i === i;
           return (
-            <RouteCard key={i} route={rt} card={p.card(i, false)} when={p.when} tag={t} tone={i === 0 ? 'fast' : ''}
+            <RouteCard key={i} route={rt} card={p.card(i, false)} when={p.when} tag={longer?.tag ?? routeTag(i, rt.dur, fastest)}
+              tone={i === 0 && !longer ? 'fast' : ''} note={longer?.note}
               selected={on} onPick={() => p.setChoice({ i, tp: false })} as={as}>
               {on && action}
             </RouteCard>
