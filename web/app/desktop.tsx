@@ -102,7 +102,7 @@ export default function Desktop() {
       </aside>
 
       <main className="desk-map">
-        <MapView ref={map} routes={p.routes} sel={p.sel} tp={p.choice.tp} labels={p.mapLabels} from={p.from} to={p.to} marker={marker}
+        <MapView ref={map} routes={p.routes} sel={p.sel} tp={p.choice.tp} labels={p.mapLabels} from={p.from} to={p.to} events={p.mapEvents} marker={marker}
           onSelect={p.setSel} pad={{ topLeft: [60, 60], bottomRight: [60, 60] }} />
         <div className="map-ctrls">
           <Compass onPress={() => map.current?.fit()} />

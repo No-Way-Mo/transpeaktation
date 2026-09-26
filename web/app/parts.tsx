@@ -232,7 +232,7 @@ export function RouteList({ p, action }: { p: Planner; action?: ReactNode }) {
       <section className="route-sec" aria-label="transPEAKtation route">
         <div className="smart-head"><Logo size={15} stroke={3} /><span>transPEAKtation</span></div>
         <RouteCard route={p.routes[best]} card={p.card(best, true)} when={p.when} tag={tag} tone="tp"
-          note={note} selected={p.choice.tp} onPick={() => p.setChoice({ i: best, tp: true })} as={as}>
+          note={note} context={p.tpContext ?? undefined} selected={p.choice.tp} onPick={() => p.setChoice({ i: best, tp: true })} as={as}>
           {p.choice.tp && action}
         </RouteCard>
         {advice && <button className="pill-btn advice" onClick={p.applyAdvice}>{`Leave at ${fmtWhen(Date.parse(advice.depart_at))}`}</button>}
@@ -289,8 +289,9 @@ export function WhenPicker({ p }: { p: Planner }) {
   );
 }
 
-export function RouteCard({ route, card, when, tag, tone, note, selected, onPick, as = 'button', children }: {
+export function RouteCard({ route, card, when, tag, tone, note, context, selected, onPick, as = 'button', children }: {
   route: Route; card: Card; when: When; tag: string; tone: 'fast' | 'tp' | ''; note?: string;
+  context?: string;  // ingested events near / closures on this route (context.ts), when there are any
   selected: boolean; onPick(): void; as?: 'button' | 'div'; children?: ReactNode;
 }) {
   const Tag = as;
@@ -309,6 +310,7 @@ export function RouteCard({ route, card, when, tag, tone, note, selected, onPick
         <span className="arrive"><span className="sub">{label}</span><b>{fmtWhen(time)}</b></span>
       </span>
       {note && <span className="route-note">{note}</span>}
+      {context && <span className="route-note">{context}</span>}
       {children}
     </Tag>
   );

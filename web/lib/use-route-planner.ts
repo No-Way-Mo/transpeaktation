@@ -2,6 +2,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { fetchEvents, fetchPlan, fmtWhen, mins, ORIGIN, REPLAY, searchPlaces, spokenTime, voiceNote,
   type EventInfo, type Plan, type Place, type Route, type TransPeak, type VoiceIntent, type When } from './route.ts';
+// Ingested events (windowed /events) + /road-conditions: map pins and the route card's context line.
+import { conditionWindow, contextLine, eventWindow, fetchEvents as fetchWindowEvents, fetchRoadConditions, routeContext,
+  type ContextData, type Span } from './context.ts';
 
 type Field = 'from' | 'to';
 export type Screen = 'start' | 'search' | 'route';
@@ -31,6 +34,24 @@ function usePlaceSearch() {
     }, 350);
   };
   return { q, results, searching, run };
+}
+
+/** Ingested events + road conditions for a trip span. Refetches only when the (5-min snapped) windows change; a
+ *  failed feed comes back as null so routing carries on without it. */
+function useTripContext(span: Span): ContextData {
+  const ev = eventWindow(span), cond = conditionWindow(span);
+  const key = `${ev.from}-${ev.to}|${cond.from}-${cond.to}`;
+  const [data, setData] = useState<ContextData>({ events: [], conditions: [], loading: true });
+  useEffect(() => {
+    const ctl = new AbortController();
+    setData(d => ({ ...d, loading: true }));
+    Promise.allSettled([fetchWindowEvents(ev, ctl.signal), fetchRoadConditions(cond, ctl.signal)]).then(([e, c]) => {
+      if (ctl.signal.aborted) return;
+      setData({ events: e.status === 'fulfilled' ? e.value : null, conditions: c.status === 'fulfilled' ? c.value : null, loading: false });
+    });
+    return () => ctl.abort();
+  }, [key]); // key encodes both windows
+  return data;
 }
 
 /** Screens (start → search → route), searches, departure time, and route cards. Shared by desktop and mobile. */
@@ -139,6 +160,16 @@ export function useRoutePlanner() {
   // Departure per estimate: now, the chosen time, or (arrive-by) the chosen time minus that estimate.
   const now = Date.now();
   const leaveFor = (dur: number) => when.mode === 'arrive' ? when.at - dur * 1000 : when.mode === 'depart' ? (REPLAY ? when.at : Math.max(when.at, now)) : now;
+  /** A trip's leave → arrive for a `dur`-second drive, with the same departure rule as the cards. */
+  const spanFor = (dur: number): Span => { const from = leaveFor(dur); return { from, to: from + dur * 1000 }; };
+  // Trip span for event / road context: every route's leave → arrive, or just the departure before routes load.
+  const spans = routes.map(r => spanFor(r.dur));
+  const fetchSpan: Span = spans.length
+    ? { from: Math.min(...spans.map(s => s.from)), to: Math.max(...spans.map(s => s.to)) }
+    : spanFor(0);
+  const context = useTripContext(fetchSpan);
+  // Each route is judged over its own leave → arrive, not the union used for fetching.
+  const ctxFor = (r: Route | undefined) => r ? routeContext(r, context.events ?? [], context.conditions ?? [], spanFor(r.dur)) : null;
   const card = (i: number, isTp: boolean): Card => {
     const dur = isTp && tp ? tp.preds[i].dur : routes[i].dur, leave = leaveFor(dur);
     return { i, tp: isTp, dur, leave, arrive: leave + dur * 1000 };
@@ -161,6 +192,12 @@ export function useRoutePlanner() {
     selected: routes[sel] as Route | undefined,
     selectedCard: routes.length ? card(sel, choice.tp) : undefined,
     when, setWhen,
+    /** Ingested events in the trip's time window, for the map. Empty while loading or if the feed failed. */
+    mapEvents: context.events ?? [],
+    /** Events near / conditions on the selected route (null = no route yet). */
+    selectedContext: ctxFor(routes[sel]),
+    /** Extra line on the transPEAKtation card: ingested events near / closures on the route it shows, if any. */
+    tpContext: tp && routes[tp.best] ? contextLine(ctxFor(routes[tp.best]), context) : null,
     whenText: when.mode === 'now' ? 'Leave now' : `${when.mode === 'depart' ? 'Leave' : 'Arrive by'} ${fmtWhen(when.at)}`,
     /** "12 min" per route on the map, in whichever estimate (normal / transPEAKtation) is selected. */
     mapLabels: routes.map((_, i) => `${mins(card(i, choice.tp).dur)} min`),
