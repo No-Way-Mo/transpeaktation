@@ -39,6 +39,7 @@ SOURCES: dict[str, Source] = {
         *(_datasf(k, "planned") for k in ("street_closures", "street_use_permits",
                                           "excavation_permits", "parking_signs")),
         Source("caltrans_lane_closures", "planned", lambda _: feeds.caltrans_lane_closures()),
+        Source("predicthq_events", "planned", lambda _: feeds.predicthq_events()),
         _datasf("police_dispatch", "live"),
         Source("sf511_traffic_events", "live", lambda _: feeds.sf511_traffic_events()),
         Source("sf511_muni_vehicles", "live", lambda _: feeds.sf511_muni_vehicles()),

@@ -111,6 +111,44 @@ def sf511_muni_vehicles() -> tuple[Records, dict]:
     return delivery.get("VehicleActivity", []), {"response_time": delivery.get("ResponseTimestamp")}
 
 
+# --- PredictHQ -------------------------------------------------------------
+
+PHQ_EVENTS_URL = "https://api.predicthq.com/v1/events/"
+# Crowd-drawing categories only. public-holidays is left out for now: it's city-wide with no venue point, and the
+# api's impact model is per venue.
+PHQ_CATEGORIES = "concerts,sports,festivals,performing-arts,conferences,expos,community"
+PHQ_WITHIN = "12km@37.7749,-122.4194"  # covers SF_BBOX; the worker clips to it
+PHQ_DAYS_BACK, PHQ_DAYS_AHEAD = 1, 30
+PHQ_MIN_RANK = 30  # PredictHQ rank 0-100 (log scale of impact); below ~30 is a neighbourhood-sized event
+PHQ_PAGE, PHQ_MAX_PAGES = 200, 60  # plans may cap a page lower (free tier: 50); ~36 pages for 30 days of SF
+
+
+def predicthq_events(max_pages: int = PHQ_MAX_PAGES) -> tuple[Records, dict]:
+    """SF events from yesterday through the next 30 days, including deleted ones so cancellations reach the worker.
+    Results are clipped to what the plan covers, silently: an empty pull can mean "outside the plan"."""
+    from datetime import date, timedelta
+
+    token = _require_env("PREDICTHQ_TOKEN")
+    today = date.today()
+    params = {"within": PHQ_WITHIN, "category": PHQ_CATEGORIES, "state": "active,predicted,deleted",
+              "active.gte": (today - timedelta(days=PHQ_DAYS_BACK)).isoformat(),
+              "active.lte": (today + timedelta(days=PHQ_DAYS_AHEAD)).isoformat(),
+              "active.tz": "America/Los_Angeles", "rank.gte": str(PHQ_MIN_RANK),
+              "sort": "start", "limit": str(PHQ_PAGE)}
+    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    events: Records = []
+    url, meta = PHQ_EVENTS_URL, {}
+    for page in range(max_pages):
+        data = json.loads(fetch(url, params=params if page == 0 else None, headers=headers))
+        events += data.get("results", [])
+        meta = {"count": data.get("count"), "overflow": data.get("overflow", False)}
+        url = data.get("next")
+        if not url:
+            break
+    meta.update(pages=page + 1, truncated=bool(url), **{k: params[k] for k in ("within", "active.gte", "active.lte")})
+    return events, meta
+
+
 # --- OpenStreetMap ---------------------------------------------------------
 
 OVERPASS_URL = "https://overpass-api.de/api/interpreter"

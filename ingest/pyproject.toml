@@ -14,4 +14,4 @@ db = ["pymongo>=4,<5", "psycopg[binary]>=3,<4"]  # worker writers: MongoDB Atlas
 packages = ["datasf", "pull", "worker", "worker.incidents"]
 
 [tool.setuptools.package-data]
-worker = ["schema.sql"]
+worker = ["schema.sql", "seeds/*.json"]

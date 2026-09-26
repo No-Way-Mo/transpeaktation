@@ -29,6 +29,10 @@ MONGO_INDEXES: dict[str, list[tuple[list, dict]]] = {
                        ([("start_time", 1), ("end_time", 1)], {}), ([("road_segment_ids", 1)], {}),
                        ([("is_closure", 1), ("end_time", 1)], {})],
     "route_plans": [([("corridor_id", 1), ("direction", 1)], {}), ([("segment_ids", 1)], {})],
+    "events": [([("location", "2dsphere")], {}), ([("start_time", 1), ("status", 1)], {}), ([("end_time", 1)], {}),
+               ([("sources.predicthq.id", 1)],
+                {"unique": True, "partialFilterExpression": {"sources.predicthq.id": {"$exists": True}}})],
+    "venues": [([("location", "2dsphere")], {}), ([("phq_entity_ids", 1)], {})],
 }
 
 
@@ -113,15 +117,15 @@ class MongoSink:
             for keys, opts in indexes:
                 self.db[coll].create_index(keys, **opts)
 
-    def _upsert(self, coll: str, items: list[tuple[dict, dict]]) -> None:
-        """(filter, document) pairs. `first_seen_at` is set on insert only; `last_ingested_at` every write."""
+    def _upsert(self, coll: str, items: list[tuple]) -> None:
+        """(filter, document) or (filter, document, add_to_set) tuples. `first_seen_at` is set on insert only;
+        `last_ingested_at` every write. add_to_set values: one item or a list of items to add."""
         from pymongo import UpdateOne
 
         now = datetime.now(timezone.utc)
         for i in range(0, len(items), 1000):
-            ops = [UpdateOne(f, {"$set": {**d, "last_ingested_at": d.get("last_ingested_at", now)},
-                                 "$setOnInsert": {"first_seen_at": now}}, upsert=True)
-                   for f, d in items[i:i + 1000]]
+            ops = [UpdateOne(f, _update(d, add[0] if add else None, now), upsert=True)
+                   for f, d, *add in items[i:i + 1000]]
             self.db[coll].bulk_write(ops, ordered=False)
         self.counts[coll] += len(items)
 
@@ -133,6 +137,30 @@ class MongoSink:
 
     def write_road_incidents(self, items: list[tuple[dict, dict]]) -> None:
         self._upsert("road_incidents", items)
+
+    def write_events(self, items: list[tuple[dict, dict, dict]]) -> None:
+        self._upsert("events", items)
+
+    def write_venues(self, items: list[tuple[dict, dict, dict]]) -> None:
+        self._upsert("venues", items)
+
+    def archive_missing_events(self, source: str, keep_ids: list[str], start: datetime, end: datetime) -> int:
+        """Active `source` events starting in [start, end] that aren't in keep_ids -> archived. Returns how many."""
+        res = self.db["events"].update_many(
+            {f"sources.{source}.id": {"$exists": True}, "status": "active", "_id": {"$nin": keep_ids},
+             "start_time": {"$gte": start, "$lte": end}},
+            {"$set": {"status": "archived", "archived_reason": f"missing_from_{source}",
+                      "last_ingested_at": datetime.now(timezone.utc)}})
+        self.counts["events_archived"] += res.modified_count
+        return res.modified_count
+
+
+def _update(doc: dict, add: dict | None, now: datetime) -> dict:
+    update = {"$set": {**doc, "last_ingested_at": doc.get("last_ingested_at", now)},
+              "$setOnInsert": {"first_seen_at": now}}
+    if add:
+        update["$addToSet"] = {k: {"$each": sorted(set(v))} if isinstance(v, list) else v for k, v in add.items()}
+    return update
 
 
 class CombinedSink:
@@ -177,3 +205,14 @@ class DryRunSink:
 
     def write_road_incidents(self, items: list[tuple[dict, dict]]) -> None:
         self._keep("road_incidents", [{**f, **d} for f, d in items])
+
+    def write_events(self, items: list[tuple[dict, dict, dict]]) -> None:
+        self._keep("events", [{**f, **d, **a} for f, d, a in items])
+
+    def write_venues(self, items: list[tuple[dict, dict, dict]]) -> None:
+        self._keep("venues", [{**f, **d, **a} for f, d, a in items])
+
+    def archive_missing_events(self, source: str, keep_ids: list[str], start: datetime, end: datetime) -> int:
+        self.samples.setdefault("archive_missing_events", []).append(
+            {"source": source, "keep": len(keep_ids), "start": start, "end": end})
+        return 0  # a dry run can't know what's in Mongo

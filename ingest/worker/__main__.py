@@ -5,7 +5,9 @@
     python -m worker run traffic               # pull.poll JSONL -> Tiger traffic_metrics + route_eta_metrics, Mongo route_plans
     python -m worker run traffic --source tomtom --dry-run
     python -m worker run incidents             # pull snapshots (closures, permits, Caltrans, CHP, dispatch) -> Mongo road_incidents
-    python -m worker schedule                  # every 10 min: traffic + fresh incident snapshots; segments when the graph changes
+    python -m worker run events                # PredictHQ snapshot -> Mongo events + venues (seeded capacities)
+    python -m worker schedule                  # every 10 min: traffic + fresh incident snapshots; events every 6 h;
+                                               # segments when the graph changes
     python -m worker backfill --date 2026-09-20  # closures/permits in effect that day (DataSF history) -> road_incidents
     python -m worker serve                     # HTTP trigger: POST /ingest/refresh (needs INGEST_TOKEN; see worker/server.py)
 
@@ -17,10 +19,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import shutil
 import sys
 import time
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -31,7 +34,8 @@ from pull import DATA_DIR, ENV_FILE
 from .db import ConfigError, DryRunSink, MongoSink, TigerSink
 from .incidents.job import IncidentJob
 from .network import Network
-from .service import GRAPHML, cached_network, load_network, refresh, run_incidents, run_segments, run_traffic
+from .service import (GRAPHML, cached_network, events_due, load_network, refresh, run_events, run_incidents,
+                      run_segments, run_traffic)
 from .traffic import BUCKET, SOURCES
 
 
@@ -77,13 +81,16 @@ def bootstrap(dry_run: bool) -> dict:
 def schedule() -> None:
     net = cached_network() or load_network()  # load_network raises the "pull the graph first" ConfigError
     run_segments(net, dry_run=False)
+    # PredictHQ free tier: ~36 requests per pull, so every 6 h by default (PREDICTHQ_EVERY_MIN to change).
+    events_every = timedelta(minutes=float(os.environ.get("PREDICTHQ_EVERY_MIN") or 360))
     while True:
         started = time.monotonic()
+        jobs = ("traffic", "incidents", *(("events",) if events_due(events_every) else ()))
         if (fresh := cached_network()) is not net:  # weekly `pull osm_drive_graph` refresh
             net = fresh or load_network()
             print(json.dumps({"segments": run_segments(net, dry_run=False)}), flush=True)
         # One implementation for the loop and POST /ingest/refresh: service.refresh (failures reported, not raised).
-        print(json.dumps({"at": datetime.now(timezone.utc), "refresh": refresh(("traffic", "incidents"))}, default=str),
+        print(json.dumps({"at": datetime.now(timezone.utc), "refresh": refresh(jobs)}, default=str),
               flush=True)
         time.sleep(max(0.0, BUCKET.total_seconds() - (time.monotonic() - started)))
 
@@ -95,7 +102,7 @@ def main(argv: list[str]) -> int:
     b = sub.add_parser("bootstrap")
     b.add_argument("--dry-run", action="store_true")
     r = sub.add_parser("run")
-    r.add_argument("job", choices=["segments", "traffic", "incidents"])
+    r.add_argument("job", choices=["segments", "traffic", "incidents", "events"])
     r.add_argument("--source", action="append", choices=SOURCES, help="traffic source (repeatable; default all)")
     r.add_argument("--no-geocode", action="store_true", help="incidents: never call a geocoding API")
     r.add_argument("--dry-run", action="store_true")
@@ -123,6 +130,8 @@ def main(argv: list[str]) -> int:
             return 0
         elif args.job == "segments":
             out = run_segments(load_network(), args.dry_run)
+        elif args.job == "events":
+            out = run_events(args.dry_run)
         elif args.job == "incidents":
             net = load_network() if GRAPHML.exists() else None
             out = run_incidents(net, args.dry_run, use_geocoder=not args.no_geocode)
