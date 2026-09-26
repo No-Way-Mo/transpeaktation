@@ -37,7 +37,6 @@ struct ContentView: View {
                 EmptyView()
             }
         }
-        .preferredColorScheme(.dark)
     }
 }
 
@@ -52,26 +51,30 @@ struct OfflineView: View {
                 .font(.title3.weight(.semibold))
             Text(message)
                 .font(.subheadline)
-                .foregroundStyle(Color.muted)
+                .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
             Text(url.absoluteString)
                 .font(.footnote.monospaced())
-                .foregroundStyle(Color.muted)
+                .foregroundStyle(.secondary)
             Button("Retry", action: retry)
                 .font(.body.weight(.semibold))
-                .foregroundStyle(Color(red: 0.043, green: 0.063, blue: 0.125))
+                .foregroundStyle(.white)
                 .padding(.horizontal, 28)
                 .frame(height: 48)
                 .background(Color.accent, in: Capsule())
                 .padding(.top, 6)
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(.primary)
         .padding(32)
     }
 }
 
+// Follows the device's light/dark setting, matching the web app's Meadow Green theme (web/app/globals.css).
 extension Color {
-    static let appBackground = Color(red: 0.024, green: 0.047, blue: 0.090) // #060C17
-    static let accent = Color(red: 0.616, green: 0.549, blue: 1.0)          // #9D8CFF
-    static let muted = Color(red: 0.549, green: 0.604, blue: 0.702)         // #8C9AB3
+    /// Map canvas behind the page until it paints: #E9F0E6 light, #0B1C2A dark.
+    static let appBackground = Color(uiColor: UIColor { $0.userInterfaceStyle == .dark
+        ? UIColor(red: 0.043, green: 0.110, blue: 0.165, alpha: 1)
+        : UIColor(red: 0.914, green: 0.941, blue: 0.902, alpha: 1) })
+    /// Action blue #1A759F in both modes (white text 5.1:1).
+    static let accent = Color(red: 0.102, green: 0.459, blue: 0.624)
 }

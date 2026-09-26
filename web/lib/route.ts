@@ -26,9 +26,9 @@ export const RECENT: Place[] = [
   { label: 'Chase Center', sub: '1 Warriors Way', lat: 37.768, lon: -122.3877 },
   { label: 'Ferry Building', sub: '1 Ferry Building', lat: 37.7955, lon: -122.3937 },
 ];
-const ARROWS: Record<string, string> = {
-  left: '←', right: '→', straight: '↑', 'slight left': '↖', 'slight right': '↗',
-  'sharp left': '↰', 'sharp right': '↱', uturn: '↩',
+// Turn arrow rotation (degrees clockwise from straight ahead) per maneuver modifier.
+const ANGLES: Record<string, number> = {
+  straight: 0, 'slight right': 45, right: 90, 'sharp right': 135, 'slight left': -45, left: -90, 'sharp left': -135,
 };
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
@@ -71,16 +71,25 @@ export function meters(a: LatLng, b: LatLng): number {
   return Math.hypot(a[0] - b[0], (a[1] - b[1]) * k) * 111_320;
 }
 
+/** Metres from p to segment a–b (flat-earth, fine at city scale). Mapbox lines only have vertices at bends, so
+ *  distance to vertices alone would call the middle of a long straight "far" from its own neighbour. */
+function segMeters(p: LatLng, a: LatLng, b: LatLng): number {
+  const k = Math.cos((p[0] * Math.PI) / 180);
+  const [bx, by, px, py] = [(b[1] - a[1]) * k, b[0] - a[0], (p[1] - a[1]) * k, p[0] - a[0]];
+  const t = Math.max(0, Math.min(1, (px * bx + py * by) / (bx * bx + by * by || 1)));
+  return Math.hypot(px - t * bx, py - t * by) * 111_320;
+}
+
 /** Where to pin route i's "12 min" label: the point of its middle stretch farthest from every other route,
  *  so labels on overlapping alternatives don't stack. */
 export function labelPoint(routes: Route[], i: number): LatLng {
-  const cs = routes[i].coords, others = routes.flatMap((r, j) => (j === i ? [] : r.coords));
+  const cs = routes[i].coords, others = routes.filter((_, j) => j !== i).map(r => r.coords);
   let best = cs[Math.floor(cs.length / 2)], bestD = -1;
   if (!others.length) return best;
   // ponytail: O(n·m) scan over every 4th point; fine for 2-3 city routes, index the others if it ever shows up.
   for (let k = Math.floor(cs.length * 0.15); k < cs.length * 0.85; k += 4) {
     let d = Infinity;
-    for (const o of others) d = Math.min(d, meters(cs[k], o));
+    for (const o of others) for (let j = 1; j < o.length; j++) d = Math.min(d, segMeters(cs[k], o[j - 1], o[j]));
     if (d > bestD) { bestD = d; best = cs[k]; }
   }
   return best;
@@ -98,10 +107,25 @@ export function stepText(s: Step, destination: string): string {
   return `${verb} ${m.modifier || ''} onto ${name}`.replace('  ', ' ');
 }
 
-export function stepArrow(s: Step): string {
-  if (s.maneuver.type === 'arrive') return '■';
-  if (s.maneuver.type === 'depart') return '↑';
-  return ARROWS[s.maneuver.modifier ?? ''] || '↑';
+/** Icon for a turn: an arrow rotated to the turn, a U-turn, or the arrival flag. */
+export function stepIcon(s: Step): { name: 'arrow' | 'uturn' | 'flag'; rotate: number } {
+  if (s.maneuver.type === 'arrive') return { name: 'flag', rotate: 0 };
+  if (s.maneuver.modifier === 'uturn') return { name: 'uturn', rotate: 0 };
+  return { name: 'arrow', rotate: s.maneuver.type === 'depart' ? 0 : ANGLES[s.maneuver.modifier ?? ''] ?? 0 };
+}
+
+export type Slow = 'moderate' | 'heavy' | 'severe';
+/** Stretches of the route slower than free-flow, merged per level, for colouring over the route line. */
+export function trafficRuns(r: Route): { level: Slow; coords: LatLng[] }[] {
+  const out: { level: Slow; coords: LatLng[] }[] = [];
+  let cur: (typeof out)[number] | null = null;
+  (r.congestion ?? []).forEach((lvl, k) => {
+    const next = r.coords[k + 1];
+    if (!next || (lvl !== 'moderate' && lvl !== 'heavy' && lvl !== 'severe')) { cur = null; return; }
+    if (cur?.level === lvl) cur.coords.push(next);
+    else out.push((cur = { level: lvl, coords: [r.coords[k], next] }));
+  });
+  return out;
 }
 
 /** Tag for a route card: the first (fastest) route vs. how much slower each alternative is. */

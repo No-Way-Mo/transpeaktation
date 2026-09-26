@@ -1,9 +1,9 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { fmtDist, fmtWhen, mins, stepArrow, stepText, type LatLng } from '@/lib/route.ts';
+import { fmtDist, fmtWhen, mins, stepText, type LatLng } from '@/lib/route.ts';
 import { useRoutePlanner } from '@/lib/use-route-planner.ts';
 import MapView, { type MapHandle } from './map-view.tsx';
-import { Endpoints, Logo, RouteList, SearchResults, TripNote, WhenPicker, WhereTo } from './parts.tsx';
+import { Compass, Endpoints, Icon, Logo, RouteList, SearchResults, TripNote, TurnIcon, WhenPicker, WhereTo } from './parts.tsx';
 
 export default function Desktop() {
   const p = useRoutePlanner();
@@ -42,7 +42,7 @@ export default function Desktop() {
             </div>
 
             <div className="chips">
-              <span className="chip on">Drive</span>
+              <span className="chip on"><Icon name="car" size={15} />Drive</span>
               <WhenPicker p={p} />
             </div>
 
@@ -59,7 +59,7 @@ export default function Desktop() {
               {hasRoutes && !steps && (
                 <>
                   <div className="steps-head">
-                    <button className="round-btn" title="New search" aria-label="New search" onClick={newSearch}>←</button>
+                    <button className="round-btn" title="New search" aria-label="New search" onClick={newSearch}><Icon name="back" size={18} /></button>
                     <span className="title">Routes to {p.to?.label}</span>
                   </div>
                   <TripNote note={p.trip.note} />
@@ -72,7 +72,7 @@ export default function Desktop() {
               {hasRoutes && steps && r && c && (
                 <>
                   <div className="steps-head">
-                    <button className="round-btn" title="Back to routes" aria-label="Back to routes" onClick={closeSteps}>←</button>
+                    <button className="round-btn" title="Back to routes" aria-label="Back to routes" onClick={closeSteps}><Icon name="back" size={18} /></button>
                     <span className="title">Directions to {p.to?.label}</span>
                   </div>
                   <div className="summary">
@@ -86,7 +86,7 @@ export default function Desktop() {
                         setStep(i);
                         map.current?.focus([st.maneuver.location[1], st.maneuver.location[0]]);
                       }}>
-                        <span className="arrow">{stepArrow(st)}</span>
+                        <span className="arrow"><TurnIcon step={st} /></span>
                         <span className="stack">
                           <span className="step-text">{stepText(st, p.to?.label ?? '')}</span>
                           <span className="sub">{st.distance > 0 ? fmtDist(st.distance) : ''}</span>
@@ -102,13 +102,13 @@ export default function Desktop() {
       </aside>
 
       <main className="desk-map">
-        <MapView ref={map} routes={p.routes} sel={p.sel} labels={p.mapLabels} from={p.from} to={p.to} marker={marker}
+        <MapView ref={map} routes={p.routes} sel={p.sel} tp={p.choice.tp} labels={p.mapLabels} from={p.from} to={p.to} marker={marker}
           onSelect={p.setSel} pad={{ topLeft: [60, 60], bottomRight: [60, 60] }} />
         <div className="map-ctrls">
-          <button className="ctrl" title="Fit route" aria-label="Fit route" onClick={() => map.current?.fit()}><i className="dot" /></button>
+          <Compass onPress={() => map.current?.fit()} />
           <div className="zoom">
-            <button title="Zoom in" aria-label="Zoom in" onClick={() => map.current?.zoomIn()}>+</button>
-            <button title="Zoom out" aria-label="Zoom out" onClick={() => map.current?.zoomOut()}>−</button>
+            <button title="Zoom in" aria-label="Zoom in" onClick={() => map.current?.zoomIn()}><Icon name="plus" /></button>
+            <button title="Zoom out" aria-label="Zoom out" onClick={() => map.current?.zoomOut()}><Icon name="minus" /></button>
           </div>
         </div>
       </main>

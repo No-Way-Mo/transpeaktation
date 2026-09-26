@@ -21,7 +21,7 @@ targets:
         INFOPLIST_KEY_CFBundleDisplayName: transPEAKtation
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
-        INFOPLIST_KEY_UIStatusBarStyle: UIStatusBarStyleLightContent
+        INFOPLIST_KEY_UIStatusBarStyle: UIStatusBarStyleDefault   # dark text in light mode, light in dark
         # Web app the shell loads. Simulator reaches the Mac's localhost; a real iPhone needs the Mac's LAN IP or the deployed URL.
         WEB_APP_URL: "http://localhost:3000"
     info:

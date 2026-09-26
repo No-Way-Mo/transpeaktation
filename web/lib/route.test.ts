@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fmtDist, fmtWhen, labelPoint, mins, routeTag, stepArrow, stepText, type LatLng, type Route, type Step } from './route.ts';
+import { fmtDist, fmtWhen, labelPoint, mins, routeTag, stepIcon, stepText, trafficRuns, type LatLng, type Route, type Step } from './route.ts';
 
 const step = (type: string, modifier?: string, name = 'Market St'): Step =>
   ({ distance: 0, duration: 0, name, maneuver: { type, modifier, location: [0, 0] } });
@@ -26,9 +26,10 @@ test('turn-by-turn text', () => {
   assert.equal(stepText(step('turn', 'left', ''), 'x'), 'Turn left onto the road');
   assert.equal(stepText(step('fork', 'slight right'), 'x'), 'Keep slight right onto Market St');
   assert.equal(stepText(step('arrive'), 'Oracle Park'), 'Arrive at Oracle Park');
-  assert.equal(stepArrow(step('turn', 'sharp left')), '↰');
-  assert.equal(stepArrow(step('arrive')), '■');
-  assert.equal(stepArrow(step('turn', 'weird')), '↑');
+  assert.deepEqual(stepIcon(step('turn', 'sharp left')), { name: 'arrow', rotate: -135 });
+  assert.deepEqual(stepIcon(step('turn', 'uturn')), { name: 'uturn', rotate: 0 });
+  assert.deepEqual(stepIcon(step('arrive')), { name: 'flag', rotate: 0 });
+  assert.deepEqual(stepIcon(step('turn', 'weird')), { name: 'arrow', rotate: 0 });
 });
 
 test('departure times', () => {
@@ -47,4 +48,17 @@ test('map labels sit where routes split, not on the shared stretch', () => {
   const p = labelPoint([r(a), r(b)], 1);
   assert.ok(Math.abs(p[1] - -122.40) < 1e-9, String(p));    // on the bowed-out stretch
   assert.deepEqual(labelPoint([r(a)], 0), a[15]);           // single route: middle
+  // The neighbour is one long straight segment (vertices only at its ends): its middle still counts as close.
+  const straight: LatLng[] = [a[0], a[29]];
+  assert.ok(Math.abs(labelPoint([r(straight), r(b)], 1)[1] - -122.40) < 1e-9);
+});
+
+test('traffic: slow stretches merge per level; free-flowing and unknown ones are left to the route colour', () => {
+  const coords: LatLng[] = [[0, 0], [0, 1], [0, 2], [0, 3], [0, 4], [0, 5]];
+  const r: Route = { dur: 1, dist: 1, summary: '', coords, steps: [], congestion: ['low', 'heavy', 'heavy', 'unknown', 'severe'] };
+  assert.deepEqual(trafficRuns(r), [
+    { level: 'heavy', coords: [[0, 1], [0, 2], [0, 3]] },
+    { level: 'severe', coords: [[0, 4], [0, 5]] },
+  ]);
+  assert.deepEqual(trafficRuns({ ...r, congestion: null }), []);
 });

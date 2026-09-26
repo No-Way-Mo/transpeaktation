@@ -1,19 +1,104 @@
 'use client';
-import { useState, type KeyboardEvent, type ReactNode } from 'react';
-import { fmtDist, fmtWhen, mins, RECENT, routeTag, type Place, type Route, type When } from '@/lib/route.ts';
+import { useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { fmtDist, fmtWhen, mins, RECENT, routeTag, stepIcon, type Place, type Route, type Step, type When } from '@/lib/route.ts';
 import { smartSuggestions } from '@/lib/suggest.ts';
 import type { Card, useRoutePlanner } from '@/lib/use-route-planner.ts';
 
 type Planner = ReturnType<typeof useRoutePlanner>;
 
+/** The fork mark: one road splitting into the normal route (blue) and transPEAKtation's (green). */
 export function Logo({ size = 26, stroke = 2.6, className }: { size?: number; stroke?: number; className?: string }) {
   return (
     <svg className={className} viewBox="0 0 32 32" width={size} height={size} fill="none" strokeLinecap="round" strokeWidth={stroke} aria-hidden="true">
-      <path d="M16 29v-9" stroke="#E7EDF6" />
-      <path d="M16 20c0-7-9-7-9-15" stroke="#9D8CFF" />
-      <path d="M16 20V5" stroke="#E7EDF6" />
-      <path d="M16 20c0-7 9-7 9-15" stroke="#6FD3FF" />
+      <path d="M16 29v-9M16 20V5" style={{ stroke: 'var(--ink)' }} />
+      <path d="M16 20c0-7-9-7-9-15" style={{ stroke: 'var(--brand-strong)' }} />
+      <path d="M16 20c0-7 9-7 9-15" style={{ stroke: 'var(--route)' }} />
     </svg>
+  );
+}
+
+// One stroke icon set (24-unit grid, 2px round strokes) instead of text glyphs.
+const ICONS = {
+  close: 'M6 6l12 12M18 6L6 18',
+  back: 'M15 5l-7 7 7 7',
+  swap: 'M7 20V4M3 8l4-4 4 4M17 4v16M13 16l4 4 4-4',
+  clock: 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0zM12 7v5l3 2',
+  chevron: 'M6 9l6 6 6-6',
+  plus: 'M12 5v14M5 12h14',
+  minus: 'M5 12h14',
+  arrow: 'M12 20V5M6 11l6-6 6 6',
+  uturn: 'M8 20V10a4 4 0 0 1 8 0v8M12 14l4 4 4-4',
+  flag: 'M5 21V4M5 4h11l-2 4 2 4H5',
+  pin: 'M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21zM12 12a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z',
+  search: 'M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4',
+  car: 'M5 16V11l2-5h10l2 5v5M5 16h14M5 16v2M19 16v2M3 11h18M8 13.5h.01M16 13.5h.01',
+} as const;
+export type IconName = keyof typeof ICONS;
+
+export function Icon({ name, size = 20, rotate, className }: { name: IconName; size?: number; rotate?: number; className?: string }) {
+  return (
+    <svg className={className} viewBox="0 0 24 24" width={size} height={size} fill="none" stroke="currentColor" strokeWidth={2}
+      strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={rotate ? { transform: `rotate(${rotate}deg)` } : undefined}>
+      <path d={ICONS[name]} />
+    </svg>
+  );
+}
+
+export function TurnIcon({ step, size = 18 }: { step: Step; size?: number }) {
+  const { name, rotate } = stepIcon(step);
+  return <Icon name={name} rotate={rotate} size={size} />;
+}
+
+const COMPASS_KEY = 'transpeaktation.compass';
+type Pt = { x: number; y: number };
+const clampTo = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+
+/** Compass dial: north is always up on this map, so it doubles as the "recenter" button. `movable` lets a finger
+ *  drag it anywhere on screen (a tap still recenters); the spot is remembered per device. */
+export function Compass({ onPress, movable, className = '' }: { onPress(): void; movable?: boolean; className?: string }) {
+  const [pos, setPos] = useState<Pt | null>(() => {
+    if (!movable) return null;
+    try { return JSON.parse(localStorage.getItem(COMPASS_KEY) ?? 'null'); } catch { return null; }
+  });
+  const drag = useRef<{ off: Pt; start: Pt; moved: boolean; at: Pt | null } | null>(null);
+  const dragged = useRef(false);
+  // A saved spot from a bigger screen/orientation must still land on-screen.
+  const place = (p: Pt, size: number): Pt => ({ x: clampTo(p.x, 8, innerWidth - size - 8), y: clampTo(p.y, 8, innerHeight - size - 8) });
+  const handlers = movable ? {
+    onPointerDown(e: React.PointerEvent<HTMLButtonElement>) {
+      const r = e.currentTarget.getBoundingClientRect();
+      drag.current = { off: { x: e.clientX - r.left, y: e.clientY - r.top }, start: { x: e.clientX, y: e.clientY }, moved: false, at: null };
+      e.currentTarget.setPointerCapture(e.pointerId);
+    },
+    onPointerMove(e: React.PointerEvent<HTMLButtonElement>) {
+      const d = drag.current;
+      if (!d || (!d.moved && Math.hypot(e.clientX - d.start.x, e.clientY - d.start.y) < 6)) return;
+      d.moved = true;
+      d.at = place({ x: e.clientX - d.off.x, y: e.clientY - d.off.y }, e.currentTarget.offsetWidth);
+      setPos(d.at);
+    },
+    onPointerUp() {
+      const d = drag.current;
+      drag.current = null;
+      dragged.current = !!d?.moved;
+      if (d?.at) try { localStorage.setItem(COMPASS_KEY, JSON.stringify(d.at)); } catch { /* private mode: position just isn't kept */ }
+    },
+  } : {};
+  const at = pos && typeof window !== 'undefined' ? place(pos, 48) : null;
+  return (
+    <button className={`compass${movable ? ' movable' : ''} ${className}`} aria-label="Recenter map. North is up." title="Recenter map"
+      style={at ? { left: at.x, top: at.y, right: 'auto', bottom: 'auto' } : undefined}
+      onClick={() => { if (dragged.current) { dragged.current = false; return; } onPress(); }} {...handlers}>
+      <svg viewBox="0 0 48 48" aria-hidden="true">
+        <circle className="dial" cx="24" cy="24" r="21" />
+        {[90, 180, 270].map(a => <path key={a} className="tick" d="M24 5.5v3.5" transform={`rotate(${a} 24 24)`} />)}
+        {[45, 135, 225, 315].map(a => <path key={a} className="tick minor" d="M24 6v2" transform={`rotate(${a} 24 24)`} />)}
+        <text className="north" x="24" y="14.5" textAnchor="middle">N</text>
+        <path className="needle-n" d="M24 17l4.5 7h-9z" />
+        <path className="needle-s" d="M24 36l-4.5-12h9z" />
+        <circle className="hub" cx="24" cy="24" r="1.8" />
+      </svg>
+    </button>
   );
 }
 
@@ -42,7 +127,7 @@ export function SearchResults({ p }: { p: Planner }) {
           <div className="smart-head"><Logo size={15} stroke={3} /><span>transPEAKtation suggestions</span></div>
           {smart.map(s => (
             <button key={s.title} className="smart-card" onClick={() => p.go(s.dest, { note: s.note, leaveMin: s.leaveMin })}>
-              <span className="glyph">{s.glyph}</span>
+              <span className="glyph"><Icon name={s.glyph} size={18} /></span>
               <span className="stack grow">
                 <span className="smart-title">{s.title}</span>
                 <span className="smart-sub">{s.sub}</span>
@@ -66,11 +151,11 @@ export function WhereTo({ p, autoFocus, onFocus, children }: { p: Planner; autoF
   const top = p.search.results[0];
   return (
     <div className="where-to">
-      <i className="ring" />
+      <Icon name="search" size={18} className="lead" />
       <input aria-label="Where to?" placeholder="Where to?" value={p.search.q} autoFocus={autoFocus} enterKeyHint="go"
         onChange={e => { p.search.run(e.target.value); p.setScreen('search'); }} onFocus={onFocus}
         onKeyDown={e => { if (e.key === 'Enter' && top) p.go(top); }} />
-      {p.search.q && <button className="clear-btn" aria-label="Clear" title="Clear" onClick={() => p.search.run('')}>×</button>}
+      {p.search.q && <button className="clear-btn" aria-label="Clear" title="Clear" onClick={() => p.search.run('')}><Icon name="close" size={12} /></button>}
       {children}
     </div>
   );
@@ -89,7 +174,7 @@ export function Endpoints({ p, placeholders, onPicked }: { p: Planner; placehold
           <input aria-label="Destination" value={p.query.to} placeholder={placeholders[1]}
             onChange={e => p.onQuery('to', e.target.value)} onFocus={() => p.focusField('to')} onBlur={() => p.setActive(null)} />
         </div>
-        <button className="swap" title="Swap start and destination" aria-label="Swap start and destination" onClick={p.swap}>⇅</button>
+        <button className="swap" title="Swap start and destination" aria-label="Swap start and destination" onClick={p.swap}><Icon name="swap" /></button>
       </div>
 
       {p.showSuggest && (
@@ -98,7 +183,7 @@ export function Endpoints({ p, placeholders, onPicked }: { p: Planner; placehold
             // mousedown would blur the input (closing this list) before the click lands
             <button key={`${s.lat},${s.lon}`} role="option" aria-selected="false" onMouseDown={e => e.preventDefault()}
               onClick={() => { p.pick(p.active!, s); onPicked?.(); }}>
-              <i className="dot-sm" />
+              <Icon name="pin" size={16} className="lead" />
               <span className="stack"><span className="name">{s.label}</span><span className="sub">{s.sub}</span></span>
             </button>
           ))}
@@ -112,7 +197,7 @@ export function Endpoints({ p, placeholders, onPicked }: { p: Planner; placehold
 export function PlaceRow({ place, onPick, plain }: { place: Place; onPick(): void; plain?: boolean }) {
   return (
     <button className="place" onClick={onPick}>
-      <span className={`badge${plain ? ' plain' : ''}`}><i /></span>
+      <span className={`badge${plain ? ' plain' : ''}`}><Icon name={plain ? 'pin' : 'clock'} size={17} /></span>
       <span className="stack"><span className="name ellipsis">{place.label}</span><span className="sub ellipsis">{place.sub}</span></span>
     </button>
   );
@@ -128,7 +213,7 @@ export function RouteList({ p, action }: { p: Planner; action?: ReactNode }) {
     <>
       <section className="route-sec" aria-label="transPEAKtation route">
         <div className="smart-head"><Logo size={15} stroke={3} /><span>transPEAKtation</span></div>
-        <RouteCard route={p.routes[best]} card={p.card(best, true)} when={p.when} tag={tag} tone={tag === 'Clear' ? 'fast' : 'tp'}
+        <RouteCard route={p.routes[best]} card={p.card(best, true)} when={p.when} tag={tag} tone="tp"
           note={note} selected={p.choice.tp} onPick={() => p.setChoice({ i: best, tp: true })} as={as}>
           {p.choice.tp && action}
         </RouteCard>
@@ -162,7 +247,7 @@ export function WhenPicker({ p }: { p: Planner }) {
     <div className="when">
       <button className={`chip${p.when.mode !== 'now' ? ' on' : ''}`} aria-expanded={!!draft}
         onClick={() => setDraft(draft ? null : p.when)}>
-        <span aria-hidden="true">◷</span> {p.whenText} <span aria-hidden="true">▾</span>
+        <Icon name="clock" size={15} /> {p.whenText} <Icon name="chevron" size={14} />
       </button>
       {draft && (
         <div className="when-pop">
