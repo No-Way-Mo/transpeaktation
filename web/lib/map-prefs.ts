@@ -1,5 +1,6 @@
 // Map style + which map layers show: one set of choices, kept on this device only. The floating Map layers button
-// and Settings → Map & Routing both read and write this same state (lib/use-map-prefs.ts), so they can't disagree.
+// (all layers on / off in one tap) and Settings → Map & Routing (style, each layer) both read and write this same
+// state (lib/use-map-prefs.ts), so they can't disagree.
 // Plain TS (no DOM types needed) so `node --test` can run it directly.
 
 export type MapStyle = 'standard' | 'satellite';
@@ -53,6 +54,12 @@ export function toggleLayer(p: MapPrefs, id: string): MapPrefs {
   const key = LAYERS.find(l => l.id === id)?.key;
   return key ? { ...p, [key]: !p[key] } : p;
 }
+
+/** The map's layers button: pressed while any layer shows. */
+export const overlaysOn = (p: MapPrefs) => p.eventPins || p.traffic;
+
+/** One tap on the layers button: every working layer on, or every one off. The map style is left alone. */
+export const setOverlays = (p: MapPrefs, on: boolean): MapPrefs => ({ ...p, eventPins: on, traffic: on });
 
 /** A layer row's switch state: unavailable layers always read as off. */
 export const layerOn = (p: MapPrefs, l: Layer) => !!l.key && p[l.key];

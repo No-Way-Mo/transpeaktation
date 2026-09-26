@@ -398,10 +398,11 @@ input::placeholder { color: var(--muted); }
 .trip-note span { font-size: 13px; line-height: 1.4; color: var(--brand-text); text-wrap: pretty; }
 @media (hover: hover) { .smart-card:hover { border-color: var(--brand-strong); } }
 
-.where-to.fake { flex: none; height: 48px; padding: 0 14px; color: var(--muted); font-size: 17px; font-weight: 500; text-align: left; }
-.where-row { display: flex; align-items: center; gap: 8px; }
-.where-row .where-to.fake { flex: 1; min-width: 0; }
-.where-row .mic { width: 48px; height: 48px; border-radius: 12px; background: var(--fill); }
+/* Phone start row: one full-width search bar, the mic inside it on the right. */
+.where-row { display: flex; align-items: center; }
+.where-to.fake { flex: 1; min-width: 0; height: 48px; padding: 0 4px 0 0; gap: 0; }
+.where-open { flex: 1; min-width: 0; height: 100%; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 14px; color: var(--muted); font-size: 17px; font-weight: 500; text-align: left; }
+.where-to.fake .mic { width: 40px; height: 40px; border-radius: 10px; }
 
 /* Voice: tap-to-talk mic, used in the Where-to box, the start sheet, and next to swap. */
 .mic-wrap { position: relative; flex: none; display: flex; }
@@ -507,7 +508,7 @@ input::placeholder { color: var(--muted); }
 /* Menu bar: full width on top of the page; the app icon opens the menu. */
 .app-bar { position: relative; z-index: 20; flex: none; display: flex; align-items: center; gap: 8px; height: 56px; padding: 0 16px 0 12px; background: var(--panel); border-bottom: 1px solid var(--line); }
 .logo-btn { width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center; }
-.logo-btn[aria-expanded='true'], .layers-btn[aria-expanded='true'] { background: var(--action-tint); color: var(--action-text); }
+.logo-btn[aria-expanded='true'] { background: var(--action-tint); color: var(--action-text); }
 .wordmark { font-size: 19px; font-weight: 700; letter-spacing: -0.025em; }
 .mob-bar { position: absolute; top: 0; left: 0; right: 0; z-index: 35; height: var(--bar-bottom); padding-top: env(safe-area-inset-top); background: var(--sheet-bg); backdrop-filter: blur(20px) saturate(1.6); -webkit-backdrop-filter: blur(20px) saturate(1.6); box-shadow: var(--shadow-sm); border-bottom: none; }
 .mob-bar .logo-btn { width: 44px; height: 44px; }
@@ -521,25 +522,21 @@ input::placeholder { color: var(--muted); }
 .menu-item .lead { color: var(--action-text); }
 .menu-sep { height: 1px; margin: 6px; border: none; background: var(--line); }
 
-/* Map layers: top-right of the desktop map (clear of zoom, compass and attribution at the bottom); under the compass on a phone. */
+/* Map layers on / off: top-right of the desktop map (clear of zoom, compass and attribution at the bottom); under the
+   compass on a phone. On = action-blue layers icon; off = muted, crossed-out icon. */
 .layers-btn { position: relative; width: 36px; height: 36px; padding: 0; border-radius: 50%; background: var(--pop); box-shadow: var(--shadow-sm); color: var(--ink); display: flex; align-items: center; justify-content: center; }
 .layers-btn::before { content: ''; position: absolute; inset: -6px; border-radius: 50%; } /* 48px tap target around the small circle */
 .desk-layers { position: absolute; top: 16px; right: 20px; z-index: 6; } /* centred over the 44px zoom column below */
-.layers-pop { right: 0; width: 320px; max-height: calc(100dvh - 100px); overflow: auto; padding: 14px; }
 .mob-layers { position: absolute; right: 18px; top: calc(var(--bar-bottom) + 204px); z-index: 28; } /* centred under the 48px compass */
 .mob-layers.high { top: calc(var(--bar-bottom) + 66px); }
-.layers { display: flex; flex-direction: column; gap: 16px; }
-.pop-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.pop-title { font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
+.layers-btn[aria-pressed='true'] { color: var(--action-text); }
+.layers-btn[aria-pressed='false'] { color: var(--muted); }
 .layer-group { display: flex; flex-direction: column; }
 .eyebrow { margin: 0 0 8px; padding: 0 2px; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
-.layers .aip-switch { padding: 10px 12px; }
 
 /* Radios (theme, map style): native inputs, so the picked one reads by shape, not colour alone. */
 .choice { margin: 0; padding: 0; border: none; min-width: 0; }
 .choice input[type='radio'] { flex: none; width: 18px; height: 18px; margin: 0; accent-color: var(--action); }
-.style-choice { padding-top: 14px; border-top: 1px solid var(--line); }
-.set-stack .style-choice { padding-top: 0; border-top: none; }
 .style-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .style-opt { display: flex; flex-direction: column; gap: 8px; padding: 6px 6px 10px; border-radius: 12px; border: 1.5px solid var(--line); cursor: pointer; }
 .style-opt:has(input:checked) { border-color: var(--action-edge); background: var(--action-tint); }
@@ -557,13 +554,8 @@ input::placeholder { color: var(--muted); }
 .soon-row .lead { margin-top: 1px; }
 .soon-row .sub { line-height: 1.4; text-wrap: pretty; }
 
-/* Phone bottom sheets (menu, layers) and dialogs (Settings, the menu's pages): above everything, one at a time. */
+/* Dialogs (Settings, the menu's pages): above everything, one at a time. */
 .nav-backdrop { position: fixed; inset: 0; z-index: 90; background: rgba(8, 22, 34, 0.32); }
-.nav-sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 91; max-height: 85dvh; overflow: auto; overscroll-behavior: contain; display: flex; flex-direction: column; gap: 8px; padding: 0 16px calc(var(--safe-bottom) + 8px); border-radius: 16px 16px 0 0; background: var(--panel); box-shadow: var(--shadow); outline: none; }
-.nav-sheet .grabber { margin-bottom: 6px; }
-.nav-sheet .menu-item { min-height: 52px; font-size: 17px; }
-.nav-sheet .menu-brand { font-size: 15px; }
-.nav-sheet .aip-switch .name { font-size: 16px; }
 .dialog { position: fixed; top: 50%; left: 50%; z-index: 91; transform: translate(-50%, -50%); width: min(480px, calc(100vw - 48px)); max-height: min(720px, calc(100dvh - 48px)); display: flex; flex-direction: column; border-radius: 20px; background: var(--panel); box-shadow: var(--shadow); outline: none; }
 .dialog.big { width: min(820px, calc(100vw - 48px)); height: min(640px, calc(100dvh - 48px)); }
 .dialog.full { inset: 0; transform: none; width: auto; max-height: none; border-radius: 0; padding-top: env(safe-area-inset-top); }

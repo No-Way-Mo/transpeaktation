@@ -8,14 +8,12 @@ test('☰ opens and a second press closes it', () => {
   assert.deepEqual(toggle(a, 'menu'), CLOSED);
 });
 
-test('only one panel at a time: layers replaces the menu, settings replaces both', () => {
+test('only one panel at a time: a menu page or Settings replaces the menu', () => {
   const menu = toggle(CLOSED, 'menu');
-  const layers = toggle(menu, 'layers');
-  assert.equal(layers.panel, 'layers');
-  assert.equal(toggle(layers, 'menu').panel, 'menu');
   assert.equal(open('settings').panel, 'settings');
-  // from Settings, the layers button opens layers (Settings closes)
-  assert.equal(toggle(open('settings'), 'layers').panel, 'layers');
+  assert.equal(open('help').panel, 'help');
+  assert.equal(toggle(open('settings'), 'menu').panel, 'menu'); // the logo from Settings opens the menu instead
+  assert.equal(menu.section, null);
 });
 
 test('menu entries, in order, with the two dividers', () => {

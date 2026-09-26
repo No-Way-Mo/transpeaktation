@@ -106,7 +106,7 @@ export default function Mobile() {
       {p.screen !== 'search' && !nav && (
         <>
           <Compass movable onPress={() => map.current?.fit()} className={p.screen === 'start' ? 'high' : ''} />
-          <MapLayers n={n} sheet className={`mob-layers${p.screen === 'start' ? ' high' : ''}`} />
+          <MapLayers className={`mob-layers${p.screen === 'start' ? ' high' : ''}`} />
         </>
       )}
 
@@ -115,10 +115,12 @@ export default function Mobile() {
           <div className="sheet-handle" {...sheet.handle}>
             {grabber}
             <div className="where-row">
-              <button className="where-to fake" onClick={() => p.setScreen('search')}>
-                <Icon name="search" size={18} className="lead" /><span>Where to?</span>
-              </button>
-              <MicButton p={p} />
+              <div className="where-to fake">
+                <button className="where-open" onClick={() => p.setScreen('search')}>
+                  <Icon name="search" size={18} className="lead" /><span>Where to?</span>
+                </button>
+                <MicButton p={p} />
+              </div>
             </div>
           </div>
           <div className="sheet-body">

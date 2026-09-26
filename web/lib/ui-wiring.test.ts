@@ -25,6 +25,12 @@ test('menu bar on top of both layouts, the app icon opens the menu; layers butto
   assert.equal(count(mobile, /<NavDialogs /g), 1);
 });
 
+test('phone start row: one search bar with the mic inside it; layers button is a plain on/off toggle', () => {
+  assert.match(mobile, /<div className="where-to fake">[\s\S]{0,300}?<MicButton p=\{p\} \/>\s*<\/div>/);
+  assert.match(menu, /className="layers-btn" aria-label="Map layers" aria-pressed=\{on\}/);
+  assert.doesNotMatch(menu, /LayersBody|BottomSheet/);
+});
+
 test('theme is set only in Settings → Appearance (System / Light / Dark)', () => {
   const setters = [desktop, mobile, parts, menu, map].map(s => count(s, /setPref\(/g));
   assert.deepEqual(setters, [0, 0, 0, 1, 0]);

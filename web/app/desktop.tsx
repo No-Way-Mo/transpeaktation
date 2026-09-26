@@ -113,7 +113,7 @@ export default function Desktop() {
           <MapView ref={map} routes={p.routes} sel={p.sel} tp={p.choice.tp} labels={p.mapLabels} from={p.from} to={p.to} events={p.mapEvents} marker={marker}
             onSelect={p.setSel} pad={{ topLeft: [60, 60], bottomRight: [60, 60] }} />
           {prefs.eventPins && <EventLegend events={p.mapEvents} />}
-          <MapLayers n={n} className="desk-layers" />
+          <MapLayers className="desk-layers" />
           <div className="map-ctrls">
             <Compass onPress={() => map.current?.fit()} />
             <div className="zoom">

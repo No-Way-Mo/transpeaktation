@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_MAP_PREFS, LAYERS, layerOn, MAP_KEY, parseMapPrefs, readMapPrefs, toggleLayer, writeMapPrefs } from './map-prefs.ts';
+import { DEFAULT_MAP_PREFS, LAYERS, layerOn, MAP_KEY, overlaysOn, parseMapPrefs, readMapPrefs, setOverlays, toggleLayer, writeMapPrefs } from './map-prefs.ts';
 
 function store(init: Record<string, string> = {}) {
   const m = new Map(Object.entries(init));
@@ -35,6 +35,19 @@ test('Event Pins and Traffic toggle; a second toggle turns them back on', () => 
   p = toggleLayer(p, 'traffic');
   assert.equal(p.traffic, false);
   assert.deepEqual(toggleLayer(toggleLayer(p, 'eventPins'), 'traffic'), DEFAULT_MAP_PREFS);
+});
+
+test('map layers button: one tap hides every layer, the next shows them all; style untouched', () => {
+  const sat = { ...DEFAULT_MAP_PREFS, style: 'satellite' as const };
+  assert.equal(overlaysOn(sat), true);
+  const off = setOverlays(sat, !overlaysOn(sat));
+  assert.deepEqual(off, { style: 'satellite', eventPins: false, traffic: false });
+  assert.equal(overlaysOn(off), false);
+  assert.deepEqual(setOverlays(off, !overlaysOn(off)), sat);
+  // one layer switched off in Settings: the button still reads "on", and a tap turns both off
+  const mixed = toggleLayer(DEFAULT_MAP_PREFS, 'traffic');
+  assert.equal(overlaysOn(mixed), true);
+  assert.equal(overlaysOn(setOverlays(mixed, !overlaysOn(mixed))), false);
 });
 
 test('unavailable layers cannot be switched on and always read as off', () => {

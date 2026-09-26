@@ -1,9 +1,9 @@
 'use client';
 import { useSyncExternalStore } from 'react';
-import { DEFAULT_MAP_PREFS, MAP_KEY, readMapPrefs, toggleLayer, writeMapPrefs, type MapPrefs, type MapStyle } from './map-prefs.ts';
+import { DEFAULT_MAP_PREFS, MAP_KEY, readMapPrefs, setOverlays, toggleLayer, writeMapPrefs, type MapPrefs, type MapStyle } from './map-prefs.ts';
 
 // Same pattern as lib/use-privacy.ts: one copy in memory (so choices still work when storage is blocked), mirrored to
-// localStorage. The Map layers panel and Settings → Map & Routing both use this hook.
+// localStorage. The Map layers button and Settings → Map & Routing both use this hook.
 const storage = () => { try { return localStorage; } catch { return undefined; } };
 const listeners = new Set<() => void>();
 let current: MapPrefs | null = null;
@@ -30,5 +30,6 @@ export function useMapPrefs() {
     prefs,
     toggle: (id: string) => set(toggleLayer(get(), id)),
     setStyle: (style: MapStyle) => set({ ...get(), style }),
+    setOverlays: (on: boolean) => set(setOverlays(get(), on)),
   };
 }

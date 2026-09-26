@@ -2,15 +2,15 @@
 import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { CLOSED, MENU, open, PAGE_TITLES, SECTIONS, toggle, type Nav, type Page, type Panel, type Section } from '@/lib/nav.ts';
-import { LAYERS, layerOn, STYLES } from '@/lib/map-prefs.ts';
+import { LAYERS, layerOn, overlaysOn, STYLES } from '@/lib/map-prefs.ts';
 import type { ThemePref } from '@/lib/theme.ts';
 import type { useRoutePlanner } from '@/lib/use-route-planner.ts';
 import { useMapPrefs } from '@/lib/use-map-prefs.ts';
 import { useTheme } from '@/lib/use-theme.ts';
 import { AiPrivacy, Icon, Logo, Toggle, type IconName } from './parts.tsx';
 
-// ☰ menu, Map layers, Settings and the menu's pages. Shared by desktop (popovers + centred dialogs) and mobile (bottom
-// sheets + full-screen pages). Which one is open lives in lib/nav.ts: one at a time, Esc or a click outside closes it.
+// Logo menu, Map layers button, Settings and the menu's pages. Shared by desktop (centred dialogs) and mobile
+// (full-screen pages). Which one is open lives in lib/nav.ts: one at a time, Esc or a click outside closes it.
 
 type Planner = ReturnType<typeof useRoutePlanner>;
 export type NavApi = ReturnType<typeof useNav>;
@@ -28,7 +28,7 @@ export function useNav(wide: boolean) {
   return {
     nav,
     open: (panel: Panel, section?: Section) => setNav(open(panel, section, wide)),
-    toggle: (panel: 'menu' | 'layers') => setNav(n => toggle(n, panel)),
+    toggle: (panel: 'menu') => setNav(n => toggle(n, panel)),
     section: (section: Section | null) => setNav(n => ({ ...n, section })),
     close: () => setNav(CLOSED),
   };
@@ -45,7 +45,7 @@ function useFocusReturn() {
   }, []);
 }
 
-/** Desktop popover: a press anywhere outside `wrap` (the button + popover) closes it. */
+/** Menu popover: a press anywhere outside `wrap` (the button + popover) closes it. */
 function useOutside(wrap: RefObject<HTMLElement | null>, onClose: () => void, on: boolean) {
   const close = useRef(onClose);
   close.current = onClose;
@@ -65,25 +65,6 @@ function trapTab(e: React.KeyboardEvent<HTMLElement>) {
   const first = all[0], last = all[all.length - 1];
   if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
   else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
-}
-
-const stop = (e: React.SyntheticEvent) => e.stopPropagation();
-
-/** Phone bottom sheet with a dimmed backdrop (tap it to close). Portalled: the start sheet's blur would trap `fixed`. */
-function BottomSheet({ label, onClose, children }: { label: string; onClose(): void; children: ReactNode }) {
-  const box = useRef<HTMLDivElement>(null);
-  useFocusReturn();
-  useEffect(() => box.current?.focus({ preventScroll: true }), []);
-  return createPortal(
-    <>
-      <div className="nav-backdrop" onPointerDown={stop} onClick={e => { stop(e); onClose(); }} />
-      {/* Portal events still bubble up the React tree: keep them away from the start sheet's drag handle. */}
-      <div className="nav-sheet" role="dialog" aria-modal="true" aria-label={label} ref={box} tabIndex={-1} onKeyDown={trapTab}
-        onPointerDown={stop} onPointerMove={stop} onPointerUp={stop} onClick={stop}>
-        <div className="grabber static" />
-        {children}
-      </div>
-    </>, document.body);
 }
 
 // ---------- ☰ main menu ----------
@@ -127,41 +108,17 @@ function MenuList({ n }: { n: NavApi }) {
 
 // ---------- map layers ----------
 
-/** Floating layers button on the map's right edge + its panel (popover on desktop, bottom sheet on a phone). */
-export function MapLayers({ n, sheet, className = '' }: { n: NavApi; sheet?: boolean; className?: string }) {
-  const wrap = useRef<HTMLDivElement>(null);
-  const on = n.nav.panel === 'layers';
-  useOutside(wrap, n.close, on && !sheet);
-  const body = <LayersBody onClose={n.close} />;
+/** Floating layers button on the map's right edge: one tap shows or hides the map's layers (event pins + route
+ *  traffic). The map style and each layer on its own are in Settings → Map & Routing. */
+export function MapLayers({ className = '' }: { className?: string }) {
+  const { prefs, setOverlays } = useMapPrefs();
+  const on = overlaysOn(prefs);
   return (
-    <div className={`nav-wrap layers-wrap ${className}`} ref={wrap}>
-      <button className="layers-btn" aria-label="Map layers" title="Map layers" aria-expanded={on} aria-haspopup="dialog" onClick={() => n.toggle('layers')}>
-        <Icon name="layers" size={18} />
+    <div className={`layers-wrap ${className}`}>
+      <button className="layers-btn" aria-label="Map layers" aria-pressed={on} title={on ? 'Hide map layers' : 'Show map layers'}
+        onClick={() => setOverlays(!on)}>
+        <Icon name={on ? 'layers' : 'layersOff'} size={18} />
       </button>
-      {on && (sheet ? <BottomSheet label="Map layers" onClose={n.close}>{body}</BottomSheet> : <Popover label="Map layers" className="layers-pop">{body}</Popover>)}
-    </div>
-  );
-}
-
-function LayersBody({ onClose }: { onClose(): void }) {
-  const { prefs, toggle, setStyle } = useMapPrefs();
-  const groups = [...new Set(LAYERS.map(l => l.group))];
-  return (
-    <div className="layers">
-      <div className="pop-head"><span className="pop-title">Map layers</span>
-        <button className="close-btn" aria-label="Close map layers" onClick={onClose}><Icon name="close" size={14} /></button>
-      </div>
-      {groups.map(g => (
-        <section key={g} className="layer-group" aria-label={g}>
-          <h3 className="eyebrow">{g}</h3>
-          <div className="aip-switches">
-            {LAYERS.filter(l => l.group === g).map(l => (
-              <Toggle key={l.id} label={l.label} detail={l.detail} on={layerOn(prefs, l)} status={l.status} onChange={() => toggle(l.id)} />
-            ))}
-          </div>
-        </section>
-      ))}
-      <StylePicker value={prefs.style} onChange={setStyle} legend="Map style" />
     </div>
   );
 }
@@ -170,7 +127,7 @@ function LayersBody({ onClose }: { onClose(): void }) {
 function StylePicker({ value, onChange, legend }: { value: string; onChange(v: 'standard' | 'satellite'): void; legend: string }) {
   const name = useId();
   return (
-    <fieldset className="choice style-choice">
+    <fieldset className="choice">
       <legend className="eyebrow">{legend}</legend>
       <div className="style-opts">
         {STYLES.map(s => (
@@ -299,7 +256,7 @@ function MapDefaults() {
           {LAYERS.filter(l => l.key).map(l => <Toggle key={l.id} label={l.label} detail={l.detail} on={layerOn(prefs, l)} onChange={() => toggle(l.id)} />)}
         </div>
       </section>
-      <p className="sub set-foot">These are the same switches as the Map layers button on the map, remembered in this browser.
+      <p className="sub set-foot">The layers button on the map turns these on or off together. Remembered in this browser.
  Event Activity and Road Disruptions aren’t available yet.</p>
     </div>
   );
@@ -351,8 +308,8 @@ const PAGES: Record<Page, ReactNode> = {
       <p>Pins show events during your trip, coloured by kind. Tap one for its venue, time and estimated crowd. The dashed
         ring around it is an estimated area where traffic may slow. Route cards say when an event or closure adds time.</p>
       <h3>Map layers</h3>
-      <p>The layers button on the map turns event pins and route traffic colours on or off and switches between the
-        standard and satellite map. Settings → Map &amp; Routing holds the same choices.</p>
+      <p>One tap on the layers button on the map hides or shows event pins and route traffic colours. Settings → Map
+        &amp; Routing switches each one on its own and picks the standard or satellite map.</p>
       <h3>Feedback</h3>
       <p>There’s no feedback form in the app yet.</p>
     </>
