@@ -276,7 +276,7 @@ export function WhenPicker({ p }: { p: Planner }) {
           </div>
           {draft.mode !== 'now' && (
             <input type="datetime-local" aria-label={draft.mode === 'depart' ? 'Leave at' : 'Arrive by'} step={300}
-              value={ptInput(draft.at)} min={REPLAY ? undefined : ptInput(Date.now())} max={ptInput(Date.now() + 7 * 864e5)}
+              value={ptInput(draft.at)} min={REPLAY ? undefined : ptInput(Date.now())} max={ptInput(Date.now() + 30 * 864e5)}
               onChange={e => { const at = fromPtInput(e.target.value); if (at) setDraft({ ...draft, at }); }} />
           )}
           <div className="when-foot">

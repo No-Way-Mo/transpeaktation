@@ -28,6 +28,9 @@ DEFAULT_LENGTH = {"sports": timedelta(hours=3), "concert": timedelta(hours=3)}
 CLOSURE_PENALTY_S = 20 * 60    # a road closed when you get there: effectively blocked, rank it last
 INCIDENT_DELAY_S = 90          # crash / hazard / lane closure active when you pass
 INCIDENT_CAP_S = 5 * 60
+# ponytail: fixed clearance guess for incidents with no end time (crashes, dispatch calls), the same 3 h as
+# contracts/map_context.schema.json's point-event rule; ingest closing them when they leave their feed would be exact.
+OPEN_ENDED = timedelta(hours=3)
 NOT_A_DELAY = {"street_use_permit", "excavation"}  # permits narrow curbs/lanes; not counted as delay
 LIVE_WINDOW = timedelta(minutes=30)  # observed traffic only says something about trips starting soon
 DESTINATION_M = 400  # a route ending this close to a venue is a trip to that event
@@ -110,6 +113,8 @@ def segment_arrivals(segment_ids: list[str], lengths: list[float] | None, depart
 
 def _active(inc: dict, t: datetime) -> bool:
     s, e = inc.get("start_time"), inc.get("end_time")
+    if e is None and s is not None:
+        e = s + OPEN_ENDED
     return (s is None or s <= t) and (e is None or t <= e)
 
 

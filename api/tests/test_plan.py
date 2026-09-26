@@ -94,6 +94,27 @@ class RoadData(unittest.TestCase):
         self.assertEqual(p["breakdown"]["incidents_sec"], model.CLOSURE_PENALTY_S)  # blocked once, not per closure
         self.assertEqual([i["label"] for i in p["incidents"]], ["Road closure on NIBBI BROS", "Road closure on Parade"])
 
+    def test_incident_without_end_time_clears_after_a_few_hours(self):
+        crash = {"source": "chp_incidents", "category": "collision", "is_closure": False, "road_segment_ids": ["3-4-0"],
+                 "start_time": at(9), "end_time": None, "details": {"call_type": "Crash"}}
+        ctx = {**CTX, "events": [], "incidents": [crash]}
+        self.assertEqual(model.predict_route(PAST, at(10), ctx, now=at(9))["breakdown"]["incidents_sec"], 90)
+        self.assertEqual(model.predict_route(PAST, at(13), ctx, now=at(9))["breakdown"]["incidents_sec"], 0)  # not forever
+
+    def test_store_asks_only_for_recent_open_ended_incidents(self):
+        s, seen = store_mod.Store(), []
+        s._mongo_call = lambda fn: seen.append(fn) or []
+        s.incidents_on(["1-2-0"], at(18), at(19))
+
+        class DB:
+            class road_incidents:
+                @staticmethod
+                def find(q, proj):
+                    DB.q = q
+                    return type("C", (), {"limit": lambda self, n: []})()
+        seen[0](DB)
+        self.assertIn({"end_time": None, "start_time": {"$gte": at(18) - model.OPEN_ENDED}}, DB.q["$and"][1]["$or"])
+
     def test_permits_are_ignored_and_minor_incidents_are_capped(self):
         sids = PAST["road_segment_ids"]
         permit = {"category": "excavation", "is_closure": False, "road_segment_ids": sids, "start_time": None, "end_time": None}
@@ -155,11 +176,14 @@ class Events(unittest.TestCase):
 class TrafficByTime(unittest.TestCase):
     def test_typical_buckets_step_back_whole_weeks_in_sf_time(self):
         t = datetime(2026, 11, 5, 18, 7, tzinfo=SF)  # PST; 1 and 2 weeks back straddle the Nov 1 DST change
-        b = store_mod.typical_buckets(t)
+        b = store_mod.typical_buckets(t, t)
         self.assertEqual(len(b), store_mod.TYPICAL_WEEKS)
         self.assertEqual([x.astimezone(SF).strftime("%m-%d %a %H:%M") for x in b[:2]],
                          ["10-29 Thu 18:00", "10-22 Thu 18:00"])
         self.assertTrue(all(x.tzinfo == timezone.utc for x in b))
+        now = datetime(2026, 9, 26, 12, tzinfo=SF)  # a trip on Thu Oct 22: its last 4 Thursdays before *now*
+        self.assertEqual([x.astimezone(SF).strftime("%m-%d %H:%M") for x in store_mod.typical_buckets(datetime(2026, 10, 22, 8, 30, tzinfo=SF), now)],
+                         ["09-24 08:30", "09-17 08:30", "09-10 08:30", "09-03 08:30"])
 
     def test_live_observed_or_typical_by_trip_time(self):
         s, calls = store_mod.Store(), []
@@ -258,6 +282,17 @@ class PlanEndpoint(unittest.TestCase):
         self.assertEqual(body["plan"]["tag"], "Closure ahead")  # the fake routes share segment IDs, so both are closed
         self.assertTrue(all(p["blocked"] for p in body["plan"]["preds"]))
         self.assertEqual([e["title"] for e in body["events"]], ["Big Game"])
+
+    def test_up_to_30_days_ahead_mapbox_gets_the_same_slot_this_week(self):
+        depart = (datetime.now(SF) + timedelta(days=24)).replace(hour=18, minute=0, second=0, microsecond=0)
+        store = FakeStore()
+        body = self.plan(store, depart).json()
+        self.assertEqual(datetime.fromisoformat(body["data"]["at"]), depart)  # the databases are asked about that day
+        mapbox_at = datetime.strptime(self.find.call_args.args[3], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        self.assertEqual(mapbox_at.astimezone(SF).strftime("%a %H:%M"), depart.strftime("%a %H:%M"))
+        self.assertLessEqual(mapbox_at, datetime.now(timezone.utc) + main.MAPBOX_AHEAD)
+        self.assertEqual(store.traffic_asked[0], depart)
+        self.assertEqual(self.plan(FakeStore(), depart + timedelta(days=7)).status_code, 400)  # 31 days: too far
 
     def test_events_endpoint_falls_back_to_demo(self):
         with mock.patch.object(main, "store", FakeStore()):
