@@ -75,6 +75,8 @@ export type Prediction = {
   incidents: { label: string; is_closure: boolean; source: string; at: string; until: string | null }[];
   traffic: { delay_sec: number; slow_segments: number; coverage: number; as_of: string | null; sources: string[] };
   model: string; blocked: boolean;
+  /** api/'s own event/closure estimate for this route; shown on the normal cards, never on transPEAKtation's. */
+  estimate?: { dur: number; delay: number; why: string[] };
 };
 /** transPEAKtation's pick across the candidate routes, with the explanation and a better departure time if any. */
 export type TransPeak = {
@@ -247,6 +249,16 @@ export function trafficRuns(r: Route): { level: Slow; coords: LatLng[] }[] {
 }
 
 /** Tag for a route card: the first (fastest) route vs. how much slower each alternative is. */
+/** A normal route's card when api/'s estimate says it will take a minute or more longer than the provider's ETA:
+ *  the tag and a line saying why. null = nothing to warn about. */
+export function longerThanItLooks(route: Route, pred: Prediction | undefined): { tag: string; note: string } | null {
+  const est = pred?.estimate;
+  if (pred?.blocked) return { tag: 'Closure ahead', note: `Crosses ${est?.why.join(' and ') || 'a closure'} when you'd get there.` };
+  if (!est || est.delay < 60) return null;
+  return { tag: `+${mins(est.delay)} min events`,
+    note: `Mapbox says ${mins(route.dur)} min; ${est.why.join(' and ') || 'traffic'} may add ~${mins(est.delay)} min.` };
+}
+
 export function routeTag(i: number, dur: number, fastest: number): string {
   if (i === 0) return 'Fastest';
   const diff = Math.round((dur - fastest) / 60);

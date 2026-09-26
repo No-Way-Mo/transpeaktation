@@ -1,6 +1,6 @@
 'use client';
 import { useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { fmtDist, fmtWhen, fromPtInput, mins, ptInput, RECENT, REPLAY, routeTag, stepIcon, type Place, type Route, type Step, type When } from '@/lib/route.ts';
+import { fmtDist, fmtWhen, fromPtInput, longerThanItLooks, mins, ptInput, RECENT, REPLAY, routeTag, stepIcon, type Place, type Route, type Step, type When } from '@/lib/route.ts';
 import { smartSuggestions } from '@/lib/suggest.ts';
 import type { Card, useRoutePlanner } from '@/lib/use-route-planner.ts';
 import { useTheme } from '@/lib/use-theme.ts';
@@ -247,7 +247,7 @@ export function RouteList({ p, action }: { p: Planner; action?: ReactNode }) {
       <section className="route-sec" aria-label="transPEAKtation route">
         <div className="smart-head"><Logo size={15} stroke={3} /><span>transPEAKtation</span></div>
         <RouteCard route={p.routes[best]} card={p.card(best, true)} when={p.when} tag={tag} tone="tp"
-          note={note} context={p.tpContext ?? undefined} selected={p.choice.tp} onPick={() => p.setChoice({ i: best, tp: true })} as={as}>
+          note={note} selected={p.choice.tp} onPick={() => p.setChoice({ i: best, tp: true })} as={as}>
           {p.choice.tp && action}
         </RouteCard>
         {advice && <button className="pill-btn advice" onClick={p.applyAdvice}>{`Leave at ${fmtWhen(Date.parse(advice.depart_at))}`}</button>}
@@ -256,9 +256,10 @@ export function RouteList({ p, action }: { p: Planner; action?: ReactNode }) {
         <div className="label">Normal</div>
         {p.routes.map((rt, i) => {
           if (rt.by === 'ml') return null; // ml/'s own route only appears as the transPEAKtation pick
-          const t = routeTag(i, rt.dur, fastest), on = !p.choice.tp && p.choice.i === i;
+          const longer = longerThanItLooks(rt, p.tp?.preds[i]), on = !p.choice.tp && p.choice.i === i;
           return (
-            <RouteCard key={i} route={rt} card={p.card(i, false)} when={p.when} tag={t} tone={i === 0 ? 'fast' : ''}
+            <RouteCard key={i} route={rt} card={p.card(i, false)} when={p.when} tag={longer?.tag ?? routeTag(i, rt.dur, fastest)}
+              tone={i === 0 && !longer ? 'fast' : ''} note={longer?.note}
               selected={on} onPick={() => p.setChoice({ i, tp: false })} as={as}>
               {on && action}
             </RouteCard>
@@ -305,9 +306,8 @@ export function WhenPicker({ p }: { p: Planner }) {
   );
 }
 
-export function RouteCard({ route, card, when, tag, tone, note, context, selected, onPick, as = 'button', children }: {
+export function RouteCard({ route, card, when, tag, tone, note, selected, onPick, as = 'button', children }: {
   route: Route; card: Card; when: When; tag: string; tone: 'fast' | 'tp' | ''; note?: string;
-  context?: string;  // ingested events near / closures on this route (context.ts), when there are any
   selected: boolean; onPick(): void; as?: 'button' | 'div'; children?: ReactNode;
 }) {
   const Tag = as;
@@ -326,7 +326,6 @@ export function RouteCard({ route, card, when, tag, tone, note, context, selecte
         <span className="arrive"><span className="sub">{label}</span><b>{fmtWhen(time)}</b></span>
       </span>
       {note && <span className="route-note">{note}</span>}
-      {context && <span className="route-note">{context}</span>}
       {children}
     </Tag>
   );

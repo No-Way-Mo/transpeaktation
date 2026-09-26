@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  contextLine, contextNote, contextTag, DEFAULT_EVENT_MIN, eventWindow, conditionWindow, fetchEvents, fmtCategory, fmtEventTime, NO_EVENTS,
+  contextNote, contextTag, DEFAULT_EVENT_MIN, eventWindow, conditionWindow, fetchEvents, fmtCategory, fmtEventTime, NO_EVENTS,
   routeContext, tripSpan, validCoord, type ContextData, type MapEvent, type RoadCondition,
 } from './context.ts';
 import { fromPtInput, type LatLng, type Route } from './route.ts';
@@ -149,15 +149,6 @@ test('contextNote: facts only, and never blocks on a failed feed', () => {
   assert.equal(contextNote({ events: [], conditions: [] }, { events: null, conditions: null, loading: false }), "Couldn't check events on your way right now.");
   assert.equal(contextNote({ events: [], conditions: [cond('x', 0, 0)] }, { ...ready, events: null }),
     "Couldn't check events on your way right now. 1 road closure on your route (Hubbell St).");
-});
-
-test('contextLine: only when the route has events or conditions; silent while loading or when clear', () => {
-  assert.equal(contextLine({ events: [], conditions: [] }, ready), null);
-  assert.equal(contextLine(null, ready), null);
-  assert.equal(contextLine({ events: [ev('a', 0, 0)], conditions: [] }, { ...ready, loading: true }), null);
-  const withEvent = { events: [ev('a', 0, 0, { name: 'Portola Music Festival' })], conditions: [] };
-  assert.equal(contextLine(withEvent, ready), contextNote(withEvent, ready));
-  assert.match(contextLine({ events: [], conditions: [cond('x', 0, 0)] }, ready)!, /1 road closure on your route/);
 });
 
 test('contextTag', () => {

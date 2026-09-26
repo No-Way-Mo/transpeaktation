@@ -24,12 +24,11 @@ PROMPT = (
     "You write the explanation on a San Francisco trip-planning card for the recommended route. Use only the facts "
     "in the JSON: never add numbers, streets, events or times that aren't there, and write every number as digits "
     "(\"8 min\", not \"eight minutes\"). One or two short sentences, at most 40 words, plain text, no greeting, no "
-    "emoji. The events and closures listed under recommended_route are ON that route and slow it down by "
-    "delay_minutes; never say the route avoids them. The route avoids only what fastest_normal_route has and it "
-    "doesn't. If crosses_a_closure is true, say first that the route crosses a road closure. Otherwise lead with "
-    "what matters most: minutes saved and what is avoided, or what slows this trip; then "
-    "better_departure if given. Multi-day events or closures don't clear by leaving earlier or later: don't suggest "
-    "that unless better_departure says so. If nothing affects the trip, say so plainly.")
+    "emoji. The events and closures listed under recommended_route are ON that route: never say it avoids them, "
+    "and never say how many minutes they add (no such number is given). The route avoids only what "
+    "fastest_normal_route has and it doesn't. If crosses_a_closure is true, say first that the route crosses a road "
+    "closure. Otherwise lead with minutes saved and what is avoided, or what is on the way. Don't give departure "
+    "advice. slow_stretches are traffic, not events: with no events or closures, say there are none on the way.")
 # Spelled-out numbers would slip past check()'s digit test ("one" is left out: "one slow stretch" is fine).
 NUMBER_WORDS = re.compile(r"\b(two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|"
                           r"sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|hundred)\b", re.I)
@@ -51,27 +50,23 @@ def _route(r: dict, p: dict, events: dict[str, dict]) -> dict:
         span = f"{_when(ev['start'])} to {_when(ev['end'])}" if ev.get("start") and ev.get("end") else None
         return {"name": h["label"], "when": span}
     return {"via": r.get("summary") or None, "minutes": mins(p["dur"]),
-            "delay_minutes": mins(p["delay"]) if p["delay"] >= 30 else 0,
-            "events_slowing_it": [event(h) for h in p["event_hits"]],
+            "events_on_it": [event(h) for h in p["event_hits"]],
             "closures_and_incidents_on_it": [i["label"] for i in p["incidents"]],
             "crosses_a_closure": p["blocked"],
             "slow_stretches": p["traffic"]["slow_segments"] if p["traffic"]["coverage"] else 0}
 
 
 def facts(routes: list[dict], departs: list[datetime], mode: str, ctx: dict, result: dict) -> dict:
-    """What the card can say, from model.plan's result: the pick, the fastest normal route, better departure."""
+    """What the card can say, from model.plan's result: the pick (ml/'s, or the fastest) and the fastest normal route."""
     best, preds = result["best"], result["preds"]
     events = {e["id"]: e for e in ctx.get("events") or []}
     saved = preds[0]["dur"] - preds[best]["dur"]
-    adv = result.get("advice")
     return {
         "trip": {"mode": {"now": "leave now", "depart": "leave at", "arrive": "arrive by"}[mode],
                  "leave_at": _when(departs[best]), "traffic_data": TRAFFIC.get(ctx.get("traffic_kind"), "live traffic now")},
         "recommended_route": _route(routes[best], preds[best], events),
         "fastest_normal_route": _route(routes[0], preds[0], events) if best else None,
         "minutes_saved_vs_fastest_normal_route": mins(saved) if saved >= 60 else 0,
-        "better_departure": {"leave_at": fmt_clock(datetime.fromisoformat(adv["depart_at"])),
-                             "minutes_saved": mins(adv["saves_sec"])} if adv else None,
     }
 
 

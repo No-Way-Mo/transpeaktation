@@ -33,7 +33,6 @@ INCIDENT_CAP_S = 5 * 60
 OPEN_ENDED = timedelta(hours=3)
 NOT_A_DELAY = {"street_use_permit", "excavation"}  # permits narrow curbs/lanes; not counted as delay
 LIVE_WINDOW = timedelta(minutes=30)  # observed traffic only says something about trips starting soon
-DESTINATION_M = 400  # a route ending this close to a venue is a trip to that event
 MPH = 0.44704  # m/s
 
 
@@ -229,65 +228,38 @@ def mins(s: float) -> int:
     return max(1, round(s / 60))
 
 
-def departure_advice(route: dict, depart: datetime, mode: str, ctx: dict, *, now: datetime, current: float) -> dict | None:
-    """A better departure for the picked route, if moving it by up to 90 min saves 5+ minutes."""
-    if mode == "arrive":
-        return None
-    # Heading to an event? Only suggest times that still get you there before it starts.
-    going_to = [e["start"] for e in ctx.get("events") or []
-                if meters(route["coords"][-1], (e["lat"], e["lon"])) <= DESTINATION_M and e["start"] > depart]
-    latest_arrival = min(going_to) if going_to else None
-    best_t, best_dur = None, current
-    for off in range(-45, 91, 15):
-        t = depart + timedelta(minutes=off)
-        if off == 0 or t < now - timedelta(minutes=1):
-            continue
-        d = predict_route(route, t, ctx, now=now)["dur"]
-        if latest_arrival and t + timedelta(seconds=d) > latest_arrival:
-            continue
-        if d < best_dur - 1:
-            best_t, best_dur = t, d
-    if best_t is None or current - best_dur < 300:
-        return None
-    saves = current - best_dur
-    return {"depart_at": best_t.isoformat(), "saves_sec": round(saves),
-            "text": f"Leaving at {fmt_clock(best_t)} saves ~{mins(saves)} min."}
-
-
 def plan(routes: list[dict], departs: list[datetime], mode: str, ctx: dict, *, now: datetime,
          ml: dict | None = None) -> dict:
-    """transPEAKtation's pick: lowest predicted time. Same shape as web's former client-side transPeakPick.
-    ml: ml/'s decision (app/ml.py: best, dur, model, reasons) replaces that pick, its time and the explanation."""
-    preds = [predict_route(r, d, ctx, now=now) for r, d in zip(routes, departs)]
+    """The transPEAKtation card. Its route and time are ml/'s decision (app/ml.py: best, dur, model, reasons);
+    without one, the provider's fastest route and ETA, unchanged: api/ doesn't re-pick or re-time routes.
+    preds carry what is on each route (events, closures, stored traffic) for the explanation, and api/'s own
+    event-impact `estimate`, which web shows on the normal routes ("longer than it looks") and ml/ gets as
+    `heuristic` (main.py); it never changes the transPEAKtation pick or time."""
+    preds = [{**x, "dur": r["dur"], "delay": 0, "model": "provider ETA",
+              "estimate": {"dur": x["dur"], "delay": x["delay"], "why": x["events"] + [i["label"] for i in x["incidents"]]}}
+             for r, x in zip(routes, (predict_route(r, d, ctx, now=now) for r, d in zip(routes, departs)))]
+    best = ml["best"] if ml else 0
     if ml:
-        best = ml["best"]
         preds[best] = {**preds[best], "dur": ml["dur"], "delay": round(ml["dur"] - routes[best]["dur"]),
                        "model": f"ml:{ml['model']}"}
-    else:
-        best = min(range(len(preds)), key=lambda i: preds[i]["dur"])
     p, first = preds[best], preds[0]
-    saved, extra = first["dur"] - p["dur"], p["delay"]
-    why_first = first["events"] + [i["label"] for i in first["incidents"]]
-    why_best = p["events"] + [i["label"] for i in p["incidents"]]
-    advice = departure_advice(routes[best], departs[best], mode, ctx, now=now, current=p["dur"])
-    if all(x["blocked"] for x in preds):
-        tag, note = "Closure ahead", f"Every route crosses a closure when you'd get there: {', '.join(why_best)}."
+    saved = first["dur"] - p["dur"]
+    on_best = p["events"] + [i["label"] for i in p["incidents"]]
+    if p["blocked"]:
+        tag, note = "Closure ahead", f"Crosses a closure when you'd get there: {', '.join(on_best)}."
     elif saved >= 60:
-        tag, note = f"Saves ~{mins(saved)} min", f"Skips {' and '.join(why_first) or 'slower traffic'} on the fastest route."
-    elif extra >= 30:
-        tag, note = f"+{mins(extra)} min events", f"Includes ~{mins(extra)} min for {' and '.join(why_best) or 'traffic'}."
-        if not advice:
-            note += " Leaving earlier or later helps."
+        skipped = [x for x in first["events"] + [i["label"] for i in first["incidents"]] if x not in on_best]
+        tag, note = f"Saves ~{mins(saved)} min", f"Skips {' and '.join(skipped) or 'slower traffic'} on the fastest route."
+    elif on_best:
+        tag, note = "Events on the way", f"On your way: {' and '.join(on_best)}."
     else:
-        tag, note = "Clear", "No delays expected from events or closures at this time."
+        tag, note = "Clear", "No events or closures on your way at this time."
     if ml and ml.get("reasons"):
         note = " ".join(ml["reasons"])
-    if advice:
-        note += f" {advice['text']}"
     if p["traffic"]["coverage"] and p["traffic"]["slow_segments"]:
         label = {"observed": "Traffic then", "typical": "Usual traffic then"}.get(ctx.get("traffic_kind"), "Live traffic")
         note += f" {label}: {p['traffic']['slow_segments']} slow stretch{'es' if p['traffic']['slow_segments'] > 1 else ''} on this route."
-    return {"best": best, "preds": preds, "tag": tag, "note": note, "advice": advice}
+    return {"best": best, "preds": preds, "tag": tag, "note": note, "advice": None}
 
 
 # --- events: database docs, demo fallback, web view ----------------------------------------------------------

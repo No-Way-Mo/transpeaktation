@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { fetchEvents, fetchPlan, fmtWhen, mins, ORIGIN, REPLAY, searchPlaces, spokenTime, voiceNote,
   type EventInfo, type Plan, type Place, type Route, type TransPeak, type VoiceIntent, type When } from './route.ts';
 // Ingested events (windowed /events) + /road-conditions: map pins and the route card's context line.
-import { conditionWindow, contextLine, eventWindow, fetchEvents as fetchWindowEvents, fetchRoadConditions, routeContext,
+import { conditionWindow, eventWindow, fetchEvents as fetchWindowEvents, fetchRoadConditions, routeContext,
   type ContextData, type Span } from './context.ts';
 
 type Field = 'from' | 'to';
@@ -171,7 +171,8 @@ export function useRoutePlanner() {
   // Each route is judged over its own leave → arrive, not the union used for fetching.
   const ctxFor = (r: Route | undefined) => r ? routeContext(r, context.events ?? [], context.conditions ?? [], spanFor(r.dur)) : null;
   const card = (i: number, isTp: boolean): Card => {
-    const dur = isTp && tp ? tp.preds[i].dur : routes[i].dur, leave = leaveFor(dur);
+    // Normal cards: api/'s estimate (provider ETA + events/closures) when there is one; transPEAKtation: its own.
+    const dur = isTp && tp ? tp.preds[i].dur : tp?.preds[i]?.estimate?.dur ?? routes[i].dur, leave = leaveFor(dur);
     return { i, tp: isTp, dur, leave, arrive: leave + dur * 1000 };
   };
   const sel = choice.tp && tp ? tp.best : choice.i;
@@ -199,8 +200,6 @@ export function useRoutePlanner() {
     mapEvents: context.events ?? [],
     /** Events near / conditions on the selected route (null = no route yet). */
     selectedContext: ctxFor(routes[sel]),
-    /** Extra line on the transPEAKtation card: ingested events near / closures on the route it shows, if any. */
-    tpContext: tp && routes[tp.best] ? contextLine(ctxFor(routes[tp.best]), context) : null,
     whenText: when.mode === 'now' ? 'Leave now' : `${when.mode === 'depart' ? 'Leave' : 'Arrive by'} ${fmtWhen(when.at)}`,
     /** "12 min" per route on the map, in whichever estimate (normal / transPEAKtation) is selected. */
     mapLabels: routes.map((_, i) => `${mins(card(i, choice.tp).dur)} min`),
