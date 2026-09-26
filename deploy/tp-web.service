@@ -1,0 +1,15 @@
+[Unit]
+Description=transPEAKtation web
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=tp
+WorkingDirectory=/opt/transpeaktation/web
+Environment=NODE_ENV=production
+ExecStart=/opt/transpeaktation/web/node_modules/.bin/next start -H 127.0.0.1 -p 3000
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
