@@ -1,27 +1,52 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { fetchRoutes, ORIGIN, searchPlaces, type Place, type Route } from './route.ts';
+import { fetchRoutes, fmtTime, ORIGIN, searchPlaces, type Place, type Route } from './route.ts';
 
 type Field = 'from' | 'to';
+export type Screen = 'start' | 'search' | 'route';
+type Trip = { note: string; leaveMin: number }; // set when the trip came from a transPEAKtation suggestion
 
-/** From/to search, suggestions, and route alternatives. Layout-agnostic: desktop and mobile both use it. */
+/** Debounced place search. The latest text wins; slower, older responses are dropped. */
+function usePlaceSearch() {
+  const [q, setQ] = useState('');
+  const [results, setResults] = useState<Place[]>([]);
+  const [searching, setSearching] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const latest = useRef('');
+  useEffect(() => () => clearTimeout(timer.current), []);
+
+  const run = (v: string) => {
+    setQ(v); latest.current = v; setResults([]); setSearching(!!v.trim());
+    clearTimeout(timer.current);
+    if (!v.trim()) return;
+    // 350 ms debounce: each lookup is a (quota-limited) Mapbox request.
+    timer.current = setTimeout(async () => {
+      const res = await searchPlaces(v).catch(() => []);
+      if (latest.current !== v) return;
+      setResults(res); setSearching(false);
+    }, 350);
+  };
+  return { q, results, searching, run };
+}
+
+/** Screens (start → search → route), searches, and route alternatives. Shared by desktop and mobile. */
 export function useRoutePlanner() {
+  const [screen, setScreen] = useState<Screen>('start');
   const [from, setFrom] = useState<Place | null>(ORIGIN);
   const [to, setTo] = useState<Place | null>(null);
   const [query, setQuery] = useState({ from: ORIGIN.label, to: '' });
   const [active, setActive] = useState<Field | null>(null);
-  const [suggestions, setSuggestions] = useState<Place[]>([]);
-  const [searching, setSearching] = useState(false);
+  const search = usePlaceSearch();       // "Where to?" on the start/search screens
+  const fieldSearch = usePlaceSearch();  // from/to boxes on the route screen
+  const [trip, setTrip] = useState<Trip>({ note: '', leaveMin: 0 });
   const [routes, setRoutes] = useState<Route[]>([]);
   const [sel, setSel] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const searchTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const inflight = useRef<AbortController>(undefined);
-  const latestQuery = useRef(query);
-  latestQuery.current = query;
+  useEffect(() => () => inflight.current?.abort(), []);
 
-  // Re-route whenever both ends are set; abort the previous request so a slow response can't win.
+  // Abort the previous request so a slow response can't overwrite a newer trip.
   const route = async (a = from, b = to) => {
     inflight.current?.abort();
     setRoutes([]); setError('');
@@ -31,35 +56,46 @@ export function useRoutePlanner() {
     try {
       const rs = await fetchRoutes(a, b, ctl.signal);
       setRoutes(rs); setSel(0);
-    } catch (e) {
+    } catch {
       if (!ctl.signal.aborted) setError("Couldn't load routes.");
     } finally {
       if (!ctl.signal.aborted) setLoading(false);
     }
   };
-  useEffect(() => () => { clearTimeout(searchTimer.current); inflight.current?.abort(); }, []);
 
-  const onQuery = (field: Field, v: string) => {
-    setQuery(q => ({ ...q, [field]: v }));
-    setActive(field); setSuggestions([]); setSearching(!!v.trim());
-    clearTimeout(searchTimer.current);
-    if (!v.trim()) return;
-    // Debounced: Nominatim's usage policy allows ~1 request/second.
-    searchTimer.current = setTimeout(async () => {
-      const res = await searchPlaces(v).catch(() => []);
-      if (latestQuery.current[field] !== v) return; // user kept typing; a newer search owns the list
-      setSuggestions(res); setSearching(false);
-    }, 350);
+  /** Start/search screen → route screen for `dest`, from the current start point. */
+  const go = (dest: Place, opts: Partial<Trip> = {}) => {
+    const f = from ?? ORIGIN;
+    setFrom(f); setTo(dest);
+    setQuery({ from: f.label, to: dest.label });
+    setActive(null); search.run('');
+    setTrip({ note: opts.note ?? '', leaveMin: opts.leaveMin ?? 0 });
+    setScreen('route');
+    route(f, dest);
   };
 
+  const goStart = () => {
+    inflight.current?.abort();
+    search.run(''); fieldSearch.run('');
+    setTo(null); setQuery(q => ({ ...q, to: '' }));
+    setRoutes([]); setError(''); setLoading(false); setActive(null);
+    setTrip({ note: '', leaveMin: 0 });
+    setScreen('start');
+  };
+
+  const focusField = (field: Field) => { setActive(field); fieldSearch.run(''); };
+  const onQuery = (field: Field, v: string) => {
+    setQuery(q => ({ ...q, [field]: v }));
+    setActive(field); fieldSearch.run(v);
+  };
   const pick = (field: Field, p: Place) => {
     const nf = field === 'from' ? p : from, nt = field === 'to' ? p : to;
     setFrom(nf); setTo(nt);
     setQuery(q => ({ ...q, [field]: p.label }));
-    setActive(null); setSuggestions([]); setSearching(false);
+    setActive(null); fieldSearch.run('');
+    setTrip({ note: '', leaveMin: 0 }); // hand-picked endpoint: the suggestion's advice no longer applies
     route(nf, nt);
   };
-
   const swap = () => {
     setFrom(to); setTo(from);
     setQuery(q => ({ from: q.to, to: q.from }));
@@ -67,13 +103,19 @@ export function useRoutePlanner() {
   };
 
   // Empty "from" box offers "Current location" back.
-  const suggestList = active === 'from' && !query.from.trim() ? [ORIGIN] : suggestions;
+  const suggestions = active === 'from' && !query.from.trim() ? [ORIGIN] : fieldSearch.results;
+  const leaveAt = trip.leaveMin ? fmtTime(trip.leaveMin * 60) : '';
 
   return {
-    from, to, query, active, setActive, searching, routes, sel, setSel, loading, error,
-    suggestions: suggestList,
-    showSuggest: !!active && (suggestList.length > 0 || searching),
-    onQuery, pick, swap, retry: () => route(),
+    screen, setScreen, go, goStart,
+    search, trip,
+    from, to, query, active, setActive, focusField, onQuery, pick, swap,
+    suggestions, searching: fieldSearch.searching,
+    showSuggest: !!active && (suggestions.length > 0 || fieldSearch.searching),
+    routes, sel, setSel, loading, error, retry: () => route(),
     selected: routes[sel] as Route | undefined,
+    leaveText: leaveAt ? `Leave at ${leaveAt}` : 'Leave now',
+    /** Clock time `sec` after departure (which is later than now for "leave at" suggestions). */
+    arrival: (sec: number) => fmtTime(trip.leaveMin * 60 + sec),
   };
 }

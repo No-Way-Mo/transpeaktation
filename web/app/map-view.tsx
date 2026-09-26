@@ -32,12 +32,12 @@ export default function MapView({ ref, routes, sel, from, to, marker, onSelect, 
     if (!map.current) return;
     const pts: LatLng[] = routes[sel]?.coords ?? [from, to].filter(p => !!p).map(p => [p.lat, p.lon]);
     if (pts.length > 1) map.current.fitBounds(pts, { paddingTopLeft: pad.topLeft, paddingBottomRight: pad.bottomRight });
-    else if (pts.length) map.current.setView(pts[0], 15);
+    else if (pts.length) map.current.setView(pts[0], 14);
   };
 
   useImperativeHandle(ref, () => ({
     fit,
-    focus: (p, zoom = 17) => map.current?.setView(p, zoom),
+    focus: (p, zoom = 16) => map.current?.setView(p, zoom),
     zoomIn: () => map.current?.zoomIn(),
     zoomOut: () => map.current?.zoomOut(),
   }));
