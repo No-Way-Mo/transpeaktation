@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { fetchEvents, fetchPlan, fmtWhen, mins, ORIGIN, REPLAY, searchPlaces, spokenTime, voiceNote,
   type EventInfo, type Plan, type Place, type Route, type TransPeak, type VoiceIntent, type When } from './route.ts';
 // Ingested events (windowed /events) + /road-conditions: map pins and the route card's context line.
-import { conditionWindow, contextLine, eventWindow, fetchEvents as fetchWindowEvents, fetchRoadConditions, routeContext,
+import { conditionWindow, eventWindow, fetchEvents as fetchWindowEvents, fetchRoadConditions, routeContext,
   type ContextData, type Span } from './context.ts';
 
 type Field = 'from' | 'to';
@@ -199,8 +199,6 @@ export function useRoutePlanner() {
     mapEvents: context.events ?? [],
     /** Events near / conditions on the selected route (null = no route yet). */
     selectedContext: ctxFor(routes[sel]),
-    /** Extra line on the transPEAKtation card: ingested events near / closures on the route it shows, if any. */
-    tpContext: tp && routes[tp.best] ? contextLine(ctxFor(routes[tp.best]), context) : null,
     whenText: when.mode === 'now' ? 'Leave now' : `${when.mode === 'depart' ? 'Leave' : 'Arrive by'} ${fmtWhen(when.at)}`,
     /** "12 min" per route on the map, in whichever estimate (normal / transPEAKtation) is selected. */
     mapLabels: routes.map((_, i) => `${mins(card(i, choice.tp).dur)} min`),

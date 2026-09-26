@@ -173,13 +173,6 @@ export function contextNote(ctx: RouteContext | null, data: ContextData): string
   return parts.join(' ');
 }
 
-/** The extra line under /plan's note on the transPEAKtation card: contextNote, but only when this route actually
- *  has ingested events near it or conditions on it. Nothing while loading or when there is nothing to add. */
-export function contextLine(ctx: RouteContext | null, data: ContextData): string | null {
-  if (data.loading || !ctx || (!ctx.events.length && !ctx.conditions.length)) return null;
-  return contextNote(ctx, data);
-}
-
 /** Short tag for the transPEAKtation card. */
 export function contextTag(ctx: RouteContext | null, data: ContextData): string {
   if (data.loading || !ctx) return 'Fastest';

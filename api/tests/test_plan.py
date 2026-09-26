@@ -45,17 +45,13 @@ class EventImpact(unittest.TestCase):
         self.assertEqual(round(model.event_max_delay_s(ORACLE)), 482)
         self.assertEqual(round(model.event_max_delay_s(small)), 72)  # 2 min floor x 0.6
 
-    def test_plan_avoids_the_event_route_and_explains(self):
+    def test_without_ml_the_card_is_the_fastest_route_unchanged(self):
         now = at(9)
-        p = model.plan([PAST, AROUND], [at(18, 30)] * 2, "depart", CTX, now=now)
-        self.assertEqual((p["best"], p["tag"]), (1, "Saves ~7 min"))
+        p = model.plan([PAST, AROUND], [at(18, 30)] * 2, "depart", CTX, now=now)  # Giants crowd on PAST
+        self.assertEqual((p["best"], p["preds"][0]["dur"], p["advice"]), (0, PAST["dur"], None))  # no re-pick/re-time
+        self.assertEqual(p["tag"], "Events on the way")
         self.assertIn("Giants vs. Dodgers at Oracle Park", p["note"])
         self.assertEqual(model.plan([PAST, AROUND], [at(12)] * 2, "depart", CTX, now=now)["tag"], "Clear")
-        only = model.plan([PAST], [at(18, 30)], "depart", CTX, now=now)
-        self.assertEqual(only["tag"], "+8 min events")
-        self.assertIsNotNone(only["advice"])                          # moving the departure helps
-        self.assertTrue(only["advice"]["saves_sec"] >= 300)
-        self.assertIsNone(model.plan([PAST], [at(18, 30)], "arrive", CTX, now=now)["advice"])  # arrive-by is fixed
 
     def test_special_event_closure_counts_like_any_event(self):
         # shaped like store.find_closure_events (what /events shows): a multi-day event right on the route
@@ -66,21 +62,6 @@ class EventImpact(unittest.TestCase):
         p = model.plan([PAST], [at(12)], "depart", {**CTX, "events": [amzn]}, now=at(9))
         self.assertNotEqual(p["tag"], "Clear")
         self.assertIn("AMZN Unboxed", p["note"])
-
-    def test_advice_for_a_trip_to_the_event_arrives_before_it_starts(self):
-        to_oracle = {**PAST, "coords": [[37.770 + i * 0.001, -122.3893] for i in range(9)]}  # ends at the ballpark
-        now = at(9)
-        adv = model.plan([to_oracle], [at(18, 45)], "depart", CTX, now=now)["advice"]
-        if adv:  # any suggestion must still arrive by first pitch (7:15 PM)
-            arrive = datetime.fromisoformat(adv["depart_at"]) + timedelta(seconds=to_oracle["dur"])
-            self.assertLessEqual(arrive, at(19, 15))
-        passing = model.plan([PAST], [at(18, 45)], "depart", CTX, now=now)["advice"]  # just driving by: later is fine
-        self.assertGreater(datetime.fromisoformat(passing["depart_at"]), at(18, 45))
-
-    def test_advice_never_suggests_the_past(self):
-        now = at(18, 30)
-        adv = model.plan([PAST], [now], "now", CTX, now=now)["advice"]
-        self.assertGreaterEqual(datetime.fromisoformat(adv["depart_at"]), now)
 
 
 class RoadData(unittest.TestCase):
