@@ -22,17 +22,23 @@ TRAFFIC = {"live": "live traffic now", "observed": "traffic recorded at that tim
            "typical": "usual traffic for that weekday and time"}
 PROMPT = (
     "You write the explanation on a San Francisco trip-planning card for the recommended route. Use only the facts "
-    "in the JSON: never add numbers, streets, events or times that aren't there. One or two short sentences, at "
-    "most 40 words, plain text, no greeting, no emoji. Lead with what matters most for this trip: why this route "
-    "(minutes saved, what it avoids), then a better departure time if one is given. Multi-day events or closures "
-    "don't go away by leaving earlier or later; don't suggest that unless better_departure says so. If nothing "
-    "affects the trip, say so plainly.")
+    "in the JSON: never add numbers, streets, events or times that aren't there, and write every number as digits "
+    "(\"8 min\", not \"eight minutes\"). One or two short sentences, at most 40 words, plain text, no greeting, no "
+    "emoji. The events and closures listed under recommended_route are ON that route and slow it down by "
+    "delay_minutes; never say the route avoids them. The route avoids only what fastest_normal_route has and it "
+    "doesn't. If crosses_a_closure is true, say first that the route crosses a road closure. Otherwise lead with "
+    "what matters most: minutes saved and what is avoided, or what slows this trip; then "
+    "better_departure if given. Multi-day events or closures don't clear by leaving earlier or later: don't suggest "
+    "that unless better_departure says so. If nothing affects the trip, say so plainly.")
+# Spelled-out numbers would slip past check()'s digit test ("one" is left out: "one slow stretch" is fine).
+NUMBER_WORDS = re.compile(r"\b(two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|"
+                          r"sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|hundred)\b", re.I)
 
 _cache: dict[str, str] = {}
 
 
 def model_name() -> str:
-    return os.environ.get("GEMINI_MODEL", "").strip() or "gemini-flash-latest"
+    return os.environ.get("GEMINI_MODEL", "").strip() or "gemini-flash-lite-latest"  # ~0.5 s; thinking models took >4 s
 
 
 def _when(t: datetime) -> str:
@@ -45,9 +51,9 @@ def _route(r: dict, p: dict, events: dict[str, dict]) -> dict:
         span = f"{_when(ev['start'])} to {_when(ev['end'])}" if ev.get("start") and ev.get("end") else None
         return {"name": h["label"], "when": span}
     return {"via": r.get("summary") or None, "minutes": mins(p["dur"]),
-            "minutes_added_by_events_and_closures": mins(p["delay"]) if p["delay"] >= 30 else 0,
-            "events": [event(h) for h in p["event_hits"]],
-            "closures_and_incidents": [i["label"] for i in p["incidents"]],
+            "delay_minutes": mins(p["delay"]) if p["delay"] >= 30 else 0,
+            "events_slowing_it": [event(h) for h in p["event_hits"]],
+            "closures_and_incidents_on_it": [i["label"] for i in p["incidents"]],
             "crosses_a_closure": p["blocked"],
             "slow_stretches": p["traffic"]["slow_segments"] if p["traffic"]["coverage"] else 0}
 
@@ -70,9 +76,10 @@ def facts(routes: list[dict], departs: list[datetime], mode: str, ctx: dict, res
 
 
 def check(text: str, facts_json: str) -> str | None:
-    """The reply, tidied, or None if it's empty, too long, or has a number the facts don't (a made-up delay/time)."""
+    """The reply, tidied, or None if it's empty, too long, spells a number out, or has a number the facts don't
+    (a made-up delay/time)."""
     text = " ".join(text.split()).strip('"')
-    if not text or len(text) > MAX_CHARS:
+    if not text or len(text) > MAX_CHARS or NUMBER_WORDS.search(text):
         return None
     known = set(re.findall(r"\d+", facts_json))
     return text if all(n in known for n in re.findall(r"\d+", text)) else None

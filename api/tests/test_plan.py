@@ -345,12 +345,13 @@ class PlanEndpoint(unittest.TestCase):
                 return self.plan(FakeStore(), depart).json()
 
         body = run("Roads look clear; about 10 min.")
-        self.assertEqual((body["plan"]["note"], body["data"]["note"]), ("Roads look clear; about 10 min.", "gemini:gemini-flash-latest"))
+        self.assertEqual((body["plan"]["note"], body["data"]["note"]), ("Roads look clear; about 10 min.", "gemini:gemini-flash-lite-latest"))
         self.assertEqual(sent[0].headers["x-goog-api-key"], "k")
         self.assertNotIn("37.7", sent[0].content.decode())  # facts only: no coordinates leave the api
-        body = run("Saves 987 min by taking the ferry.")      # a number that isn't in the facts: made up
-        self.assertEqual(body["data"]["note"], "template (gemini reply rejected)")
-        self.assertNotIn("987", body["plan"]["note"])
+        for made_up in ("Saves 987 min by taking the ferry.", "Saves eleven minutes."):  # not in the facts
+            body = run(made_up)
+            self.assertEqual(body["data"]["note"], "template (gemini reply rejected)")
+            self.assertNotEqual(body["plan"]["note"], made_up)
 
     def ml_plan(self, answer, status=200):
         """/plan with ML_URL set and ml/ answering `answer`; returns (body, what ml/ was sent)."""
