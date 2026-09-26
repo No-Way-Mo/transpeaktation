@@ -1,9 +1,13 @@
 // Leaflet drawing for the snapmap experiment (lib/experiment.ts): an "Event activity" heat canvas under the routes,
 // progressive event pins, and a tiny legend. All rules live in lib/snapmap.ts; this file only draws them.
-// No plugin: the heat layer is ~80 lines of canvas (alpha kernels, then our palette as a lookup table).
+// No plugin: the heat layer is an additive density grid (kernel sized in metres), normalised to the busiest cluster in
+// the time window, coloured through our palette as a lookup table.
 import type * as Leaflet from 'leaflet';
 import { fmtCategory, fmtEventTime, type MapEvent, type Span } from '@/lib/context.ts';
-import { ACTIVITY_PALETTE, activityPoints, focusZoom, heatCeiling, heatOpacity, heatRadius, legendOpacity, pinStates, type HeatPoint } from '@/lib/snapmap.ts';
+import {
+  ACTIVITY_PALETTE, activityPoints, densityPeak, focusRel, heatAlpha, heatLevel, heatOpacity, heatRadiusMeters, kernel, legendOpacity,
+  pinStates, relZoom, SF_BOUNDS, type HeatPoint,
+} from '@/lib/snapmap.ts';
 import type { Theme } from '@/lib/theme.ts';
 
 export type SnapState = {
@@ -15,9 +19,9 @@ export type SnapState = {
 };
 
 const PANE = 'snap-activity';      // between tiles (200) and route lines (400): heat never covers a route
-const RES = 0.5;                   // heat drawn at half resolution: it's a soft glow, 4x fewer pixels
+const RES = 0.4;                   // heat computed at 0.4x resolution: it's a soft glow, ~6x fewer pixels
 const PAD = 0.25;                  // pins kept for this much of the view beyond each edge (smooth panning)
-const MAX_ALPHA: Record<Theme, number> = { light: 0.55, dark: 0.62 };
+const MAX_ALPHA: Record<Theme, number> = { light: 0.78, dark: 0.8 }; // hotspot centre; edges fade to 0 (heatAlpha)
 const GLYPH = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4M16 3v4M4 10h16"/><path d="m12 12.6.9 1.8 2 .3-1.45 1.4.35 2-1.8-.95-1.8.95.35-2-1.45-1.4 2-.3Z" fill="#fff" stroke="none"/></svg>';
 
 /** Palette as a 256-entry RGB lookup, low -> high. */
@@ -44,6 +48,8 @@ export class SnapMapLayers {
   private state: SnapState | null = null;
   private selected: string | null = null;
   private byId = new Map<string, MapEvent>();
+  private peakKey = '';
+  private peak = 1;
 
   constructor(L: typeof Leaflet, map: Leaflet.Map) {
     this.L = L; this.map = map;
@@ -76,6 +82,7 @@ export class SnapMapLayers {
     this.byId = new Map(s.events.map(e => [e.id, e]));
     if (this.selected && !this.byId.has(this.selected)) this.selected = null; // left the time window
     this.points = activityPoints(s.events, s.span);
+    this.peakKey = '';
     this.refresh();
   }
 
@@ -85,45 +92,59 @@ export class SnapMapLayers {
     this.drawHeat();
     this.drawPins();
     const s = this.state;
-    if (s) this.legend.style.opacity = String(legendOpacity(this.map.getZoom(), s.routeActive));
+    if (s) this.legend.style.opacity = String(legendOpacity(this.rel(), s.routeActive));
+  }
+
+  /** Zoom relative to the one that fits all of SF in this map's current size (lib/snapmap.ts). */
+  private rel(): number {
+    return relZoom(this.map.getZoom(), this.map.getBoundsZoom(this.L.latLngBounds(SF_BOUNDS)));
   }
 
   // ---- heat -------------------------------------------------------------------------------------------------
   private drawHeat() {
     const { map, canvas, L } = this, s = this.state;
     const size = map.getSize(), w = Math.max(1, Math.round(size.x * RES)), h = Math.max(1, Math.round(size.y * RES));
-    const zoom = map.getZoom();
+    const zoom = map.getZoom(), rel = this.rel();
     const topLeft = map.containerPointToLayerPoint([0, 0]);
     L.DomUtil.setTransform(canvas, topLeft, 1);
     canvas.style.width = `${size.x}px`; canvas.style.height = `${size.y}px`;
     if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
     this.bounds = map.getBounds();
-    const opacity = s ? heatOpacity(zoom, s.routeActive) : 0;
+    const opacity = s ? heatOpacity(rel, s.routeActive) : 0;
     canvas.style.opacity = String(opacity);
-    const g = canvas.getContext('2d', { willReadFrequently: true })!;
+    const g = canvas.getContext('2d')!;
     g.clearRect(0, 0, w, h);
     if (!s || opacity <= 0 || !this.points.length) return;
-    const r = heatRadius(zoom) * RES, ceiling = heatCeiling(zoom);
-    // 1. alpha only: one soft kernel per event, weighted, accumulating where events cluster
+
+    // Kernel radius on the ground -> grid cells at this zoom.
+    const radiusM = heatRadiusMeters(rel);
+    const key = `${radiusM.toFixed(0)}|${this.points.length}`;
+    if (key !== this.peakKey) { this.peak = densityPeak(this.points, radiusM); this.peakKey = key; }
+    const mPerPx = 40_075_016.686 * Math.cos(map.getCenter().lat * Math.PI / 180) / (256 * 2 ** zoom);
+    const r = radiusM / mPerPx * RES, r2 = r * r;
+    // 1. additive density (float, exact kernel; no 8-bit alpha stacking)
+    const grid = new Float32Array(w * h);
     for (const p of this.points) {
-      const c = map.latLngToContainerPoint([p.lat, p.lon]), x = c.x * RES, y = c.y * RES;
-      if (x < -r || y < -r || x > w + r || y > h + r) continue;
-      const grad = g.createRadialGradient(x, y, 0, x, y, r);
-      grad.addColorStop(0, 'rgba(0,0,0,1)');
-      grad.addColorStop(1, 'rgba(0,0,0,0)');
-      g.globalAlpha = Math.min(1, Math.max(0.06, p.w / ceiling));
-      g.fillStyle = grad;
-      g.fillRect(x - r, y - r, 2 * r, 2 * r);
+      const c = map.latLngToContainerPoint([p.lat, p.lon]), cx = c.x * RES, cy = c.y * RES;
+      if (cx < -r || cy < -r || cx > w + r || cy > h + r) continue;
+      const x0 = Math.max(0, Math.floor(cx - r)), x1 = Math.min(w - 1, Math.ceil(cx + r));
+      const y0 = Math.max(0, Math.floor(cy - r)), y1 = Math.min(h - 1, Math.ceil(cy + r));
+      for (let y = y0; y <= y1; y++) {
+        const dy = y - cy, row = y * w;
+        for (let x = x0; x <= x1; x++) {
+          const dx = x - cx, d2 = dx * dx + dy * dy;
+          if (d2 < r2) grid[row + x] += p.w * kernel(Math.sqrt(d2 / r2));
+        }
+      }
     }
-    g.globalAlpha = 1;
-    // 2. colour: density -> palette, and a gentle alpha so streets and labels stay readable underneath
-    const img = g.getImageData(0, 0, w, h), d = img.data, lut = this.lut, max = MAX_ALPHA[s.theme];
-    for (let i = 0; i < d.length; i += 4) {
-      const a = d[i + 3];
-      if (!a) continue;
-      const k = a * 4;
-      d[i] = lut[k]; d[i + 1] = lut[k + 1]; d[i + 2] = lut[k + 2];
-      d[i + 3] = 255 * max * Math.min(1, (a / 255) * 1.6);
+    // 2. relative intensity -> our palette; transparent below the floor so sparse areas stay a normal map
+    const img = g.createImageData(w, h), d = img.data, lut = this.lut, max = MAX_ALPHA[s.theme], peak = this.peak;
+    for (let i = 0; i < grid.length; i++) {
+      if (!grid[i]) continue;
+      const t = heatLevel(grid[i] / peak), a = heatAlpha(t, max);
+      if (a <= 0) continue;
+      const k = Math.round(t * 255) * 4, o = i * 4;
+      d[o] = lut[k]; d[o + 1] = lut[k + 1]; d[o + 2] = lut[k + 2]; d[o + 3] = Math.round(a * 255);
     }
     g.putImageData(img, 0, 0);
   }
@@ -141,12 +162,12 @@ export class SnapMapLayers {
   private drawPins() {
     const s = this.state, L = this.L;
     if (!s) return;
-    const zoom = this.map.getZoom();
+    const rel = this.rel();
     const view = this.map.getBounds().pad(PAD);
     const pinned = new Set(s.routeEventIds);
     if (this.selected) pinned.add(this.selected);
     const keep = new Set<string>();
-    for (const st of pinStates(s.events, zoom, pinned)) {
+    for (const st of pinStates(s.events, rel, pinned)) {
       const ev = this.byId.get(st.id)!;
       if (!view.contains([ev.lat, ev.lon])) continue;
       keep.add(st.id);
@@ -177,7 +198,7 @@ export class SnapMapLayers {
     const ev = this.byId.get(id);
     if (!ev) return;
     this.selected = id;
-    const target = focusZoom(this.map.getZoom());
+    const target = this.map.getZoom() + focusRel(this.rel()) - this.rel();
     const open = () => {
       this.drawPins();
       this.pins.get(id)?.bindPopup(() => eventCard(ev), { className: 'event-pop', closeButton: false, offset: [0, -8], autoPan: true }).openPopup();
