@@ -169,8 +169,19 @@ export function spokenTime(t: string, now = Date.now()): number | null {
 /** One line on the route screen saying what voice did. Voice only plans; booking always needs a tap (AGENTS.md). */
 export function voiceNote(v: VoiceIntent): string {
   if (v.destination && !v.destination.place) return `Couldn't find "${v.destination.query}". Try another name.`;
+  if (!v.transcript.trim()) return "Didn't catch that. Try again, a little closer to the mic.";
   if (!v.destination?.place) return `Heard "${v.transcript}". Try "Take me to Oracle Park".`;
   return `You said "${v.transcript}".` + (v.action === 'plan_and_book' ? ' Pick a route, then confirm to book.' : '');
+}
+
+/** Why a voice request failed, in words the rider can act on. Errors come from sendVoice (api/'s `detail`) or fetch. */
+export function voiceError(e: unknown): string {
+  if (e instanceof TypeError) return "Can't reach the server. Check your connection and try again."; // fetch network failure
+  const msg = e instanceof Error ? e.message : '';
+  if (msg.startsWith('voice unavailable')) return "Voice isn't set up on this server yet. Type your destination instead.";
+  if (msg === 'audio too long') return 'That was too long. Keep it to a few seconds.';
+  if (msg.startsWith('speech-to-text unavailable')) return 'Speech service is busy. Try again in a moment.';
+  return "Couldn't understand that. Try again.";
 }
 
 export function fmtDist(m: number, units: Units = 'mi'): string {
