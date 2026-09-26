@@ -25,8 +25,7 @@ load_dotenv(_API_DIR / ".env")  # api/.env; real env vars win
 # Local dev: reuse keys already in ingest/.env (e.g. its MAPBOX_TOKEN) instead of copying them. Never overrides.
 load_dotenv(_API_DIR.parent / "ingest" / ".env")
 
-from . import ml, model, providers, voice
-from . import model, providers, voice
+from . import advice, ml, model, providers, voice
 from . import store as ingested  # map views (find_*); `store` below is the planner's Store
 from .segments import Segments
 from .store import Store
@@ -238,6 +237,10 @@ async def plan_trip(
         if decision:
             decided_by = f"ml:{decision['model']}"
     result = model.plan(found, departs, mode, ctx, now=now, ml=decision)
+    note_by = "ml" if decision and decision.get("reasons") else "template"
+    if note_by == "template":  # ml/'s own reasons win; otherwise Gemini words the facts, template on any failure
+        text, note_by = await advice.explain(state["http"], advice.facts(found, departs, mode, ctx, result))
+        result["note"] = text or result["note"]
     best = result["preds"][result["best"]]
 
     if not replay:  # a simulation isn't demand
@@ -256,7 +259,7 @@ async def plan_trip(
                  "incidents": "mongo" if incidents is not None else "unavailable",
                  "traffic": f"tiger:{traffic_kind}" if traffic is not None else "unavailable",
                  "predictions": "tiger" if predictions else "none (event-impact heuristic)",
-                 "decision": decided_by},
+                 "decision": decided_by, "note": note_by},
     }
 
 

@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 import httpx
 
-from app import main, ml, model, providers, store as store_mod
+from app import advice, main, ml, model, providers, store as store_mod
 
 SF = model.SF_TZ
 DAY = datetime(2026, 9, 26, tzinfo=SF)
@@ -264,12 +264,15 @@ class PlanEndpoint(unittest.TestCase):
         main._cache.clear()
         self.load = mock.patch.object(main.segments, "load")
         self.load.start()
+        self.env = mock.patch.dict("os.environ", {"GEMINI_API_KEY": ""})  # never call the real Gemini from tests
+        self.env.start()
         self.client = TestClient(main.app).__enter__()
         main.segments.graph = None  # no road graph: routes keep the fake segment IDs, lengths are unknown
 
     def tearDown(self):
         self.client.__exit__(None, None, None)
         self.load.stop()
+        self.env.stop()
 
     def plan(self, store, depart, **extra):
         self.find = mock.AsyncMock(return_value=([dict(PAST), dict(AROUND)], "mapbox"))
@@ -326,6 +329,29 @@ class PlanEndpoint(unittest.TestCase):
         self.assertLessEqual(mapbox_at, datetime.now(timezone.utc) + main.MAPBOX_AHEAD)
         self.assertEqual(store.traffic_asked[0], depart)
         self.assertEqual(self.plan(FakeStore(), depart + timedelta(days=7)).status_code, 400)  # 31 days: too far
+
+    def test_gemini_words_the_note_from_the_facts_only(self):
+        depart = (datetime.now(SF) + timedelta(hours=1)).replace(second=0, microsecond=0)
+        self.assertEqual(self.plan(FakeStore(), depart).json()["data"]["note"], "template (no GEMINI_API_KEY)")
+        sent = []
+
+        def run(reply):
+            def handler(req: httpx.Request):
+                sent.append(req)
+                return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": reply}]}}]})
+            advice._cache.clear()
+            with mock.patch.dict("os.environ", {"GEMINI_API_KEY": "k"}), \
+                    mock.patch.dict(main.state, {"http": httpx.AsyncClient(transport=httpx.MockTransport(handler))}):
+                return self.plan(FakeStore(), depart).json()
+
+        body = run("Roads look clear; about 10 min.")
+        self.assertEqual((body["plan"]["note"], body["data"]["note"]), ("Roads look clear; about 10 min.", "gemini:gemini-flash-lite-latest"))
+        self.assertEqual(sent[0].headers["x-goog-api-key"], "k")
+        self.assertNotIn("37.7", sent[0].content.decode())  # facts only: no coordinates leave the api
+        for made_up in ("Saves 987 min by taking the ferry.", "Saves eleven minutes."):  # not in the facts
+            body = run(made_up)
+            self.assertEqual(body["data"]["note"], "template (gemini reply rejected)")
+            self.assertNotEqual(body["plan"]["note"], made_up)
 
     def ml_plan(self, answer, status=200):
         """/plan with ML_URL set and ml/ answering `answer`; returns (body, what ml/ was sent)."""
