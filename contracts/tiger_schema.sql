@@ -1,5 +1,5 @@
 -- Tiger Data (service transPEAKtation, dp0coukufh, db tsdb) schema. Idempotent.
--- Apply: tiger db query dp0coukufh --file contracts/tiger_schema.sql
+-- Apply: psql "$TIGER_DATABASE_URL" -f contracts/tiger_schema.sql  (or: tiger db query dp0coukufh --file ...)
 -- road_segment_id -> Mongo road_segments.segment_id; vehicle_id -> Mongo vehicles.vehicle_id.
 
 -- Model predictions per road segment (ml/ writes).

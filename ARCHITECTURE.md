@@ -48,7 +48,7 @@ Sources and status: `ingest/TODO.md`.
 | Event sources | concerts, sports, festivals, holidays, venue calendars | PredictHQ or Ticketmaster (undecided) |
 | City + road data | closures, permits, restrictions, road conditions | DataSF, Caltrans, CHP, 511 |
 | Mobility data | live traffic, destination status | 511, Muni vehicles; destination demand is derived in `ml/` |
-| Map / baseline routing | road graph, candidate routes, baseline ETA | OpenStreetMap (OSMnx), Google Maps or Mapbox (undecided) |
+| Map / baseline routing | road graph, candidate routes, baseline + live ETA, corridor speeds | OpenStreetMap (OSMnx), Mapbox Directions (`pull.poll`) |
 
 ## 2. Ingestion + storage → `ingest/` (DigitalOcean)
 Ingestion workers normalize crawler / API data, dedupe events, geocode locations, and build clean event + road records.

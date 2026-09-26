@@ -26,7 +26,7 @@ One owner per folder. Only edit another folder with its owner's OK.
 ## Data stores
 Mongo = long-lived entities / nested JSON. Tiger = time-series + fast-changing numbers. Both are empty; field names below are the join keys, keep them.
 
-**MongoDB Atlas**: org Designathon → project Transpeaktation → cluster `transpeaktation` (M0, AWS us-east-1) → db `transpeaktation`. Connect with `MONGODB_URI` (`ingest/.env.example`); password from a teammate, never in git. Your IP must be on the Atlas access list.
+**MongoDB Atlas**: org Designathon → project Transpeaktation → cluster `transpeaktation` (M0, AWS us-east-1) → db `transpeaktation`. Connect with `MONGODB_URI` (every `<folder>/.env.example`); setup + IP access: `README.md` step 3.
 
 | Collection | Holds | Indexes |
 |---|---|---|
@@ -41,7 +41,7 @@ Mongo = long-lived entities / nested JSON. Tiger = time-series + fast-changing n
 | `vehicles` | AV fleet identity + config | `vehicle_id` unique |
 | `road_incidents` | closures, permits, crashes, dispatch | `source+source_id` unique, `location` 2dsphere, `start_time+end_time`, `road_segment_ids` |
 
-**Tiger Data**: service `transPEAKtation` (`dp0coukufh`, us-east-1), db `tsdb`. Schema: `contracts/tiger_schema.sql` (idempotent). Connect: `tiger db save-password dp0coukufh` once, then `tiger db query dp0coukufh ...`.
+**Tiger Data**: service `transPEAKtation` (`dp0coukufh`, us-east-1), db `tsdb`. Schema: `contracts/tiger_schema.sql` (idempotent). Connect with `TIGER_DATABASE_URL`; setup: `README.md` step 3. Apply schema: `psql "$TIGER_DATABASE_URL" -f contracts/tiger_schema.sql`.
 
 | Hypertable | One row per | Key columns |
 |---|---|---|
