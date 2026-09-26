@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useImperativeHandle, useRef, type Ref } from 'react';
 import type * as Leaflet from 'leaflet';
+import { fmtCategory, fmtEventTime, type MapEvent } from '@/lib/context.ts';
 import { labelPoint, trafficRuns, type LatLng, type Place, type Route } from '@/lib/route.ts';
 
 export type MapHandle = { fit(): void; focus(p: LatLng, zoom?: number): void; zoomIn(): void; zoomOut(): void };
@@ -14,6 +15,7 @@ type Props = {
   from: Place | null;
   to: Place | null;
   marker?: LatLng | null;           // highlighted turn on the selected route
+  events?: MapEvent[];              // ingested events in the trip's time window
   onSelect(i: number): void;
   pad: { topLeft: [number, number]; bottomRight: [number, number] }; // room left for overlays when fitting
 };
@@ -21,14 +23,14 @@ type Props = {
 const dark = () => matchMedia('(prefers-color-scheme: dark)'); // browser-only: called from effects, never at import
 const tiles = () => `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_${dark().matches ? 'Dark' : 'Light'}_Gray_Base/MapServer/tile/{z}/{y}/{x}`;
 
-export default function MapView({ ref, routes, sel, tp, labels, from, to, marker, onSelect, pad }: Props) {
+export default function MapView({ ref, routes, sel, tp, labels, from, to, marker, events, onSelect, pad }: Props) {
   const el = useRef<HTMLDivElement>(null);
   const L = useRef<typeof Leaflet>(null);
   const map = useRef<Leaflet.Map>(null);
   const layer = useRef<Leaflet.LayerGroup>(null);
   const base = useRef<Leaflet.TileLayer>(null);
-  const latest = useRef({ routes, sel, tp, labels, from, to, marker, pad, onSelect });
-  latest.current = { routes, sel, tp, labels, from, to, marker, pad, onSelect };
+  const latest = useRef({ routes, sel, tp, labels, from, to, marker, events, pad, onSelect });
+  latest.current = { routes, sel, tp, labels, from, to, marker, events, pad, onSelect };
 
   const fit = () => {
     const { routes, sel, from, to, pad } = latest.current;
@@ -52,7 +54,7 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
   const draw = () => {
     const l = L.current, g = layer.current;
     if (!l || !g || !el.current) return;
-    const { routes, sel, tp, labels, from, to, marker } = latest.current;
+    const { routes, sel, tp, labels, from, to, marker, events } = latest.current;
     // Colours come from the CSS theme tokens, so light/dark and brand changes stay in globals.css.
     const cs = getComputedStyle(el.current), c = (n: string) => cs.getPropertyValue(n).trim();
     const casing = c('--route-casing'), line = c(tp ? '--brand-line' : '--route');
@@ -77,6 +79,12 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
       const icon = l.divIcon({ className: 'eta-pin', html: `<span class="eta-bubble${cls}">${text}</span>` });
       l.marker(labelPoint(routes, i), { icon, keyboard: false, zIndexOffset: i === sel ? 1000 : 0, title: `Route ${i + 1}: ${text}` })
         .on('click', () => latest.current.onSelect(i)).addTo(g);
+    });
+    // Event pins under the ETA labels; the popup is built from text nodes, never HTML from the data.
+    events?.forEach(ev => {
+      const icon = l.divIcon({ className: 'event-pin', iconSize: [12, 12] });
+      l.marker([ev.lat, ev.lon], { icon, keyboard: false, zIndexOffset: -1000, title: ev.name })
+        .bindPopup(() => eventPopup(ev), { className: 'event-pop', closeButton: false, offset: [0, -2] }).addTo(g);
     });
     const ring = c('--marker-ring');
     if (marker) l.circleMarker(marker, { radius: 7, color: line, weight: 3, fillColor: ring, fillOpacity: 1 }).addTo(g);
@@ -105,9 +113,21 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
     return () => { cancelled = true; ro.disconnect(); mq.removeEventListener('change', onTheme); map.current?.remove(); map.current = null; };
   }, []);
 
-  useEffect(draw, [routes, sel, tp, labels?.join(), from, to, marker]);
+  useEffect(draw, [routes, sel, tp, labels?.join(), from, to, marker, events]);
   // New routes or endpoints: frame them.
   useEffect(fit, [routes, from, to]);
 
   return <div ref={el} className="map" />;
+}
+
+/** Event name, venue, time, type: what we already have, nothing more. */
+function eventPopup(ev: MapEvent): HTMLElement {
+  const box = document.createElement('div');
+  for (const [cls, text] of [['name', ev.name], ['sub', ev.venue], ['sub', fmtEventTime(ev)], ['sub', fmtCategory(ev.category)]]) {
+    if (!text) continue;
+    const line = box.appendChild(document.createElement('div'));
+    line.className = cls!;
+    line.textContent = text;
+  }
+  return box;
 }

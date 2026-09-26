@@ -1,6 +1,6 @@
 'use client';
 import { useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { fmtDist, fmtWhen, mins, RECENT, routeTag, stepIcon, type Place, type Route, type Step, type When } from '@/lib/route.ts';
+import { fmtDist, fmtWhen, fromSfLocal, mins, RECENT, routeTag, stepIcon, type Place, type Route, type Step, toSfLocal, type When } from '@/lib/route.ts';
 import { smartSuggestions } from '@/lib/suggest.ts';
 import type { Card, useRoutePlanner } from '@/lib/use-route-planner.ts';
 import { useVoice } from '@/lib/use-voice.ts';
@@ -253,8 +253,8 @@ export function RouteList({ p, action }: { p: Planner; action?: ReactNode }) {
 }
 
 const MODES: [When['mode'], string][] = [['now', 'Leave now'], ['depart', 'Leave at'], ['arrive', 'Arrive by']];
-/** datetime-local's value format, in local time. */
-const localInput = (ms: number) => new Date(ms - new Date(ms).getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+/** datetime-local's value format, in SF time (the picker means SF wall-clock time wherever the browser is). */
+const localInput = toSfLocal;
 
 /** "Leave now ▾" chip that opens Leave now / Leave at / Arrive by + a date-time. Applies on Done (one re-route). */
 export function WhenPicker({ p }: { p: Planner }) {
@@ -278,7 +278,7 @@ export function WhenPicker({ p }: { p: Planner }) {
           {draft.mode !== 'now' && (
             <input type="datetime-local" aria-label={draft.mode === 'depart' ? 'Leave at' : 'Arrive by'} step={300}
               value={localInput(draft.at)} min={localInput(Date.now())} max={localInput(Date.now() + 7 * 864e5)}
-              onChange={e => { const at = new Date(e.target.value).getTime(); if (at) setDraft({ ...draft, at }); }} />
+              onChange={e => { const at = fromSfLocal(e.target.value); if (at) setDraft({ ...draft, at }); }} />
           )}
           <div className="when-foot">
             {draft.mode !== 'now' && <span className="sub">Estimates use typical traffic for that time.</span>}

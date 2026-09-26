@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { predict, smartSuggestions, transPeakPick } from './suggest.ts';
-import type { LatLng, Route } from './route.ts';
+import { smartSuggestions, transPeakPick } from './suggest.ts';
+import type { Route } from './route.ts';
 
 const at = (h: number, m = 0) => { const d = new Date(2026, 8, 26); d.setHours(h, m, 0, 0); return d; };
 const place = { label: 'Moscone Center', sub: 'SoMa', lat: 37.784, lon: -122.401 };
@@ -33,24 +33,15 @@ test('non-event place: one "leave now" card for the top result; nothing without 
   assert.deepEqual(smartSuggestions('  ', [place], at(12)), []);
 });
 
-// Two 10-minute routes: one straight past Oracle Park, one ~1 km west of it.
-const line = (lon: number): LatLng[] => Array.from({ length: 11 }, (_, i) => [37.774 + i * 0.001, lon]); // clear of Chase Center
-const route = (coords: LatLng[], dur = 600): Route => ({ dur, dist: 2000, summary: '', coords, steps: [] });
-const past = route(line(-122.3893)), around = route(line(-122.401), 660);
+const route = (dur: number): Route => ({ dur, dist: 2000, summary: '', coords: [[37.78, -122.40], [37.79, -122.40]], steps: [] });
 
-test('predict: event delay only near the venue and only while the crowd is there', () => {
-  assert.equal(predict(past, at(12).getTime()).delay, 0);                    // noon: no crowd
-  assert.equal(Math.round(predict(past, at(18, 30).getTime()).delay), 480);  // in the window: full 8 min
-  const edge = predict(past, at(17, 20).getTime()).delay;                    // ramping in (passes ~17:25)
-  assert.ok(edge > 0 && edge < 480, String(edge));
-  assert.equal(predict(around, at(18, 30).getTime()).delay, 0);             // ~1 km away
-});
-
-test('transPeakPick: avoids the event route when it saves time, else explains the extra time', () => {
-  const t = at(18, 30).getTime();
-  const pick = transPeakPick([past, around], [t, t]);
-  assert.equal(pick.best, 1);
-  assert.equal(pick.tag, 'Saves ~7 min');                  // 18 min vs 11 min
-  assert.equal(transPeakPick([past, around], [at(12).getTime(), at(12).getTime()]).tag, 'Clear');
-  assert.equal(transPeakPick([past], [t]).tag, '+8 min events');
+test('transPeakPick: fastest route at its baseline time, tag + note from the real context only', () => {
+  const routes = [route(600), route(660)];
+  const clear = transPeakPick(routes, { events: [], conditions: [] }, { events: [], conditions: [], loading: false });
+  assert.equal(clear.best, 0);
+  assert.deepEqual(clear.preds.map(p => p.dur), [600, 660]);   // no invented delay minutes
+  assert.equal(clear.tag, 'Clear');
+  assert.equal(clear.note, 'No events on your way at this time.');
+  const loading = transPeakPick(routes, null, { events: [], conditions: [], loading: true });
+  assert.equal(loading.tag, 'Fastest');
 });

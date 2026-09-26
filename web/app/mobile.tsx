@@ -86,7 +86,7 @@ export default function Mobile() {
 
   return (
     <div className="mob" style={sheet.style}>
-      <MapView ref={map} routes={p.routes} sel={p.sel} tp={p.choice.tp} labels={p.mapLabels} from={p.from} to={p.to} onSelect={p.setSel}
+      <MapView ref={map} routes={p.routes} sel={p.sel} tp={p.choice.tp} labels={p.mapLabels} from={p.from} to={p.to} events={p.mapEvents} onSelect={p.setSel}
         pad={{ topLeft: [24, 190], bottomRight: [24, 420] }} />
 
       {p.screen !== 'search' && !nav && (

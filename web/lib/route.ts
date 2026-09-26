@@ -33,7 +33,7 @@ const ANGLES: Record<string, number> = {
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
-async function api<T>(path: string, signal?: AbortSignal): Promise<T> {
+export async function api<T>(path: string, signal?: AbortSignal): Promise<T> {
   const res = await fetch(`${API}${path}`, { signal });
   if (!res.ok) throw new Error((await res.json().catch(() => null))?.detail ?? `HTTP ${res.status}`);
   return res.json();
@@ -67,16 +67,17 @@ export async function sendVoice(audio: Blob, signal?: AbortSignal): Promise<Voic
   return res.json();
 }
 
-/** Spoken time -> the next time it happens (epoch ms). No am/pm: whichever of the two comes next. */
+/** Spoken time -> the next time it happens in SF (epoch ms). No am/pm: whichever of the two comes next. */
 export function spokenTime(t: string, now = Date.now()): number | null {
   const m = /^(\d{1,2})(?::(\d{2}))?\s*(?:([ap])\.?\s?m\.?)?$/i.exec(t.trim());
   if (!m) return null;
   if (+m[1] > 12 || +(m[2] ?? 0) > 59) return null;
   const h = +m[1] % 12, min = +(m[2] ?? 0), ap = m[3]?.toLowerCase();
+  const pad = (n: number) => String(n).padStart(2, '0');
   const at = (hour: number) => {
-    const d = new Date(now); d.setHours(hour, min, 0, 0);
-    if (d.getTime() <= now) d.setDate(d.getDate() + 1);
-    return d.getTime();
+    const today = toSfLocal(now).slice(0, 10), clock = `T${pad(hour)}:${pad(min)}`;
+    const t = fromSfLocal(today + clock);
+    return t > now ? t : fromSfLocal(new Date(Date.parse(`${today}T00:00Z`) + 864e5).toISOString().slice(0, 10) + clock);
   };
   return ap ? at(h + (ap === 'p' ? 12 : 0)) : Math.min(at(h), at(h + 12));
 }
@@ -94,14 +95,40 @@ export function fmtDist(m: number, units: Units = 'mi'): string {
   return mi < 0.1 ? `${Math.max(50, Math.round((m * 3.281) / 50) * 50)} ft` : `${mi.toFixed(1)} mi`;
 }
 
-export const fmtTime = (sec: number, now = Date.now()) =>
-  new Date(now + sec * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+// Every trip and event time is San Francisco wall-clock time, whatever time zone the browser is in: "arrive by
+// 2:00 PM" means 2 PM in SF, and an SF event's day never shifts because the viewer is in New York.
+export const SF_TZ = 'America/Los_Angeles';
+const sfParts = new Intl.DateTimeFormat('en-US', {
+  timeZone: SF_TZ, hourCycle: 'h23', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+});
 
-/** "7:15 PM" today, "Tomorrow 7:15 PM", otherwise "Tue 7:15 PM". */
+/** Epoch ms → SF wall-clock "YYYY-MM-DDTHH:mm" (the datetime-local input format). */
+export function toSfLocal(ms: number): string {
+  const p = Object.fromEntries(sfParts.formatToParts(ms).map(x => [x.type, x.value]));
+  return `${p.year}-${p.month}-${p.day}T${p.hour}:${p.minute}`;
+}
+
+/** SF wall-clock "YYYY-MM-DDTHH:mm" → epoch ms (NaN if malformed). DST-safe: the offset is re-read at the guess. */
+export function fromSfLocal(s: string): number {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(s);
+  if (!m) return NaN;
+  const wall = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5]);
+  let t = wall;
+  for (let i = 0; i < 2; i++) t = wall - (Date.parse(`${toSfLocal(t)}Z`) - t);
+  return t;
+}
+
+/** Whole SF calendar days from `now` to `ms` (0 = same SF day). */
+export const sfDays = (ms: number, now: number) =>
+  Math.round((Date.parse(toSfLocal(ms).slice(0, 10)) - Date.parse(toSfLocal(now).slice(0, 10))) / 864e5);
+
+export const fmtTime = (sec: number, now = Date.now()) =>
+  new Date(now + sec * 1000).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: SF_TZ });
+
+/** "7:15 PM" today, "Tomorrow 7:15 PM", otherwise "Tue 7:15 PM" (SF time). */
 export function fmtWhen(ms: number, now = Date.now()): string {
-  const d = new Date(ms), t = fmtTime(0, ms);
-  const days = Math.round((new Date(d).setHours(0, 0, 0, 0) - new Date(now).setHours(0, 0, 0, 0)) / 864e5);
-  return days === 0 ? t : days === 1 ? `Tomorrow ${t}` : `${d.toLocaleDateString([], { weekday: 'short' })} ${t}`;
+  const t = fmtTime(0, ms), days = sfDays(ms, now);
+  return days === 0 ? t : days === 1 ? `Tomorrow ${t}` : `${new Date(ms).toLocaleDateString('en-US', { weekday: 'short', timeZone: SF_TZ })} ${t}`;
 }
 
 /** Equirectangular distance in metres; plenty for city-scale "is this near that". */
@@ -112,11 +139,19 @@ export function meters(a: LatLng, b: LatLng): number {
 
 /** Metres from p to segment a–b (flat-earth, fine at city scale). Mapbox lines only have vertices at bends, so
  *  distance to vertices alone would call the middle of a long straight "far" from its own neighbour. */
-function segMeters(p: LatLng, a: LatLng, b: LatLng): number {
+export function segMeters(p: LatLng, a: LatLng, b: LatLng): number {
   const k = Math.cos((p[0] * Math.PI) / 180);
   const [bx, by, px, py] = [(b[1] - a[1]) * k, b[0] - a[0], (p[1] - a[1]) * k, p[0] - a[0]];
   const t = Math.max(0, Math.min(1, (px * bx + py * by) / (bx * bx + by * by || 1)));
   return Math.hypot(px - t * bx, py - t * by) * 111_320;
+}
+
+/** Metres from p to the nearest point of a polyline. */
+export function metersToLine(p: LatLng, line: LatLng[]): number {
+  if (line.length === 1) return meters(p, line[0]);
+  let d = Infinity;
+  for (let j = 1; j < line.length; j++) d = Math.min(d, segMeters(p, line[j - 1], line[j]));
+  return d;
 }
 
 /** Where to pin route i's "12 min" label: the point of its middle stretch farthest from every other route,

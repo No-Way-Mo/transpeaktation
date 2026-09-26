@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fmtDist, fmtWhen, labelPoint, mins, routeTag, spokenTime, stepIcon, stepText, trafficRuns, voiceNote, type LatLng, type Route, type Step, type VoiceIntent } from './route.ts';
+import { fmtDist, fmtWhen, fromSfLocal, labelPoint, mins, routeTag, spokenTime, stepIcon, stepText, toSfLocal, trafficRuns, voiceNote, type LatLng, type Route, type Step, type VoiceIntent } from './route.ts';
 
 const step = (type: string, modifier?: string, name = 'Market St'): Step =>
   ({ distance: 0, duration: 0, name, maneuver: { type, modifier, location: [0, 0] } });
@@ -32,11 +32,21 @@ test('turn-by-turn text', () => {
   assert.deepEqual(stepIcon(step('turn', 'weird')), { name: 'arrow', rotate: 0 });
 });
 
-test('departure times', () => {
-  const now = new Date(2026, 8, 26, 15, 0).getTime();
-  assert.match(fmtWhen(new Date(2026, 8, 26, 19, 15).getTime(), now), /^7:15\sPM$/);
-  assert.match(fmtWhen(new Date(2026, 8, 27, 8, 0).getTime(), now), /^Tomorrow 8:00\sAM$/);
-  assert.match(fmtWhen(new Date(2026, 8, 29, 8, 0).getTime(), now), /^Tue 8:00\sAM$/);
+test('departure times, in SF time', () => {
+  const now = fromSfLocal('2026-09-26T15:00');
+  assert.match(fmtWhen(fromSfLocal('2026-09-26T19:15'), now), /^7:15\sPM$/);
+  assert.match(fmtWhen(fromSfLocal('2026-09-27T08:00'), now), /^Tomorrow 8:00\sAM$/);
+  assert.match(fmtWhen(fromSfLocal('2026-09-29T08:00'), now), /^Tue 8:00\sAM$/);
+  // 11:30 PM in SF is already the next day in New York; still "today" here.
+  assert.match(fmtWhen(fromSfLocal('2026-09-26T23:30'), now), /^11:30\sPM$/);
+});
+
+test('SF wall clock <-> epoch, independent of the browser time zone, across DST', () => {
+  assert.equal(new Date(fromSfLocal('2026-09-28T14:00')).toISOString(), '2026-09-28T21:00:00.000Z');  // PDT, UTC-7
+  assert.equal(new Date(fromSfLocal('2026-12-01T14:00')).toISOString(), '2026-12-01T22:00:00.000Z');  // PST, UTC-8
+  assert.equal(toSfLocal(Date.parse('2026-09-28T21:00:00Z')), '2026-09-28T14:00');
+  assert.equal(toSfLocal(fromSfLocal('2026-11-01T09:30')), '2026-11-01T09:30');                       // DST-end day
+  assert.ok(Number.isNaN(fromSfLocal('nope')));
 });
 
 test('map labels sit where routes split, not on the shared stretch', () => {
@@ -63,14 +73,16 @@ test('traffic: slow stretches merge per level; free-flowing and unknown ones are
   assert.deepEqual(trafficRuns({ ...r, congestion: null }), []);
 });
 
-test('spoken times pick the next occurrence', () => {
-  const now = new Date(2026, 8, 26, 15, 0).getTime(), at = (d: number, h: number, m = 0) => new Date(2026, 8, d, h, m).getTime();
+test('spoken times pick the next occurrence, in SF time', () => {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const now = fromSfLocal('2026-09-26T15:00'), at = (d: number, h: number, m = 0) => fromSfLocal(`2026-09-${d}T${pad(h)}:${pad(m)}`);
   assert.equal(spokenTime('6:30', now), at(26, 18, 30));      // no am/pm at 3 PM -> this evening
   assert.equal(spokenTime('7:00 PM', now), at(26, 19));
   assert.equal(spokenTime('9 a.m.', now), at(27, 9));          // already past today -> tomorrow
   assert.equal(spokenTime('2', now), at(27, 2));               // 2 PM passed, 2 AM is next
   assert.equal(spokenTime('25:00', now), null);
   assert.equal(spokenTime('noon', now), null);
+  assert.equal(spokenTime('11 pm', fromSfLocal('2026-09-30T23:30')), fromSfLocal('2026-10-01T23:00')); // month rollover
 });
 
 test('voice note never implies voice booked anything', () => {

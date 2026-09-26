@@ -1,6 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { fetchRoutes, fmtWhen, mins, ORIGIN, searchPlaces, spokenTime, voiceNote, type Place, type Route, type VoiceIntent, type When } from './route.ts';
+import { conditionWindow, eventWindow, fetchEvents, fetchRoadConditions, routeContext, tripSpan, type ContextData, type Span } from './context.ts';
 import { transPeakPick } from './suggest.ts';
 
 type Field = 'from' | 'to';
@@ -31,6 +32,24 @@ function usePlaceSearch() {
     }, 350);
   };
   return { q, results, searching, run };
+}
+
+/** Ingested events + road conditions for a trip span. Refetches only when the (5-min snapped) windows change; a
+ *  failed feed comes back as null so routing carries on without it. */
+function useTripContext(span: Span): ContextData {
+  const ev = eventWindow(span), cond = conditionWindow(span);
+  const key = `${ev.from}-${ev.to}|${cond.from}-${cond.to}`;
+  const [data, setData] = useState<ContextData>({ events: [], conditions: [], loading: true });
+  useEffect(() => {
+    const ctl = new AbortController();
+    setData(d => ({ ...d, loading: true }));
+    Promise.allSettled([fetchEvents(ev, ctl.signal), fetchRoadConditions(cond, ctl.signal)]).then(([e, c]) => {
+      if (ctl.signal.aborted) return;
+      setData({ events: e.status === 'fulfilled' ? e.value : null, conditions: c.status === 'fulfilled' ? c.value : null, loading: false });
+    });
+    return () => ctl.abort();
+  }, [key]); // key encodes both windows
+  return data;
 }
 
 /** Screens (start → search → route), searches, departure time, and route cards. Shared by desktop and mobile. */
@@ -128,8 +147,16 @@ export function useRoutePlanner() {
 
   // Departure per estimate: now, the chosen time, or (arrive-by) the chosen time minus that estimate.
   const now = Date.now();
-  const leaveFor = (dur: number) => when.mode === 'arrive' ? when.at - dur * 1000 : when.mode === 'depart' ? Math.max(when.at, now) : now;
-  const tp = routes.length ? transPeakPick(routes, routes.map(r => leaveFor(r.dur))) : null;
+  const leaveFor = (dur: number) => tripSpan(when, dur, now).from;
+  // Trip span for event / road context: every route's leave → arrive, or just the departure before routes load.
+  const spans = routes.map(r => tripSpan(when, r.dur, now));
+  const fetchSpan: Span = spans.length
+    ? { from: Math.min(...spans.map(s => s.from)), to: Math.max(...spans.map(s => s.to)) }
+    : tripSpan(when, 0, now);
+  const context = useTripContext(fetchSpan);
+  // Each route is judged over its own leave → arrive, not the union used for fetching.
+  const ctxFor = (r: Route | undefined) => r ? routeContext(r, context.events ?? [], context.conditions ?? [], tripSpan(when, r.dur, now)) : null;
+  const tp = routes.length ? transPeakPick(routes, ctxFor(routes[0]), context) : null;
   const card = (i: number, isTp: boolean): Card => {
     const dur = isTp && tp ? tp.preds[i].dur : routes[i].dur, leave = leaveFor(dur);
     return { i, tp: isTp, dur, leave, arrive: leave + dur * 1000 };
@@ -151,6 +178,10 @@ export function useRoutePlanner() {
     selected: routes[sel] as Route | undefined,
     selectedCard: routes.length ? card(sel, choice.tp) : undefined,
     when, setWhen,
+    /** Ingested events in the trip's time window, for the map. Empty while loading or if the feed failed. */
+    mapEvents: context.events ?? [],
+    /** Events near / conditions on the selected route (null = no route yet). */
+    selectedContext: ctxFor(routes[sel]),
     whenText: when.mode === 'now' ? 'Leave now' : `${when.mode === 'depart' ? 'Leave' : 'Arrive by'} ${fmtWhen(when.at)}`,
     /** "12 min" per route on the map, in whichever estimate (normal / transPEAKtation) is selected. */
     mapLabels: routes.map((_, i) => `${mins(card(i, choice.tp).dur)} min`),
