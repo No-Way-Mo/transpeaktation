@@ -55,9 +55,23 @@ Check: `.venv/Scripts/python -m pull.check`
 - Free historical freeway speeds exist (Caltrans PeMS / LargeST Bay Area) if we want pretraining/eval data; not SF surface streets.
 - Polling runs wherever it's started; a laptop that sleeps leaves gaps (`pull.check` reports them). Move to DigitalOcean with the ingestion worker.
 
-## Integration work (ingestion worker step, not started)
-- Link DataSF segments (`cnn`) to OSM roads by location (OSMnx nearest-edge match); redo on each refresh.
-- Normalize, dedupe, geocode, write to MongoDB / Tiger Data.
+## Ingestion worker (`python -m worker`, see `worker/`)
+Raw snapshots + `data/timeseries/mapbox_corridors/` → per-source normalizer → cnn / OSM-edge linking,
+optional geocode → validate (bad rows → `data/quarantine/<source>.jsonl`) → dedupe (natural key;
+conservative cross-source for incidents/closures) → the stores in AGENTS.md "Data stores".
+`--dry-run` stops before the DBs and dumps `data/normalized/`.
+- ✅ OSM edges → Mongo `road_segments` (`segment_id` = `u-v-key`), with DataSF `cnn` matched by location
+  (edge midpoint within 15 m) and the DataSF speed limit for that `cnn` embedded.
+- ✅ Closures, permits, no-parking signs, Caltrans, police dispatch, CHP → Mongo `road_incidents`
+  (upsert on `source`+`source_id`; `road_segment_ids` = nearby OSM edges).
+- ✅ Mapbox corridor polls → Tiger `traffic_metrics` (per OSM edge; needs the OSM GraphML to map pieces
+  onto `road_segment_id`). Reruns skip poll times already stored.
+- 🟡 511 (`sf511_*`): unsupported until a real response fixture exists (needs `SF511_API_KEY`).
+- 🟡 No store in the contract yet for clearance heights, parking regulations, tow-away zones, street
+  sweeping, turn restrictions: normalized and dumped, not persisted (team decision).
+- 🟡 `traffic_metrics.free_flow_speed_mph` / `congestion_ratio` left NULL: Mapbox gives
+  `congestion_numeric` (0-100), which isn't the contract's `1 - speed/free_flow`. Decide before filling.
+
 
 ## Open decisions
 - PredictHQ vs Ticketmaster, depending on PredictHQ pricing.

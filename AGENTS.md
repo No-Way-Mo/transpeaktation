@@ -57,5 +57,6 @@ Mongo = long-lived entities / nested JSON. Tiger = time-series + fast-changing n
 - ingest setup: `cd ingest && python -m venv .venv && .venv/Scripts/pip install -e .[osm]` (macOS/Linux: `.venv/bin/`)
 - ingest pull raw data: `cd ingest && .venv/Scripts/python -m pull [static|planned|live|<source>]` · quality report: `.venv/Scripts/python -m pull.check`
 - ingest speed polling (needs `MAPBOX_TOKEN`): `cd ingest && python -m pull.poll` (every 10 min; `--once` for one round)
+- ingest worker (raw snapshots + speed polls → normalize/validate/dedupe → Mongo `road_segments`/`road_incidents`, Tiger `traffic_metrics`): `cd ingest && .venv/Scripts/pip install -e .[db]` then `.venv/Scripts/python -m worker [--dry-run] [static|planned|live|<source>]`
 - ingest DataSF live check: `cd ingest && python -m datasf` · test: `cd ingest && python -m unittest discover -s tests -t .`
 - ingest data sources plan + backlog: `ingest/TODO.md`
