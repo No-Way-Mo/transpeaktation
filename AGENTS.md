@@ -52,6 +52,16 @@ Mongo = long-lived entities / nested JSON. Tiger = time-series + fast-changing n
 | `prediction_metrics` | segment × time × model | `predicted_speed_mph`, `predicted_delay_sec`, `predicted_demand`, `confidence` |
 | `simulation_metrics` | run × segment × time | `avg_speed_mph`, `avg_delay_sec`, `throughput_vph` |
 
+## Traffic data normalization (raw feeds → `traffic_metrics`)
+Forecast models need one fixed road list, one unit, and one time step. Raw feeds (`ingest/data/timeseries/`) have none of these, so the ingestion worker enforces them before anything reaches Tiger:
+1. **Fixed segments.** Every reading is snapped to `road_segment_id` = OSM edge `u-v-key` (same as Mongo `road_segments.segment_id`); DataSF rows join via `cnn`. Provider geometry (TomTom/Mapbox tile lines, Mapbox route pieces, which re-split between polls, Muni GPS fixes) never leaves ingest. One row per segment × 10-min bucket × `source`.
+2. **One unit.** Store `speed_mph`, `free_flow_speed_mph`, and `congestion_ratio = 1 - speed/free_flow` (0 = free flow, 1 = stopped), clamped to [0, 1]. Per source:
+   - `tomtom`: absolute tiles km/h → mph; free-flow = absolute ÷ relative (relative tiles every 6 h).
+   - `mapbox_route`: annotation speed m/s → mph; free-flow from TomTom on the same segment, else the posted limit (DataSF speed limits / OSM `maxspeed`; unposted = 25 mph). `duration_typical` is *typical* traffic, not free flow; don't use it as free-flow.
+   - `mapbox_tiles`: congestion level only; map low/moderate/heavy/severe to a ratio calibrated per road class on segments that also have a measured speed (until calibrated: 0.1 / 0.4 / 0.65 / 0.85), and leave `speed_mph` null.
+   - `muni`: speed between consecutive fixes of an in-service vehicle; runs low (stops), so keep it its own `source`, never averaged into others.
+3. **One time step.** 10-minute UTC buckets; `time` = bucket start. Within a bucket, average a source's readings. Store only observed values (the schema has no "filled" flag): 20-min Mapbox tiles land in every other bucket. Gap filling (forward-fill ≤ 2 buckets, longer stays missing) happens when `ml/` builds model inputs, not in Tiger.
+
 ## Run
 <!-- add one line per folder once it runs -->
 - demo: `open demo/index.html` · test: `node demo/check.mjs`
