@@ -5,7 +5,7 @@ Event-aware predictive routing + autonomous fleet orchestration for San Francisc
 - How the system fits together: [`ARCHITECTURE.md`](ARCHITECTURE.md)
 - Who owns which folder, team rules, database schemas: [`AGENTS.md`](AGENTS.md)
 
-What runs today: the **demo** (`demo/`), the **data pullers** (`ingest/`), the **route map web app** (`web/`), and the **iOS app** (`ios/`) that wraps it. `ml/` and `api/` are not built yet; their owners add a run command to `AGENTS.md` when they land.
+What runs today: the **demo** (`demo/`), the **data pullers** (`ingest/`), the **routing API** (`api/`), the **route map web app** (`web/`), and the **iOS app** (`ios/`) that wraps it. `ml/` is not built yet; their owners add a run command to `AGENTS.md` when they land.
 
 ## 1. Install tools
 
@@ -74,7 +74,23 @@ Keep speed history growing with `.venv/bin/python -m pull.poll` (every 10 min un
 
 Pull a single layer with `python -m pull static|planned|live`, or name one source (`python -m pull chp_incidents`). Expect `sf511_*` to say `skip` without a 511 key, and `chp_incidents` freshness to FAIL when CHP's own feed is stale; both are normal. Source list and backlog: `ingest/TODO.md`.
 
-## 6. Run the web app
+## 6. Run the API
+
+```bash
+cd api
+python3 -m venv .venv
+.venv/bin/pip install -e .
+.venv/bin/python -m unittest discover -s tests -t .   # "Ran 10 tests ... OK"
+.venv/bin/uvicorn app.main:app --reload               # http://localhost:8000/docs
+```
+
+- `GET /places?q=...` place search, `GET /routes?from=lon,lat&to=lon,lat` driving routes, `GET /health`.
+- Put `MAPBOX_TOKEN` in `api/.env` for live-traffic ETAs (`dur_typical`, `congestion`); locally the API also picks it up from `ingest/.env` if `api/.env` doesn't set it. Without it the API uses the free OSRM + Nominatim services and says `"source": "osrm"`.
+- Each route also carries `road_segment_ids`: the OSM road edges it drives, same IDs as our databases. The first start downloads the SF road graph (~15 s) into `api/data/`; `/health` shows `road_graph: loading` until then.
+
+## 7. Run the web app
+
+Start the API first (step 6); the web app gets places and routes from it.
 
 ```bash
 cd web
@@ -83,17 +99,17 @@ npm test          # "pass 3"
 npm run dev       # http://localhost:3000
 ```
 
-Wide window = desktop layout (sidebar + map). Narrow the window to 760px or less, or open it on a phone, for the mobile layout. Place search and routing use the free OpenStreetMap services (Nominatim, OSRM), so no key is needed yet.
+Wide window = desktop layout (sidebar + map). Narrow the window to 760px or less, or open it on a phone, for the mobile layout. The API address defaults to `http://localhost:8000`; set `NEXT_PUBLIC_API_URL` in `web/.env` to change it.
 
-## 7. Run the iOS app
+## 8. Run the iOS app
 
-The iOS app is a SwiftUI shell that shows the web app's mobile layout, so **start the web app first** (step 6).
+The iOS app is a SwiftUI shell that shows the web app's mobile layout, so **start the API and web app first** (steps 6–7).
 
 ```bash
 open ios/Transpeaktation.xcodeproj   # pick an iPhone simulator, press Run (⌘R)
 ```
 
-- The app loads `http://localhost:3000`, which works in the Simulator. On a real iPhone, set `WEB_APP_URL` in `ios/project.yml` to your Mac's LAN address (e.g. `http://192.168.1.20:3000`, same Wi-Fi) or the deployed URL, then run `cd ios && xcodegen` (`brew install xcodegen`).
+- The app loads `http://localhost:3000`, which works in the Simulator. On a real iPhone, set `WEB_APP_URL` in `ios/project.yml` to your Mac's LAN address (e.g. `http://192.168.1.20:3000`, same Wi-Fi) or the deployed URL (and point `NEXT_PUBLIC_API_URL` at the Mac's LAN address too), then run `cd ios && xcodegen` (`brew install xcodegen`).
 - If the web app isn't running, the app shows a "Can't reach transPEAKtation" screen with Retry.
 - Debug the page inside the app: Safari → Develop → Simulator → localhost.
 
@@ -106,6 +122,7 @@ open ios/Transpeaktation.xcodeproj   # pick an iPhone simulator, press Run (⌘R
 | `. ingest/.env` prints `command not found` or runs in the background | The URL lost its double quotes; put them back. |
 | `psql: command not found` on macOS | Run the `export PATH=...libpq...` line from step 1 (add it to `~/.zshrc`). |
 | `osm_drive_graph ... skip: needs osmnx` | You ran the system `python` instead of `.venv/bin/python`. |
+| Web app says "Couldn't load routes." | The API isn't running (step 6); check http://localhost:8000/health. |
 | iOS app stuck on "Can't reach transPEAKtation" | `npm run dev` isn't running in `web/`, or on a real iPhone `WEB_APP_URL` still says `localhost`. |
 | `CERTIFICATE_VERIFY_FAILED` to overpass-api.de (Windows) | `.venv/Scripts/pip install certifi`; the pullers use it automatically. |
 

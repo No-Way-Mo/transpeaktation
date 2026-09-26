@@ -1,4 +1,4 @@
-// Place search (Nominatim) + driving routes (OSRM) + display formatting.
+// Place search + driving routes (via api/: Mapbox with traffic, OSRM/Nominatim fallback) + display formatting.
 // Shared by the desktop and mobile layouts. Plain TS (no enums etc.) so `node --test` can run it directly.
 
 export type Place = { label: string; sub: string; lat: number; lon: number };
@@ -9,7 +9,12 @@ export type Step = {
   name: string;
   maneuver: { type: string; modifier?: string; location: [number, number] }; // [lon, lat]
 };
-export type Route = { dur: number; dist: number; summary: string; coords: LatLng[]; steps: Step[] };
+export type Route = {
+  dur: number; dist: number; summary: string; coords: LatLng[]; steps: Step[];
+  dur_typical?: number | null;          // usual time without today's traffic (Mapbox only)
+  congestion?: string[] | null;         // per coords pair: low | moderate | heavy | severe | unknown (Mapbox only)
+  road_segment_ids?: string[] | null;   // OSM edges "u-v-key", same IDs as Mongo road_segments / Tiger metrics
+};
 export type Units = 'mi' | 'km';
 
 // ponytail: "Current location" is fixed to Union Square; swap in navigator.geolocation when we need real GPS.
@@ -24,24 +29,20 @@ const ARROWS: Record<string, string> = {
   'sharp left': '↰', 'sharp right': '↱', uturn: '↩',
 };
 
-// ponytail: public Nominatim/OSRM demo servers (rate-limited, no SLA). Move to Mapbox (MAPBOX_TOKEN) via api/ for traffic-aware ETAs.
+const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+
+async function api<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(`${API}${path}`, { signal });
+  if (!res.ok) throw new Error((await res.json().catch(() => null))?.detail ?? `HTTP ${res.status}`);
+  return res.json();
+}
+
 export async function searchPlaces(q: string, signal?: AbortSignal): Promise<Place[]> {
-  const url = `https://nominatim.openstreetmap.org/search?format=json&limit=5&bounded=1&viewbox=-122.53,37.84,-122.35,37.70&q=${encodeURIComponent(q)}`;
-  const data: { name?: string; display_name: string; lat: string; lon: string }[] = await (await fetch(url, { signal })).json();
-  return data.map(d => {
-    const parts = d.display_name.split(', ');
-    return { label: d.name || parts[0], sub: parts.slice(1, 4).join(', '), lat: +d.lat, lon: +d.lon };
-  });
+  return (await api<{ places: Place[] }>(`/places?q=${encodeURIComponent(q)}`, signal)).places;
 }
 
 export async function fetchRoutes(from: Place, to: Place, signal?: AbortSignal): Promise<Route[]> {
-  const url = `https://router.project-osrm.org/route/v1/driving/${from.lon},${from.lat};${to.lon},${to.lat}?alternatives=3&overview=full&geometries=geojson&steps=true`;
-  const data = await (await fetch(url, { signal })).json();
-  if (data.code !== 'Ok' || !data.routes?.length) throw new Error(data.message || 'No route');
-  return data.routes.map((r: any) => ({
-    dur: r.duration, dist: r.distance, summary: r.legs[0].summary,
-    coords: r.geometry.coordinates.map(([x, y]: number[]) => [y, x]), steps: r.legs[0].steps,
-  }));
+  return (await api<{ routes: Route[] }>(`/routes?from=${from.lon},${from.lat}&to=${to.lon},${to.lat}`, signal)).routes;
 }
 
 export function fmtDist(m: number, units: Units = 'mi'): string {

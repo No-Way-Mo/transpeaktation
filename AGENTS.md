@@ -10,7 +10,7 @@ One owner per folder. Only edit another folder with its owner's OK.
 |--------------|-------|-------|-------|
 | `ingest/`    | TBD | Event, city/road, mobility/AV, map inputs → normalize, dedupe, geocode → write to DBs | Python workers, MongoDB Atlas, Tiger Data, DigitalOcean |
 | `ml/`        | TBD | Event understanding, traffic + demand forecast, fleet optimizer | Python, Gemini API |
-| `api/`       | TBD | Trip planner, AV fleet controller, voice → intent, confirm → Solana tx | FastAPI, ElevenLabs, Solana |
+| `api/`       | TBD | Places + traffic-aware routes (Mapbox, OSRM fallback) with OSM segment IDs (OSMnx); later: fleet controller, voice → intent, confirm → Solana tx | FastAPI, Mapbox, OSMnx, ElevenLabs, Solana |
 | `web/`       | TBD | Trip planning app, fleet dashboard, AI transparency / privacy page | Next.js, React, TypeScript, Leaflet |
 | `ios/`       | TBD | SwiftUI shell that loads the `web/` app (mobile layout) in a WKWebView | SwiftUI, XcodeGen |
 | `contracts/` | everyone | Shared data shapes (events, routes, forecasts, fleet state) | JSON Schema / Pydantic |
@@ -60,5 +60,6 @@ Mongo = long-lived entities / nested JSON. Tiger = time-series + fast-changing n
 - ingest live polling (Mapbox corridors + traffic tiles, TomTom flow tiles, Muni vehicles, 511 events; keys in `ingest/.env`): `cd ingest && .venv/Scripts/pip install -e .[live] && .venv/Scripts/python -m pull.poll` (`--once`, `--only mapbox|mapbox_tiles|tomtom|muni|events`)
 - ingest DataSF live check: `cd ingest && python -m datasf` · test: `cd ingest && python -m unittest discover -s tests -t .`
 - ingest data sources plan + backlog: `ingest/TODO.md`
+- api: `cd api && python3 -m venv .venv && .venv/bin/pip install -e .` · run: `.venv/bin/uvicorn app.main:app --reload` → http://localhost:8000/docs · test: `.venv/bin/python -m unittest discover -s tests -t .`
 - web: `cd web && npm install && npm run dev` → http://localhost:3000 (≤760px wide = mobile layout) · test: `npm test` · build: `npm run build`
 - ios: start web first, then `open ios/Transpeaktation.xcodeproj` and Run on a simulator. Web URL = `WEB_APP_URL` in `ios/project.yml`; after editing that file run `cd ios && xcodegen`.
