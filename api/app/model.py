@@ -4,10 +4,13 @@ Pure functions (no I/O), so the planner is testable offline. Stand-in until ml/ 
 when forecasts exist for a route's segments they replace the event heuristic below.
 
 Event impact (CLAUDE.md "Hackathon MVP", interpretable on purpose):
-    delay = size_factor(attendance or capacity) x type_factor x time_factor x distance_factor
-      size_factor     1.25 * sqrt(people / 1000) min, clamped to 2..12 (Oracle ~41k -> 8 min, Chase ~18k -> 5 min)
+    delay = tier_delay x time_factor x distance_factor
+      tier            crowd = (attendance or capacity) x type_factor: high >= 15k (Oracle, Chase) +10 min,
+                      medium >= 5k +5 min, low (incl. unknown size) +2 min
       time_factor     1 while the crowd arrives [start-90, start+15] or leaves [end-15, end+60], ramping over 30 min
       distance_factor 1 within 200 m of the venue, fading to 0 at 700 m, at the moment the route passes it
+    A route gets its worst event's delay, not the sum: crowds along one route overlap, and a dozen small
+    conferences shouldn't add up to more than a ballgame.
 """
 from __future__ import annotations
 
@@ -42,9 +45,16 @@ def event_size(ev: dict) -> float:
     return float(ev.get("attendance") or ev.get("capacity") or 3000)
 
 
+TIER_MIN = {"low": 2, "medium": 5, "high": 10}  # minutes an event adds at full crowd, right by the venue
+
+
+def event_tier(ev: dict) -> str:
+    crowd = event_size(ev) * TYPE_FACTOR.get(ev.get("category") or "", 0.7)
+    return "high" if crowd >= 15_000 else "medium" if crowd >= 5_000 else "low"
+
+
 def event_max_delay_s(ev: dict) -> float:
-    minutes = min(12.0, max(2.0, 1.25 * math.sqrt(event_size(ev) / 1000)))
-    return minutes * 60 * TYPE_FACTOR.get(ev.get("category") or "", 0.7)
+    return TIER_MIN[event_tier(ev)] * 60.0
 
 
 def crowd_windows(ev: dict) -> list[tuple[datetime, datetime]]:
@@ -78,9 +88,10 @@ def meters(a: Sequence[float], b: Sequence[float]) -> float:
 
 
 def event_effects(route: dict, depart: datetime, events: list[dict]) -> tuple[float, list[dict]]:
-    """Seconds added by events the route passes while their crowd is out, and which events."""
+    """Seconds added by events the route passes while their crowd is out (the worst one's), and which events,
+    worst first."""
     coords, dur = route["coords"], route["dur"]
-    total, hits = 0.0, []
+    hits = []
     for ev in events:
         k, d = min(((i, meters(c, (ev["lat"], ev["lon"]))) for i, c in enumerate(coords)), key=lambda x: x[1])
         near = distance_factor(d)
@@ -89,11 +100,11 @@ def event_effects(route: dict, depart: datetime, events: list[dict]) -> tuple[fl
         passing = depart + timedelta(seconds=dur * k / max(1, len(coords) - 1))
         s = event_max_delay_s(ev) * near * time_factor(passing, crowd_windows(ev))
         if s >= MIN_EVENT_DELAY_S:
-            total += s
             label = ev["title"] if ev["venue"] == ev["title"] else f"{ev['title']} at {ev['venue']}"  # DataSF: venue = title
             hits.append({"id": ev["id"], "label": label, "delay": round(s),
-                         "impact": round(100 * s / (12 * 60)), "distance_m": round(d)})
-    return total, hits
+                         "impact": event_tier(ev), "distance_m": round(d)})
+    hits.sort(key=lambda h: -h["delay"])
+    return (hits[0]["delay"] if hits else 0.0), hits
 
 
 # --- road segments: closures, traffic, forecasts ---------------------------------------------------------
@@ -265,10 +276,19 @@ NOTE_MAX = 100
 
 def slower_note(x: dict, slower: int) -> str:
     """Why a normal route takes `slower` more minutes than transPEAKtation's, in at most NOTE_MAX characters."""
-    why = x["estimate"]["why"]
-    text = ("Crosses a road closure when you'd get there." if x["blocked"] else
-            f"{slower} min slower: {', '.join(why) if why else 'longer or busier roads'}.")
-    return text if len(text) <= NOTE_MAX else text[:NOTE_MAX - 1] + "…"
+    if x["blocked"]:
+        return "Crosses a road closure when you'd get there."
+    why = x["estimate"]["why"]  # worst event first, then closures/incidents
+    if not why:
+        return f"{slower} min slower: longer or busier roads."
+    more = f" +{len(why) - 1} more" if len(why) > 1 else ""
+    text = f"{slower} min slower: {shorten(why[0], 45)}{more}"
+    return text if text.endswith("…") else text + "."
+
+
+def shorten(text: str, n: int) -> str:
+    """At most n characters, cut at a word ("Catawba and Cherokee American…"), never mid-word."""
+    return text if len(text) <= n else text[:n - 1].rsplit(" ", 1)[0].rstrip(",;:-") + "…"
 
 
 # --- events: database docs, demo fallback, web view ----------------------------------------------------------

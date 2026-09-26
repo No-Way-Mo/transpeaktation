@@ -23,10 +23,11 @@ TRAFFIC = {"live": "live traffic now", "observed": "traffic recorded at that tim
 PROMPT = (
     "You write short notes for the normal route cards of a San Francisco trip-planning app. The JSON has the "
     "recommended transpeaktation_route and the normal_routes that take longer. For each normal route, in order, say "
-    "why it is slower than the transPEAKtation route, in at most 90 characters: plain text, no greeting, no emoji. "
+    "why it is slower than the transPEAKtation route, in at most 60 characters: plain text, no greeting, no emoji. "
     "Use only the facts in the JSON: never add numbers, streets, events or times that aren't there, and write every "
-    "number as digits (\"8 min\", not \"eight minutes\"). Name at most 2 events or closures, shortening long "
-    "names. If crosses_a_closure is true, say it crosses a road closure. slow_stretches are traffic, not events. With "
+    "number as digits (\"8 min\", not \"eight minutes\"). Name only the first event or closure (the worst), "
+    "shortened to a few words, and add \"+N more\" if there are others. If crosses_a_closure is true, say it "
+    "crosses a road closure. slow_stretches are traffic, not events. With "
     "no events, closures or slow stretches, say it is a longer or busier way. Reply with a JSON array of strings, "
     "one per normal route.")
 # Spelled-out numbers would slip past check()'s digit test ("one" is left out: "one slow stretch" is fine).
