@@ -14,6 +14,7 @@ Field names follow AGENTS.md "Data stores" and ingest/DESIGN.md.
 """
 from __future__ import annotations
 
+import math
 import os
 import threading
 import time
@@ -215,6 +216,15 @@ class Store:
             (segment_ids, t0 - timedelta(minutes=15), t1 + timedelta(minutes=15)))
         cols = ("road_segment_id", "time", "predicted_delay_sec", "model_version")
         return None if rows is None else [dict(zip(cols, r)) for r in rows]
+
+    def trips_to(self, lon: float, lat: float, t0: datetime, t1: datetime, radius_m: float = 400) -> int | None:
+        """Other riders heading to about the same place: logged trips (Mongo trips) ending within ~radius_m
+        (a box; trips store ~100 m rounded points) that depart in [t0, t1]."""
+        dlat, dlon = radius_m / 111_132, radius_m / (111_320 * math.cos(math.radians(lat)))
+        return self._mongo_call(lambda db: db.trips.count_documents({
+            "destination.lat": {"$gte": lat - dlat, "$lte": lat + dlat},
+            "destination.lon": {"$gte": lon - dlon, "$lte": lon + dlon},
+            "depart_at": {"$gte": t0, "$lte": t1}}))
 
     # --- writes ----------------------------------------------------------------------------------------------
     def save_trip(self, doc: dict[str, Any]) -> bool:

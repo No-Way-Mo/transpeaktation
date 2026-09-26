@@ -176,7 +176,10 @@ export function useRoutePlanner() {
   };
   const sel = choice.tp && tp ? tp.best : choice.i;
   /** Map taps pick that route's normal card, unless it's the route the selected transPEAKtation card shows. */
-  const setSel = (i: number) => { if (!(choice.tp && i === sel)) setChoice({ i, tp: false }); };
+  const setSel = (i: number) => {
+    if (routes[i]?.by === 'ml') setChoice({ i, tp: true }); // ml/'s own route has only the transPEAKtation card
+    else if (!(choice.tp && i === sel)) setChoice({ i, tp: false });
+  };
 
   // Empty "from" box offers "Current location" back.
   const suggestions = active === 'from' && !query.from.trim() ? [ORIGIN] : fieldSearch.results;

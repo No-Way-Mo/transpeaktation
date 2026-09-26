@@ -25,6 +25,7 @@ load_dotenv(_API_DIR / ".env")  # api/.env; real env vars win
 # Local dev: reuse keys already in ingest/.env (e.g. its MAPBOX_TOKEN) instead of copying them. Never overrides.
 load_dotenv(_API_DIR.parent / "ingest" / ".env")
 
+from . import ml, model, providers, voice
 from . import model, providers, voice
 from . import store as ingested  # map views (find_*); `store` below is the planner's Store
 from .segments import Segments
@@ -74,10 +75,14 @@ def lonlat(raw: str) -> tuple[float, float]:
         lon, lat = (float(x) for x in raw.split(","))
     except ValueError:
         raise HTTPException(400, "expected 'lon,lat'")
-    lon0, lat0, lon1, lat1 = SERVICE_AREA
-    if not (lon0 <= lon <= lon1 and lat0 <= lat <= lat1):  # also rejects nan/inf
+    if not in_area((lon, lat)):
         raise HTTPException(400, "outside the San Francisco service area")
     return lon, lat
+
+
+def in_area(p: tuple[float, float]) -> bool:
+    lon0, lat0, lon1, lat1 = SERVICE_AREA
+    return lon0 <= p[0] <= lon1 and lat0 <= p[1] <= lat1  # also rejects nan/inf
 
 
 REPLAY_MAX = timedelta(days=365)
@@ -147,13 +152,15 @@ async def routes(
     return await _routes(a, b, mapbox_time(when(depart_at), now), mapbox_time(when(arrive_by), now))
 
 
-async def _routes(a: tuple[float, float], b: tuple[float, float], dep: str | None, arr: str | None) -> dict:
+async def _routes(a: tuple[float, float], b: tuple[float, float], dep: str | None, arr: str | None,
+                  via: tuple[tuple[float, float], ...] = ()) -> dict:
     # ~10 m, to the minute: nearby taps / re-renders share a cached answer
-    key = ("routes", *(round(x, 4) for x in (*a, *b)), dep and dep[:16], arr and arr[:16])
+    key = ("routes", *(round(x, 4) for x in (*a, *b)), dep and dep[:16], arr and arr[:16],
+           tuple(round(x, 4) for p in via for x in p))
     if (hit := _cached(key)) is not None:
         return hit
     try:
-        found, source = await providers.find_routes(state["http"], a, b, dep, arr)
+        found, source = await providers.find_routes(state["http"], a, b, dep, arr, via)
     except providers.NoRoute:
         raise HTTPException(404, "no drivable route between these points")
     except providers.ProviderError:
@@ -181,13 +188,15 @@ async def plan_trip(
     """The trip planner: candidate routes (Mapbox/OSRM) -> events, closures, traffic and forecasts for their road
     segments at the trip's time (Mongo / Tiger, written by ingest/ and ml/) -> event-aware model -> pick,
     explanation and a better departure time. Logs the request to Mongo `trips` (no user identity).
-    Traffic by trip time: live (now), observed (past, replay), typical (future); see Store.traffic_at."""
+    Traffic by trip time: live (now), observed (past, replay), typical (future); see Store.traffic_at.
+    With ML_URL set, ml/ makes the decision (app/ml.py, contracts/route_decision.md); otherwise the heuristic."""
     a, b = lonlat(from_), lonlat(to)
     if depart_at and arrive_by:
         raise HTTPException(400, "pass depart_at or arrive_by, not both")
     real_now = datetime.now(timezone.utc)
     dep, arr = when(depart_at, replay), when(arrive_by, replay)
-    got = await _routes(a, b, mapbox_time(dep, real_now), mapbox_time(arr, real_now))
+    mb_dep, mb_arr = mapbox_time(dep, real_now), mapbox_time(arr, real_now)
+    got = await _routes(a, b, mb_dep, mb_arr)
     found = got["routes"]
     mode = "arrive" if arr else "depart" if dep else "now"
     departs = [arr - timedelta(seconds=r["dur"]) if arr else dep or real_now for r in found]
@@ -207,7 +216,26 @@ async def plan_trip(
         model.demo_events(t0)
     ctx = {"events": evs, "incidents": incidents or [], "traffic": traffic or [], "traffic_kind": traffic_kind,
            "predictions": predictions or [], "lengths": lengths}
-    result = model.plan(found, departs, mode, ctx, now=now)
+    decision, decided_by = None, "heuristic"
+    if ml.url():
+        window = (t0 - timedelta(hours=1), t0 + timedelta(hours=1))
+        demand = await asyncio.to_thread(store.trips_to, *b, *window)
+        body = ml.request_body(at=t0, mode=mode, replay=replay, origin=a, destination=b, routes=found, departs=departs,
+                               ctx=ctx, heuristic=[model.predict_route(r, d, ctx, now=now) for r, d in zip(found, departs)],
+                               demand=demand, demand_window=window)
+        decision, decided_by = await ml.decide(state["http"], body, len(found), in_area)
+        if decision and "waypoints" in decision:  # ml/'s own route: Mapbox turns it into geometry + directions
+            try:
+                own = (await _routes(a, b, mb_dep, mb_arr, tuple(decision["waypoints"])))["routes"][0]
+            except HTTPException as e:
+                decision, decided_by = None, f"heuristic (ml route unusable: {e.detail})"
+            else:
+                found = [*found, {**own, "by": "ml"}]
+                departs = [*departs, arr - timedelta(seconds=own["dur"]) if arr else dep or real_now]
+                decision = {**decision, "best": len(found) - 1}
+        if decision:
+            decided_by = f"ml:{decision['model']}"
+    result = model.plan(found, departs, mode, ctx, now=now, ml=decision)
     best = result["preds"][result["best"]]
 
     if not replay:  # a simulation isn't demand
@@ -225,7 +253,8 @@ async def plan_trip(
                  "events": "mongo" if events is not None else "demo",
                  "incidents": "mongo" if incidents is not None else "unavailable",
                  "traffic": f"tiger:{traffic_kind}" if traffic is not None else "unavailable",
-                 "predictions": "tiger" if predictions else "none (event-impact heuristic)"},
+                 "predictions": "tiger" if predictions else "none (event-impact heuristic)",
+                 "decision": decided_by},
     }
 
 

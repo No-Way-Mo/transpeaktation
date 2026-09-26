@@ -14,6 +14,7 @@ export type Route = {
   dur_typical?: number | null;          // usual time without today's traffic (Mapbox only)
   congestion?: string[] | null;         // per coords pair: low | moderate | heavy | severe | unknown (Mapbox only)
   road_segment_ids?: string[] | null;   // OSM edges "u-v-key", same IDs as Mongo road_segments / Tiger metrics
+  by?: 'ml';                            // ml/'s own route (not one of the provider's): transPEAKtation card only
 };
 export type Units = 'mi' | 'km';
 /** When to travel: now (live traffic), leave at `at`, or arrive by `at` (epoch ms). */
@@ -89,7 +90,8 @@ export type EventInfo = {
 export type Plan = {
   routes: Route[]; source: string; plan: TransPeak; events: EventInfo[];
   // Where each input came from, for the moment `at` (traffic: tiger:live | tiger:observed | tiger:typical | unavailable)
-  data: { at: string; replay: boolean; events: string; incidents: string; traffic: string; predictions: string };
+  // decision: ml:<model> when ml/ picked, else heuristic (with why ml/ wasn't used)
+  data: { at: string; replay: boolean; events: string; incidents: string; traffic: string; predictions: string; decision: string };
 };
 
 /** Demo mode (NEXT_PUBLIC_REPLAY=1): past times are allowed and replay the data stored for then. */

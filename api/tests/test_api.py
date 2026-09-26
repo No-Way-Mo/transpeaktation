@@ -41,6 +41,17 @@ class Normalize(unittest.TestCase):
         self.assertIsNone(r["dur_typical"])
         self.assertIsNone(r["congestion"])
 
+    def test_route_through_via_points_is_one_trip(self):
+        step = lambda t, name: {"distance": 1, "duration": 1, "name": name, "maneuver": {"type": t, "location": [0, 0]}}  # noqa: E731
+        leg = lambda a, b, c: {"summary": a, "annotation": {"congestion": c},  # noqa: E731
+                                "steps": [step("depart", a), step("turn", b), step("arrive", b)]}
+        data = {"code": "Ok", "routes": [{**MAPBOX_ROUTE["routes"][0],
+                                          "legs": [leg("Post", "4th", ["low"]), leg("4th", "King", ["heavy"])]}]}
+        r = providers.normalize_routes(data)[0]
+        self.assertEqual([(s["maneuver"]["type"], s["name"]) for s in r["steps"]],
+                         [("depart", "Post"), ("turn", "4th"), ("turn", "King"), ("arrive", "King")])
+        self.assertEqual(r["congestion"], ["low", "heavy"])
+
     def test_no_route_is_its_own_error(self):
         with self.assertRaises(providers.NoRoute):
             providers.normalize_routes({"code": "NoRoute", "routes": []})

@@ -254,10 +254,17 @@ def departure_advice(route: dict, depart: datetime, mode: str, ctx: dict, *, now
             "text": f"Leaving at {fmt_clock(best_t)} saves ~{mins(saves)} min."}
 
 
-def plan(routes: list[dict], departs: list[datetime], mode: str, ctx: dict, *, now: datetime) -> dict:
-    """transPEAKtation's pick: lowest predicted time. Same shape as web's former client-side transPeakPick."""
+def plan(routes: list[dict], departs: list[datetime], mode: str, ctx: dict, *, now: datetime,
+         ml: dict | None = None) -> dict:
+    """transPEAKtation's pick: lowest predicted time. Same shape as web's former client-side transPeakPick.
+    ml: ml/'s decision (app/ml.py: best, dur, model, reasons) replaces that pick, its time and the explanation."""
     preds = [predict_route(r, d, ctx, now=now) for r, d in zip(routes, departs)]
-    best = min(range(len(preds)), key=lambda i: preds[i]["dur"])
+    if ml:
+        best = ml["best"]
+        preds[best] = {**preds[best], "dur": ml["dur"], "delay": round(ml["dur"] - routes[best]["dur"]),
+                       "model": f"ml:{ml['model']}"}
+    else:
+        best = min(range(len(preds)), key=lambda i: preds[i]["dur"])
     p, first = preds[best], preds[0]
     saved, extra = first["dur"] - p["dur"], p["delay"]
     why_first = first["events"] + [i["label"] for i in first["incidents"]]
@@ -273,6 +280,8 @@ def plan(routes: list[dict], departs: list[datetime], mode: str, ctx: dict, *, n
             note += " Leaving earlier or later helps."
     else:
         tag, note = "Clear", "No events or closures on your way at this time."
+    if ml and ml.get("reasons"):
+        note = " ".join(ml["reasons"])
     if advice:
         note += f" {advice['text']}"
     if p["traffic"]["coverage"] and p["traffic"]["slow_segments"]:
