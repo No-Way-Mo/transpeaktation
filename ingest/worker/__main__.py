@@ -7,6 +7,7 @@
     python -m worker run incidents             # pull snapshots (closures, permits, Caltrans, CHP, dispatch) -> Mongo road_incidents
     python -m worker schedule                  # every 10 min: traffic + fresh incident snapshots; segments when the graph changes
     python -m worker backfill --date 2026-09-20  # closures/permits in effect that day (DataSF history) -> road_incidents
+    python -m worker serve                     # HTTP trigger: POST /ingest/refresh (needs INGEST_TOKEN; see worker/server.py)
 
 Needs the OSM graph first: `python -m pull osm_drive_graph` (writes data/raw/osm_drive_graph.graphml).
 `--dry-run` touches no database and prints what would be written; watermarks aren't saved.
@@ -27,74 +28,11 @@ from datasf import DATASETS, DataSF, pull as datasf_pull
 from datasf.client import load_dotenv
 from pull import DATA_DIR, ENV_FILE
 
-from .db import CombinedSink, ConfigError, DryRunSink, MongoSink, TigerSink
-from .incidents import geocode
-from .incidents.job import SOURCES as INCIDENT_SOURCES, IncidentJob
-from .network import Network, road_segment_doc
-from .state import STATE_DIR, State
-from .traffic import BUCKET, SOURCES, TrafficJob
-
-GRAPHML = DATA_DIR / "osm_drive_graph.graphml"
-
-
-def graph_sig(path: Path) -> str:
-    st = path.stat()
-    return f"{st.st_size}-{int(st.st_mtime)}"
-
-
-def load_network() -> Network:
-    if not GRAPHML.exists():
-        raise ConfigError(f"no OSM graph at {GRAPHML}: run `python -m pull osm_drive_graph` first")
-    return Network.load(GRAPHML, DATA_DIR / "streets.json", DATA_DIR / "speed_limits.json")
-
-
-def run_segments(net: Network, dry_run: bool) -> dict:
-    docs = [road_segment_doc(e) for e in net.edges.values()]
-    sink = DryRunSink() if dry_run else MongoSink()
-    sink.write_road_segments(docs)
-    out = {"road_segments": len(docs), "with_cnn": sum(1 for e in net.edges.values() if e.cnn),
-           "with_posted_limit": sum(1 for e in net.edges.values() if e.speed_limit_mph)}
-    if dry_run:
-        out["sample"] = sink.samples.get("road_segments", [])[:1]
-    return out
-
-
-def run_traffic(net: Network, sources: tuple[str, ...], dry_run: bool, state_dir: Path = STATE_DIR) -> dict:
-    state = State(state_dir)
-    if dry_run:
-        sink = DryRunSink()
-        state.save = lambda: None  # a dry run must not move watermarks
-    else:
-        try:
-            mongo = MongoSink()
-        except ConfigError as e:  # route plans are optional; traffic rows are the point
-            print(f"mongo unavailable, route_plans skipped: {e}", file=sys.stderr)
-            mongo = None
-        sink = CombinedSink(TigerSink(), mongo)
-    report = TrafficJob(net, state, sink, graph_sig=graph_sig(GRAPHML)).run(sources)
-    if dry_run:
-        report["_dry_run"] = {"would_write": dict(sink.counts), "samples": sink.samples}
-    return report
-
-
-def refresh_incident_snapshots() -> None:
-    """Re-pull the incident feeds (+ streets for cnn geometry) with `python -m pull`'s own code."""
-    from pull.__main__ import main as pull_main
-
-    pull_main(list(INCIDENT_SOURCES))
-
-
-def run_incidents(net: Network | None, dry_run: bool, use_geocoder: bool = True) -> dict:
-    geocoder, why = geocode.from_env(DATA_DIR.parent / "cache" / "geocode.json") if use_geocoder \
-        else (None, "geocoding disabled (--no-geocode)")
-    sink = DryRunSink() if dry_run else MongoSink()
-    report = IncidentJob(DATA_DIR, sink, net=net, geocoder=geocoder).run()
-    if geocoder is not None:
-        geocoder.save()
-    report["_geocoder"] = why
-    if dry_run:
-        report["_dry_run"] = {"would_write": dict(sink.counts), "sample": sink.samples.get("road_incidents", [])[:1]}
-    return report
+from .db import ConfigError, DryRunSink, MongoSink, TigerSink
+from .incidents.job import IncidentJob
+from .network import Network
+from .service import GRAPHML, cached_network, load_network, refresh, run_incidents, run_segments, run_traffic
+from .traffic import BUCKET, SOURCES
 
 
 # DataSF keeps these after they end, so a past day can be rebuilt. Dispatch, CHP and Caltrans (and traffic) are
@@ -137,20 +75,16 @@ def bootstrap(dry_run: bool) -> dict:
 
 
 def schedule() -> None:
-    net, sig = load_network(), graph_sig(GRAPHML)
+    net = cached_network() or load_network()  # load_network raises the "pull the graph first" ConfigError
     run_segments(net, dry_run=False)
     while True:
         started = time.monotonic()
-        if graph_sig(GRAPHML) != sig:  # weekly `pull osm_drive_graph` refresh
-            net, sig = load_network(), graph_sig(GRAPHML)
+        if (fresh := cached_network()) is not net:  # weekly `pull osm_drive_graph` refresh
+            net = fresh or load_network()
             print(json.dumps({"segments": run_segments(net, dry_run=False)}), flush=True)
-        for name, job in (("traffic", lambda: run_traffic(net, SOURCES, dry_run=False)),
-                          ("incidents", lambda: (refresh_incident_snapshots(), run_incidents(net, dry_run=False))[1])):
-            try:
-                print(json.dumps({"at": datetime.now(timezone.utc), name: job()}, default=str), flush=True)
-            except Exception as e:  # a feed or DB blip shouldn't kill the worker; watermarks didn't move
-                print(json.dumps({"at": datetime.now(timezone.utc), "job": name, "error": f"{type(e).__name__}: {e}"},
-                                 default=str), file=sys.stderr, flush=True)
+        # One implementation for the loop and POST /ingest/refresh: service.refresh (failures reported, not raised).
+        print(json.dumps({"at": datetime.now(timezone.utc), "refresh": refresh(("traffic", "incidents"))}, default=str),
+              flush=True)
         time.sleep(max(0.0, BUCKET.total_seconds() - (time.monotonic() - started)))
 
 
@@ -169,6 +103,9 @@ def main(argv: list[str]) -> int:
     bf = sub.add_parser("backfill")
     bf.add_argument("--date", required=True, type=date.fromisoformat, help="SF local day, YYYY-MM-DD")
     bf.add_argument("--dry-run", action="store_true")
+    sv = sub.add_parser("serve", help="HTTP trigger for refreshes (POST /ingest/refresh, GET /ingest/status/<id>)")
+    sv.add_argument("--host", default="127.0.0.1", help="bind address (default: localhost only)")
+    sv.add_argument("--port", type=int, default=8100)
     args = p.parse_args(argv)
 
     load_dotenv(ENV_FILE)
@@ -180,6 +117,10 @@ def main(argv: list[str]) -> int:
             return 0
         elif args.cmd == "backfill":
             out = backfill(args.date, load_network() if GRAPHML.exists() else None, args.dry_run)
+        elif args.cmd == "serve":
+            from .server import serve
+            serve(args.host, args.port)
+            return 0
         elif args.job == "segments":
             out = run_segments(load_network(), args.dry_run)
         elif args.job == "incidents":
