@@ -85,11 +85,20 @@ class RoadData(unittest.TestCase):
         self.assertEqual(p["breakdown"]["incidents_sec"], model.CLOSURE_PENALTY_S)
         self.assertEqual(p["incidents"][0]["label"], "Road closure on Fleet Week")
 
+    def test_duplicate_closure_rows_count_once(self):
+        sids = PAST["road_segment_ids"]
+        rows = [{"source": "street_closures", "category": "street_closure", "is_closure": True, "road_segment_ids": [s],
+                 "start_time": None, "end_time": None, "details": {"name": "NIBBI BROS"}} for s in sids[:2]]
+        other = {**rows[0], "details": {"name": "Parade"}, "road_segment_ids": [sids[5]]}
+        p = model.predict_route(PAST, at(10), {**CTX, "incidents": [*rows, other]}, now=at(9))
+        self.assertEqual(p["breakdown"]["incidents_sec"], model.CLOSURE_PENALTY_S)  # blocked once, not per closure
+        self.assertEqual([i["label"] for i in p["incidents"]], ["Road closure on NIBBI BROS", "Road closure on Parade"])
+
     def test_permits_are_ignored_and_minor_incidents_are_capped(self):
         sids = PAST["road_segment_ids"]
         permit = {"category": "excavation", "is_closure": False, "road_segment_ids": sids, "start_time": None, "end_time": None}
         crashes = [{"category": "collision", "is_closure": False, "road_segment_ids": [s], "start_time": None,
-                    "end_time": None, "details": {"call_type": "Traffic Collision"}} for s in sids]
+                    "end_time": None, "details": {"call_type": "Traffic Collision", "location_text": f"block {s}"}} for s in sids]
         p = model.predict_route(PAST, at(10), {**CTX, "incidents": [permit, *crashes]}, now=at(9))
         self.assertEqual(p["breakdown"]["incidents_sec"], model.INCIDENT_CAP_S)
         self.assertEqual(len(p["incidents"]), len(sids))

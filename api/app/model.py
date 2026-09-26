@@ -123,21 +123,22 @@ def incident_label(inc: dict) -> str:
 def incident_effects(incidents: list[dict], segment_ids: list[str], arrivals: list[datetime]) -> tuple[float, list[dict]]:
     """Closures/incidents that are active on a route segment at the moment the trip reaches it."""
     pos = {s: i for i, s in reversed(list(enumerate(segment_ids)))}  # first time the route uses each segment
-    delay, minor, out = 0.0, 0.0, []
+    minor, out, seen = 0.0, [], set()
     for inc in incidents:
         if inc.get("category") in NOT_A_DELAY:
             continue
         idx = min((pos[s] for s in inc.get("road_segment_ids") or [] if s in pos), default=None)
         if idx is None or not _active(inc, arrivals[idx]):
             continue
-        blocked = bool(inc.get("is_closure"))
-        if blocked:
-            delay += CLOSURE_PENALTY_S
-        else:
-            minor += INCIDENT_DELAY_S
-        out.append({"label": incident_label(inc), "is_closure": blocked, "source": inc.get("source"),
+        blocked, label = bool(inc.get("is_closure")), incident_label(inc)
+        if (label, blocked) in seen:  # sources list one closure per direction/block: count it once
+            continue
+        seen.add((label, blocked))
+        minor += 0 if blocked else INCIDENT_DELAY_S
+        out.append({"label": label, "is_closure": blocked, "source": inc.get("source"),
                     "at": arrivals[idx].isoformat(), "until": inc["end_time"].isoformat() if inc.get("end_time") else None})
-    return delay + min(minor, INCIDENT_CAP_S), out
+    # A closure makes the route blocked (one penalty, however many closures); minor incidents add up to a cap.
+    return (CLOSURE_PENALTY_S if any(i["is_closure"] for i in out) else 0) + min(minor, INCIDENT_CAP_S), out
 
 
 def traffic_effect(rows: list[dict], segment_ids: list[str], lengths: list[float] | None) -> dict:
