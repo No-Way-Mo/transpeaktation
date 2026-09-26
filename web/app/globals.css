@@ -49,6 +49,16 @@
   --origin: #34A0A4;
   --dest: #184E77;
   --marker-ring: #FFFFFF;
+  /* Event kinds on the map: off the route blues, brand greens and traffic amber/red, so a pin never reads as traffic.
+     Block parties + "other" are a quiet slate: they're most of the pins and the smallest draws. */
+  --ev-music: #7048E8;
+  --ev-sports: #3B5BDB;
+  --ev-parade: #A0522D;
+  --ev-festival: #D6409F;
+  --ev-conference: #0B7285;
+  --ev-market: #5C940D;
+  --ev-community: #718396;
+  --ev-other: #718396;
   --compass-n: #D9454F;
   /* Esri light-grey basemap, washed toward the meadow end so roads/water pick up the palette. */
   --map-tint: sepia(0.28) hue-rotate(58deg) saturate(1.25) brightness(1.01);
@@ -107,6 +117,14 @@
   --traffic-moderate: #E9B949;
   --dest: #D9ED92;
   --marker-ring: #0F2233;
+  --ev-music: #845EF7;
+  --ev-sports: #4C6EF5;
+  --ev-parade: #B8683A;
+  --ev-festival: #E64FAB;
+  --ev-conference: #1098AD;
+  --ev-market: #74B816;
+  --ev-community: #6B8196;
+  --ev-other: #6B8196;
   /* Esri dark-grey basemap pushed toward #184e77 navy. */
   --map-tint: sepia(0.5) hue-rotate(168deg) saturate(1.7) brightness(0.92);
 
@@ -147,9 +165,10 @@ input::placeholder { color: var(--muted); }
 .endpoints { display: flex; align-items: center; gap: 10px; padding: 4px 6px 4px 14px; border-radius: 14px; background: var(--fill); }
 .rail { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 4px 0; }
 .rail i { display: block; }
-.rail .o { width: 10px; height: 10px; border-radius: 50%; background: var(--origin); box-shadow: 0 0 0 2px var(--marker-ring), 0 0 0 3px var(--line-strong); }
-.rail .line { width: 2px; height: 20px; background: var(--line-strong); border-radius: 1px; }
-.rail .d { width: 10px; height: 10px; border-radius: 50%; background: var(--dest); box-shadow: 0 0 0 2px var(--marker-ring), 0 0 0 3px var(--line-strong); }
+/* Same shapes as the map: hollow start dot, then a dotted trail down to the destination pin. */
+.rail .o { width: 12px; height: 12px; border-radius: 50%; background: var(--marker-ring); border: 3px solid var(--origin); }
+.rail .line { width: 2px; height: 18px; background: radial-gradient(circle, var(--muted) 1px, transparent 1.5px) 0 0 / 2px 5px repeat-y; opacity: 0.7; }
+.rail .d { width: 12px; height: 12px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg); margin-top: 1px; background: var(--dest); box-shadow: inset 0 0 0 3.5px var(--dest), inset 0 0 0 6px var(--marker-ring); }
 .inputs { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .inputs input { height: 40px; border: none; outline: none; background: transparent; font-size: 15px; font-weight: 500; padding: 0; min-width: 0; }
 .sep { height: 1px; background: var(--line); }
@@ -212,7 +231,19 @@ input::placeholder { color: var(--muted); }
 .eta-bubble.on.tp { color: var(--on-brand); background: var(--brand); }
 
 /* Ingested event pins + their popup (Leaflet divIcon / popup, restyled with the theme tokens) */
-.event-pin { box-sizing: border-box; border-radius: 4px; background: var(--warn); border: 2px solid var(--marker-ring); box-shadow: var(--shadow-sm); }
+.event-pin { box-sizing: border-box; border-radius: 50%; background: var(--k); border: 2px solid var(--marker-ring); box-shadow: var(--shadow-sm); display: flex; align-items: center; justify-content: center; }
+.event-pin svg { width: 62%; height: 62%; fill: none; stroke: #FFFFFF; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.event-pin.k-community, .event-pin.k-other { opacity: 0.85; }
+.k-music { --k: var(--ev-music); } .k-sports { --k: var(--ev-sports); } .k-parade { --k: var(--ev-parade); }
+.k-festival { --k: var(--ev-festival); } .k-conference { --k: var(--ev-conference); } .k-market { --k: var(--ev-market); }
+.k-community { --k: var(--ev-community); } .k-other { --k: var(--ev-other); }
+.event-pop .kind { align-self: flex-start; width: fit-content; margin-bottom: 2px; padding: 1px 7px; border-radius: 6px; font-size: 11px; font-weight: 650; color: #FFFFFF; background: var(--k); }
+/* Start / destination (Leaflet divIcons; colours stay the --origin / --dest tokens) */
+.origin-pin { box-sizing: border-box; border-radius: 50%; background: var(--marker-ring); border: 5px solid var(--origin); box-shadow: 0 0 0 2px var(--marker-ring), var(--shadow-sm); }
+.dest-pin { background: none; border: none; }
+.dest-pin svg { width: 100%; height: 100%; display: block; overflow: visible; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.3)); }
+.dest-pin .body { fill: var(--dest); stroke: var(--marker-ring); stroke-width: 2; }
+.dest-pin .hole { fill: var(--marker-ring); }
 .event-pop .leaflet-popup-content-wrapper, .event-pop .leaflet-popup-tip { background: var(--pop); color: var(--ink); box-shadow: var(--shadow); }
 .event-pop .leaflet-popup-content-wrapper { border-radius: 12px; }
 .event-pop .leaflet-popup-content { margin: 10px 12px; display: flex; flex-direction: column; gap: 2px; font-family: var(--sans); }
@@ -263,6 +294,12 @@ input::placeholder { color: var(--muted); }
 .step .stack { flex: 1; padding-top: 1px; }
 .step-text { font-size: 14px; font-weight: 500; line-height: 1.3; text-wrap: pretty; }
 .desk-map { position: relative; flex: 1; min-width: 0; height: 100%; }
+.legend { position: absolute; left: 16px; bottom: 28px; z-index: 5; margin: 0; padding: 8px 12px; list-style: none; display: flex; flex-direction: column; gap: 5px; border-radius: 12px; background: var(--sheet-bg); box-shadow: var(--shadow-sm); font-size: 12px; font-weight: 550; color: var(--ink); }
+.legend li { display: flex; align-items: center; gap: 8px; }
+.legend .area { margin-top: 3px; padding-top: 7px; border-top: 1px solid var(--line); color: var(--muted); }
+.legend .area i { width: 18px; height: 18px; border-radius: 50%; border: 1.5px dashed var(--muted); background: radial-gradient(circle, var(--fill-2) 45%, var(--fill) 46%); }
+.event-pop .impact { margin-top: 2px; }
+.legend .event-pin { width: 18px; height: 18px; border-width: 1.5px; box-shadow: none; opacity: 1; }
 .map-ctrls { position: absolute; right: 16px; bottom: 28px; z-index: 5; display: flex; flex-direction: column; align-items: center; gap: 10px; }
 .zoom { display: flex; flex-direction: column; overflow: hidden; border-radius: 12px; background: var(--pop); box-shadow: var(--shadow); }
 .zoom button { width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: var(--ink); }

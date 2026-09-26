@@ -86,7 +86,7 @@ export async function fetchRoadConditions(w: Span, signal?: AbortSignal): Promis
 }
 
 // ---- route relevance ------------------------------------------------------------------------------------------
-export const EVENT_NEAR_M = 300;     // event point (venue / centre of its closures) within this of the route line
+export const EVENT_NEAR_M = 300;     // event point (venue / centre of its closures) within this of the route line, or its impact radius if larger
 export const CONDITION_NEAR_M = 40;  // no shared segment IDs: the condition must lie on the route line...
 export const ALONG_SHARE = 0.5;      // ...for at least half its points, so a street or freeway that only crosses it doesn't count
 // "Route 80", "I-280", "US 101": freeways are grade-separated, so a closure point on the deck above a street the route
@@ -127,7 +127,7 @@ export function routeContext(r: Route, events: MapEvent[], conditions: RoadCondi
   };
   const segs = new Set(r.road_segment_ids ?? []);
   return {
-    events: events.filter(e => eventInTime(e, trip) && onRoute([e.lat, e.lon], EVENT_NEAR_M)),
+    events: events.filter(e => eventInTime(e, trip) && onRoute([e.lat, e.lon], Math.max(EVENT_NEAR_M, eventImpact(e).radius_m))),
     conditions: conditions.filter(c => conditionInTime(c, trip) && (segs.size && c.road_segment_ids?.length
       ? c.road_segment_ids.some(id => segs.has(id))
       : along(c))),
@@ -152,6 +152,62 @@ export function fmtEventTime(e: MapEvent): string {
 
 /** "special_event" → "Special event". */
 export const fmtCategory = (c: string | null) => c ? (c[0].toUpperCase() + c.slice(1)).replace(/_/g, ' ') : '';
+
+// ---- event kind: what the map pin looks like -------------------------------------------------------------------
+// Every DataSF event arrives as category "special_event", so the category alone can't tell a farmers market from
+// Dreamforce. A real category (Ticketmaster / PredictHQ) wins; otherwise the name decides. First match wins, so the
+// order matters: "Portola Music Festival" is music, "Block-Tober Fest" is a block party, "Tech Street Festival" a festival.
+export type EventKind = 'music' | 'sports' | 'parade' | 'market' | 'community' | 'festival' | 'conference' | 'other';
+/** Pin label, whether it's a big draw (drawn larger) or a small local one (drawn small and muted), and a typical
+ *  crowd for one closed block of it (a guess for SF: Portola, Folsom St Fair, Dreamforce vs. a street's block party). */
+export const EVENT_KINDS: Record<EventKind, { label: string; big: boolean; crowd: number }> = {
+  music: { label: 'Concert & music', big: true, crowd: 12_000 },
+  sports: { label: 'Sports & races', big: true, crowd: 5_000 },
+  parade: { label: 'Parade', big: true, crowd: 8_000 },
+  festival: { label: 'Festival & fair', big: true, crowd: 8_000 },
+  conference: { label: 'Conference', big: true, crowd: 5_000 },
+  market: { label: 'Market', big: false, crowd: 1_500 },
+  community: { label: 'Block party', big: false, crowd: 150 },
+  other: { label: 'Event', big: false, crowd: 500 },
+};
+const KIND_BY_CATEGORY: Record<string, EventKind> = {
+  concert: 'music', concerts: 'music', music: 'music', performing_arts: 'music',
+  sports: 'sports', sport: 'sports', festival: 'festival', festivals: 'festival', community: 'community',
+  conference: 'conference', conferences: 'conference', expo: 'conference', expos: 'conference', parade: 'parade',
+};
+const KIND_BY_NAME: [EventKind, RegExp][] = [
+  ['music', /\bmusic\b|concert|symphony|opera|\bjazz\b|\bdj\b/i],
+  ['sports', /\bsports?\b|\bgame\b|tournament|marathon|\brace\b|\bbike\b|\b\d+k\b|cornhole|giants|warriors|49ers/i],
+  ['parade', /parade|fleet week|procession|blessing|sunday streets/i],
+  ['market', /market/i],
+  ['community', /block part|trick.?or.?treat|treat or treat|halloween|street party|barbe?cue|\bbbq\b|picnic|feast|wedding/i],
+  ['festival', /festival|\bfest\b|\bfesta\b|oktoberfest|street fair|\bfair\b|fiesta|carnival|celebration/i],
+  ['conference', /conference|summit|dreamforce|unboxed|corporate|convention|\bexpo\b|\bgala\b/i],
+];
+export function eventKind(e: Pick<MapEvent, 'name' | 'category'>): EventKind {
+  const byCat = e.category && KIND_BY_CATEGORY[e.category.toLowerCase()];
+  if (byCat) return byCat;
+  return KIND_BY_NAME.find(([, re]) => re.test(e.name))?.[0] ?? 'other';
+}
+
+// ---- impact area: how far out an event's crowd is likely to slow traffic ---------------------------------------
+// No feed gives attendance yet (DataSF permits don't), so the crowd is estimated: the kind's typical crowd, scaled by
+// how many street blocks the permit closes (^0.75: more blocks = more people, a bit less than proportionally).
+// The radius grows with sqrt(crowd), i.e. the area grows with the crowd. Heuristic, not a forecast: say "est." in UI.
+export const IMPACT_MIN_M = 150;
+export const IMPACT_MAX_M = 1200;
+export type EventImpact = { crowd: number; radius_m: number };
+export function eventImpact(e: Pick<MapEvent, 'name' | 'category' | 'road_closure_ids'>): EventImpact {
+  const blocks = Math.max(1, e.road_closure_ids?.length ?? 0);
+  const crowd = EVENT_KINDS[eventKind(e)].crowd * blocks ** 0.75;
+  const radius_m = Math.min(IMPACT_MAX_M, Math.max(IMPACT_MIN_M, 100 + 120 * Math.sqrt(crowd / 1000)));
+  return { crowd, radius_m };
+}
+/** "~8,000 people": two significant figures, it's an estimate. */
+export function fmtCrowd(n: number): string {
+  const k = 10 ** Math.max(0, Math.floor(Math.log10(Math.max(n, 1))) - 1);
+  return `~${(Math.round(n / k) * k).toLocaleString('en-US')} people`;
+}
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 

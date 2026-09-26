@@ -1,12 +1,27 @@
 'use client';
 import { useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { fmtDist, fmtWhen, fromPtInput, longerThanItLooks, mins, ptInput, RECENT, REPLAY, routeTag, stepIcon, type Place, type Route, type Step, type When } from '@/lib/route.ts';
+import { EVENT_KINDS, eventKind, type EventKind, type MapEvent } from '@/lib/context.ts';
+import { eventGlyph } from './map-view.tsx';
 import { smartSuggestions } from '@/lib/suggest.ts';
 import type { Card, useRoutePlanner } from '@/lib/use-route-planner.ts';
 import { useTheme } from '@/lib/use-theme.ts';
 import { useVoice } from '@/lib/use-voice.ts';
 
 type Planner = ReturnType<typeof useRoutePlanner>;
+
+/** Map key for the event pins: only the kinds on the map right now, biggest draws first. */
+export function EventLegend({ events }: { events: MapEvent[] }) {
+  const on = new Set(events.map(eventKind));
+  const kinds = (Object.keys(EVENT_KINDS) as EventKind[]).filter(k => on.has(k));
+  if (!kinds.length) return null;
+  return (
+    <ul className="legend" aria-label="Event types on the map">
+      {kinds.map(k => <li key={k}><i className={`event-pin k-${k}`} dangerouslySetInnerHTML={{ __html: eventGlyph(k) }} />{EVENT_KINDS[k].label}</li>)}
+      <li className="area"><i />Est. crowd impact area</li>
+    </ul>
+  );
+}
 
 /** The fork mark: one road splitting into the normal route (blue) and transPEAKtation's (green). */
 export function Logo({ size = 26, stroke = 2.6, className }: { size?: number; stroke?: number; className?: string }) {

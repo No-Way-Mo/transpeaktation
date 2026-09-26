@@ -1,8 +1,8 @@
 'use client';
 import { useEffect, useImperativeHandle, useRef, type Ref } from 'react';
 import type * as Leaflet from 'leaflet';
-import { fmtCategory, fmtEventTime, type MapEvent } from '@/lib/context.ts';
-import { labelPoint, trafficRuns, type LatLng, type Place, type Route } from '@/lib/route.ts';
+import { EVENT_KINDS, eventImpact, eventKind, fmtCrowd, fmtEventTime, type EventKind, type MapEvent } from '@/lib/context.ts';
+import { fmtDist, labelPoint, trafficRuns, type LatLng, type Place, type Route } from '@/lib/route.ts';
 import type { Theme } from '@/lib/theme.ts';
 import { useTheme } from '@/lib/use-theme.ts';
 
@@ -64,6 +64,14 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
     const cs = getComputedStyle(el.current), c = (n: string) => cs.getPropertyValue(n).trim();
     const casing = c('--route-casing'), line = c(tp ? '--brand-line' : '--route');
     g.clearLayers();
+    // Estimated impact areas under everything else: a faint dashed outer ring (where traffic may slow) and a
+    // stronger core. Biggest first so a small event's area stays visible on top of a big one.
+    [...(events ?? [])].map(ev => ({ ev, kind: eventKind(ev), r: eventImpact(ev).radius_m })).sort((a, b) => b.r - a.r)
+      .forEach(({ ev, kind, r }) => {
+        const col = c(`--ev-${kind}`), quiet = !EVENT_KINDS[kind].big;
+        l.circle([ev.lat, ev.lon], { radius: r, color: col, weight: 1.5, opacity: quiet ? 0.35 : 0.6, dashArray: '4 5', fillColor: col, fillOpacity: quiet ? 0.05 : 0.08, interactive: false }).addTo(g);
+        l.circle([ev.lat, ev.lon], { radius: r * 0.45, stroke: false, fillColor: col, fillOpacity: quiet ? 0.08 : 0.14, interactive: false }).addTo(g);
+      });
     routes.forEach((r, i) => {
       if (i === sel) return;
       const pick = () => latest.current.onSelect(i);
@@ -86,15 +94,18 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
         .on('click', () => latest.current.onSelect(i)).addTo(g);
     });
     // Event pins under the ETA labels; the popup is built from text nodes, never HTML from the data.
+    // Colour + glyph per kind; big draws (festivals, concerts, conferences...) larger than block parties and markets.
     events?.forEach(ev => {
-      const icon = l.divIcon({ className: 'event-pin', iconSize: [12, 12] });
-      l.marker([ev.lat, ev.lon], { icon, keyboard: false, zIndexOffset: -1000, title: ev.name })
+      const kind = eventKind(ev), n = EVENT_KINDS[kind].big ? 24 : 18;
+      const icon = l.divIcon({ className: `event-pin k-${kind}`, iconSize: [n, n], html: eventGlyph(kind) });
+      l.marker([ev.lat, ev.lon], { icon, keyboard: false, zIndexOffset: EVENT_KINDS[kind].big ? -900 : -1000, title: `${EVENT_KINDS[kind].label}: ${ev.name}` })
         .bindPopup(() => eventPopup(ev), { className: 'event-pop', closeButton: false, offset: [0, -2] }).addTo(g);
     });
     const ring = c('--marker-ring');
     if (marker) l.circleMarker(marker, { radius: 7, color: line, weight: 3, fillColor: ring, fillOpacity: 1 }).addTo(g);
-    if (from) l.circleMarker([from.lat, from.lon], { radius: 8, color: ring, weight: 3, fillColor: c('--origin'), fillOpacity: 1 }).addTo(g);
-    if (to) l.circleMarker([to.lat, to.lon], { radius: 8, color: ring, weight: 3, fillColor: c('--dest'), fillOpacity: 1 }).addTo(g);
+    // Map convention: start = hollow ring dot, destination = teardrop pin with its tip on the spot.
+    if (from) l.marker([from.lat, from.lon], { icon: l.divIcon({ className: 'origin-pin', iconSize: [18, 18] }), keyboard: false, zIndexOffset: 1500, title: `Start: ${from.label}` }).addTo(g);
+    if (to) l.marker([to.lat, to.lon], { icon: l.divIcon({ className: 'dest-pin', iconSize: [28, 36], iconAnchor: [14, 35], html: DEST_PIN }), keyboard: false, zIndexOffset: 2000, title: `Destination: ${to.label}` }).addTo(g);
   };
 
   useEffect(() => {
@@ -125,10 +136,30 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
   return <div ref={el} className="map" />;
 }
 
-/** Event name, venue, time, type: what we already have, nothing more. */
+const DEST_PIN = '<svg viewBox="0 0 28 36" aria-hidden="true"><path class="body" d="M14 34.5C14 34.5 26.5 21.8 26.5 13.5a12.5 12.5 0 0 0-25 0C1.5 21.8 14 34.5 14 34.5Z"/><circle class="hole" cx="14" cy="13.5" r="4.75"/></svg>';
+
+// 24×24 stroke glyphs (static strings, never data), drawn white inside the kind's coloured disc.
+const GLYPHS: Record<EventKind, string> = {
+  music: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
+  sports: '<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6M18 9h1.5a2.5 2.5 0 0 0 0-5H18M4 22h16M10 14.7V17c0 .6-.5 1-1 1.2C7.9 18.8 7 20.2 7 22M14 14.7V17c0 .6.5 1 1 1.2 1.1.6 2 2 2 3.8M18 2H6v7a6 6 0 0 0 12 0V2Z"/>',
+  parade: '<path d="M4 22V3M4 4h14l-3 4.5L18 13H4"/>',
+  festival: '<path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9Z"/>',
+  conference: '<path d="M3 4h18M4 4v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V4M12 16v4M8 21l4-1 4 1"/>',
+  market: '<path d="M3 9h18l-1.5 11h-15ZM8 9l4-6 4 6M9 13v4M15 13v4"/>',
+  community: '<path d="M3 11 12 3l9 8M5 9.5V21h14V9.5M10 21v-6h4v6"/>',
+  other: '<circle cx="12" cy="12" r="3.5"/>',
+};
+export const eventGlyph = (k: EventKind) => `<svg viewBox="0 0 24 24" aria-hidden="true">${GLYPHS[k]}</svg>`;
+
+/** Event name, venue, time, kind: what we already have, nothing more. */
 function eventPopup(ev: MapEvent): HTMLElement {
   const box = document.createElement('div');
-  for (const [cls, text] of [['name', ev.name], ['sub', ev.venue], ['sub', fmtEventTime(ev)], ['sub', fmtCategory(ev.category)]]) {
+  const kind = eventKind(ev), tag = box.appendChild(document.createElement('div'));
+  tag.className = `kind k-${kind}`;
+  tag.textContent = EVENT_KINDS[kind].label;
+  const { crowd, radius_m } = eventImpact(ev);
+  const impact = `${fmtCrowd(crowd)} (est.) · may slow traffic within ${fmtDist(radius_m)}`;
+  for (const [cls, text] of [['name', ev.name], ['sub', ev.venue], ['sub', fmtEventTime(ev)], ['sub impact', impact]]) {
     if (!text) continue;
     const line = box.appendChild(document.createElement('div'));
     line.className = cls!;
