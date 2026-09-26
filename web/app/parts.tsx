@@ -281,10 +281,10 @@ export function RouteList({ p, action }: { p: Planner; action?: ReactNode }) {
         <div className="label">Normal</div>
         {p.routes.map((rt, i) => {
           if (rt.by === 'ml') return null; // ml/'s own route only appears as the transPEAKtation pick
-          const longer = longerThanItLooks(rt, p.tp?.preds[i]), on = !p.choice.tp && p.choice.i === i;
+          const pred = p.tp?.preds[i], longer = longerThanItLooks(pred), on = !p.choice.tp && p.choice.i === i;
           return (
-            <RouteCard key={i} route={rt} card={p.card(i, false)} when={p.when} tag={longer?.tag ?? routeTag(i, rt.dur, fastest)}
-              tone={i === 0 && !longer ? 'fast' : ''} note={longer?.note}
+            <RouteCard key={i} route={rt} card={p.card(i, false)} when={p.when} tag={longer ?? routeTag(i, rt.dur, fastest)}
+              tone={i === 0 && !longer ? 'fast' : ''} note={pred?.note ?? undefined}
               selected={on} onPick={() => p.setChoice({ i, tp: false })} as={as}>
               {on && action}
             </RouteCard>
@@ -370,7 +370,7 @@ const SWITCHES: { key: keyof Privacy; label: string; detail: string }[] = [
   { key: 'saveTrips', label: 'Save my trips',
     detail: 'Keeps an area-level record of each trip (no exact start or end, no name or device ID) so we can forecast crowds. Off: nothing is written.' },
   { key: 'aiText', label: 'AI-written explanations',
-    detail: 'Google Gemini words the route card from trip facts, never addresses. Off: a built-in sentence, and nothing is sent to Google.' },
+    detail: 'Google Gemini words why the normal routes are slower, from trip facts, never addresses. Off: a built-in sentence, and nothing is sent to Google.' },
   { key: 'voice', label: 'Voice requests',
     detail: 'Your clip goes to ElevenLabs to become text; we don’t keep the audio. Off: the mic button is hidden.' },
 ];

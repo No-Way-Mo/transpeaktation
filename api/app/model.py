@@ -90,7 +90,8 @@ def event_effects(route: dict, depart: datetime, events: list[dict]) -> tuple[fl
         s = event_max_delay_s(ev) * near * time_factor(passing, crowd_windows(ev))
         if s >= MIN_EVENT_DELAY_S:
             total += s
-            hits.append({"id": ev["id"], "label": f"{ev['title']} at {ev['venue']}", "delay": round(s),
+            label = ev["title"] if ev["venue"] == ev["title"] else f"{ev['title']} at {ev['venue']}"  # DataSF: venue = title
+            hits.append({"id": ev["id"], "label": label, "delay": round(s),
                          "impact": round(100 * s / (12 * 60)), "distance_m": round(d)})
     return total, hits
 
@@ -244,22 +245,30 @@ def plan(routes: list[dict], departs: list[datetime], mode: str, ctx: dict, *, n
                        "model": f"ml:{ml['model']}"}
     p, first = preds[best], preds[0]
     saved = first["dur"] - p["dur"]
-    on_best = p["events"] + [i["label"] for i in p["incidents"]]
-    if p["blocked"]:
-        tag, note = "Closure ahead", f"Crosses a closure when you'd get there: {', '.join(on_best)}."
-    elif saved >= 60:
-        skipped = [x for x in first["events"] + [i["label"] for i in first["incidents"]] if x not in on_best]
-        tag, note = f"Saves ~{mins(saved)} min", f"Skips {' and '.join(skipped) or 'slower traffic'} on the fastest route."
-    elif on_best:
-        tag, note = "Events on the way", f"On your way: {' and '.join(on_best)}."
-    else:
-        tag, note = "Clear", "No events or closures on your way at this time."
-    if ml and ml.get("reasons"):
-        note = " ".join(ml["reasons"])
-    if p["traffic"]["coverage"] and p["traffic"]["slow_segments"]:
-        label = {"observed": "Traffic then", "typical": "Usual traffic then"}.get(ctx.get("traffic_kind"), "Live traffic")
-        note += f" {label}: {p['traffic']['slow_segments']} slow stretch{'es' if p['traffic']['slow_segments'] > 1 else ''} on this route."
+    tag = ("Closure ahead" if p["blocked"] else f"Saves ~{mins(saved)} min" if saved >= 60
+           else "Events on the way" if p["events"] or p["incidents"] else "Clear")
+    # Notes go on the normal cards only: why each is slower than the transPEAKtation time (Gemini rewords them, main.py).
+    tp_min, tie = mins(p["dur"]), False
+    for r, x in zip(routes, preds):
+        if r.get("by") == "ml":  # ml/'s own route is never shown as a normal route
+            continue
+        slower = mins(x["estimate"]["dur"]) - tp_min
+        tie |= slower <= 0
+        x["note"] = slower_note(x, slower) if slower > 0 else None
+    note = " ".join(ml["reasons"]) if ml and ml.get("reasons") else \
+        "No events or traffic slowing the fastest normal route." if tie else ""
     return {"best": best, "preds": preds, "tag": tag, "note": note, "advice": None}
+
+
+NOTE_MAX = 100
+
+
+def slower_note(x: dict, slower: int) -> str:
+    """Why a normal route takes `slower` more minutes than transPEAKtation's, in at most NOTE_MAX characters."""
+    why = x["estimate"]["why"]
+    text = ("Crosses a road closure when you'd get there." if x["blocked"] else
+            f"{slower} min slower: {', '.join(why) if why else 'longer or busier roads'}.")
+    return text if len(text) <= NOTE_MAX else text[:NOTE_MAX - 1] + "…"
 
 
 # --- events: database docs, demo fallback, web view ----------------------------------------------------------

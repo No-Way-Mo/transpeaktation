@@ -41,5 +41,5 @@ test('data path names who got what, in order', () => {
 
 test('trace line under the card', () => {
   assert.equal(traceLine(data()), 'Rule-based · Gemini text · Saved (area)');
-  assert.equal(traceLine(data({ decision: 'ml:x', note: 'ml', stored: 'off' })), 'AI model · Not saved');
+  assert.equal(traceLine(data({ decision: 'ml:x', note: 'template (ai text off)', stored: 'off' })), 'AI model · No AI text · Not saved');
 });

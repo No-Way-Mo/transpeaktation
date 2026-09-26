@@ -184,7 +184,7 @@ async def plan_trip(
     replay: bool = Query(False, description="Simulate a trip at a past time with the data stored for then (demo); "
                                             "not logged as a trip"),
     save: bool = Query(True, description="Log this request to Mongo `trips` (area-level, no identity); false = nothing stored"),
-    ai_text: bool = Query(True, description="Let Gemini word the explanation; false = template, nothing sent to Google"),
+    ai_text: bool = Query(True, description="Let Gemini word the normal routes' notes; false = template, nothing sent to Google"),
 ):
     """The trip planner: candidate routes (Mapbox/OSRM) -> events, closures, traffic and forecasts for their road
     segments at the trip's time (Mongo / Tiger, written by ingest/ and ml/) -> event-aware model -> pick,
@@ -240,12 +240,12 @@ async def plan_trip(
         if decision:
             decided_by = f"ml:{decision['model']}"
     result = model.plan(found, departs, mode, ctx, now=now, ml=decision)
-    note_by = "ml" if decision and decision.get("reasons") else "template"
-    if note_by == "template" and not ai_text:  # the rider turned AI text off: nothing goes to Google
-        note_by = "template (ai text off)"
-    elif note_by == "template":  # ml/'s own reasons win; otherwise Gemini words the facts, template on any failure
-        text, note_by = await advice.explain(state["http"], advice.facts(found, departs, mode, ctx, result))
-        result["note"] = text or result["note"]
+    note_by = "none (no normal route is slower)"
+    if slower := [p for p in result["preds"] if p.get("note")]:  # Gemini words the facts, template on any failure
+        texts, note_by = (None, "template (ai text off)") if not ai_text else \
+            await advice.explain(state["http"], advice.facts(found, ctx, result))  # off: nothing goes to Google
+        for p, text in zip(slower, texts or []):
+            p["note"] = text
     best = result["preds"][result["best"]]
 
     record = None

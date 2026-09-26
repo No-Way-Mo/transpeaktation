@@ -51,11 +51,9 @@ export function dataPath(d: PlanData, source: string): Stop[] {
       ? { who: 'Route model', did: `${d.decision.slice(3)} picked the route from the data above, on our servers.`, ai: true }
       : { who: 'Rule-based estimate', did: 'Picked the route from the data above with fixed rules. No AI model.' },
     gemini
-      ? { who: 'Google Gemini', did: 'Worded the route card from trip facts only: times, minutes, street and event names. No addresses or coordinates.', ai: true, outside: true }
-      : d.note === 'ml'
-        ? { who: 'Route model', did: 'Wrote the route card itself.', ai: true }
-        : { who: 'Built-in sentence', off: d.note.includes('ai text off'),
-            did: d.note.includes('ai text off') ? 'You turned AI text off, so nothing went to Google.' : 'Gemini wasn’t used this time, so nothing went to Google.' },
+      ? { who: 'Google Gemini', did: 'Worded why the normal routes are slower, from trip facts only: times, minutes, street and event names. No addresses or coordinates.', ai: true, outside: true }
+      : { who: 'Built-in sentence', off: d.note.includes('ai text off'),
+          did: d.note.includes('ai text off') ? 'You turned AI text off, so nothing went to Google.' : 'Gemini wasn’t used this time, so nothing went to Google.' },
     d.stored === 'trips'
       ? { who: 'Trip log', did: 'Saved an area-level record to forecast crowds: start and end to ~100 m, and the roads used minus a few blocks at each end. No name, account or device ID.' }
       : { who: 'Trip log', off: true, did: d.stored === 'replay' ? 'Not saved: a replay isn’t a real trip.' : 'Not saved: you turned saving off.' },
@@ -65,8 +63,7 @@ export function dataPath(d: PlanData, source: string): Stop[] {
 /** One line under the transPEAKtation card: who decided, who wrote it, whether it was kept. */
 export function traceLine(d: PlanData): string {
   const pick = d.decision.startsWith('ml:') ? 'AI model' : 'Rule-based';
-  const text = d.note.startsWith('gemini') ? 'Gemini text' : d.note === 'ml' ? '' : 'No AI text';
-  return [pick, text, d.stored === 'trips' ? 'Saved (area)' : 'Not saved'].filter(Boolean).join(' · ');
+  return [pick, d.note.startsWith('gemini') ? 'Gemini text' : 'No AI text', d.stored === 'trips' ? 'Saved (area)' : 'Not saved'].filter(Boolean).join(' · ');
 }
 
 /** True when a switch that shapes /plan changed since `used` planned the trip on screen. */
