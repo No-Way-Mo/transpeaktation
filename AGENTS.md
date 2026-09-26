@@ -26,3 +26,7 @@ One owner per folder. Only edit another folder with its owner's OK.
 ## Run
 <!-- add one line per folder once it runs -->
 - demo: `open demo/index.html` · test: `node demo/check.mjs`
+- ingest setup: `cd ingest && python -m venv .venv && .venv/Scripts/pip install -e .[osm]` (macOS/Linux: `.venv/bin/`)
+- ingest pull raw data: `cd ingest && .venv/Scripts/python -m pull [static|planned|live|<source>]` · quality report: `.venv/Scripts/python -m pull.check`
+- ingest DataSF live check: `cd ingest && python -m datasf` · test: `cd ingest && python -m unittest discover -s tests -t .`
+- ingest data sources plan + backlog: `ingest/TODO.md`

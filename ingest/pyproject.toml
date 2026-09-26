@@ -1,0 +1,12 @@
+[project]
+name = "transpeaktation-ingest"
+version = "0.1.0"
+description = "Ingest workers: pull city/road/event feeds and normalize them for Transpeaktation."
+requires-python = ">=3.10"
+dependencies = []  # pullers are stdlib-only; add DB drivers here when writers land.
+
+[project.optional-dependencies]
+osm = ["osmnx>=2,<3"]  # SF road graph (pull source: osm_drive_graph)
+
+[tool.setuptools]
+packages = ["datasf", "pull"]
