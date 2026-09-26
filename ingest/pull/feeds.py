@@ -85,10 +85,21 @@ def _511(path: str, **params: str) -> Any:
     return json.loads(body.decode("utf-8-sig"))  # 511 prefixes JSON with a BOM
 
 
-def sf511_traffic_events() -> tuple[Records, dict]:
-    """Bay Area incidents, closures, construction. Free key; ~60 requests/hour."""
-    data = _511("/traffic/events")
-    return data.get("events", []), {"pagination": data.get("pagination"), "meta": data.get("meta")}
+SF511_PAGE = 500
+
+
+def sf511_traffic_events(max_pages: int = 5) -> tuple[Records, dict]:
+    """Bay Area incidents, closures, construction. Free key; ~60 requests/hour, so
+    page in big chunks (the default page is only 20)."""
+    events: Records = []
+    for page in range(max_pages):
+        data = _511("/traffic/events", limit=str(SF511_PAGE), offset=str(page * SF511_PAGE))
+        batch = data.get("events", [])
+        events += batch
+        if len(batch) < SF511_PAGE or not (data.get("pagination") or {}).get("next_url"):
+            break
+    # Don't keep 511's pagination/meta: its URLs embed the api_key.
+    return events, {"pages": page + 1}
 
 
 def sf511_muni_vehicles() -> tuple[Records, dict]:

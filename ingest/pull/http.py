@@ -1,7 +1,9 @@
 """Tiny retrying HTTP GET/POST for the non-DataSF feeds. Stdlib (+ certifi if present)."""
 from __future__ import annotations
 
+import gzip
 import ssl
+import zlib
 import time
 import urllib.error
 import urllib.parse
@@ -41,19 +43,33 @@ def fetch(
     if params:
         url += ("&" if "?" in url else "?") + urllib.parse.urlencode(params)
     body = urllib.parse.urlencode(data).encode() if data else None
-    req = urllib.request.Request(url, data=body, headers={"User-Agent": USER_AGENT})
+    # Some APIs (511.org) refuse uncompressed responses, so always ask for gzip.
+    req = urllib.request.Request(url, data=body, headers={"User-Agent": USER_AGENT, "Accept-Encoding": "gzip, deflate"})
     for attempt in range(retries + 1):
         try:
             with urllib.request.urlopen(req, timeout=timeout, context=SSL_CONTEXT) as resp:
-                return resp.read()
+                return _decode(resp.read(), resp.headers.get("Content-Encoding", ""))
         except urllib.error.HTTPError as e:
             if (e.code in RETRY_STATUSES or e.code in retry_on) and attempt < retries:
                 time.sleep(float(e.headers.get("Retry-After") or 2**attempt))
                 continue
-            raise FetchError(f"{e.code} from {url.split('?')[0]}: {e.read()[:200]!r}") from e
+            detail = _decode(e.read(), e.headers.get("Content-Encoding", "")) if e.fp else b""
+            raise FetchError(f"{e.code} from {url.split('?')[0]}: {detail[:200]!r}") from e
         except (urllib.error.URLError, TimeoutError) as e:
             if attempt < retries:
                 time.sleep(2**attempt)
                 continue
             raise FetchError(f"{url.split('?')[0]}: {e}") from e
     raise AssertionError("unreachable")
+
+
+def _decode(raw: bytes, encoding: str) -> bytes:
+    encoding = encoding.lower()
+    if "gzip" in encoding:
+        return gzip.decompress(raw)
+    if "deflate" in encoding:
+        try:
+            return zlib.decompress(raw)
+        except zlib.error:  # raw deflate without zlib header
+            return zlib.decompress(raw, -zlib.MAX_WBITS)
+    return raw

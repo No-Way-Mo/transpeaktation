@@ -7,6 +7,7 @@ dependencies = []  # pullers are stdlib-only; add DB drivers here when writers l
 
 [project.optional-dependencies]
 osm = ["osmnx>=2,<3"]  # SF road graph (pull source: osm_drive_graph)
+live = ["mapbox-vector-tile>=2"]  # decode TomTom traffic tiles (pull.poll)
 
 [tool.setuptools]
 packages = ["datasf", "pull"]

@@ -49,7 +49,8 @@ class BudgetTests(unittest.TestCase):
             self.assertTrue(inside(c.a, SF_BBOX) and inside(c.b, SF_BBOX), c.key)
 
     def test_main_refuses_over_budget_schedule(self):
-        with mock.patch.dict("os.environ", {"MAPBOX_TOKEN": "t"}), mock.patch.object(poll, "poll_once") as p:
+        with mock.patch.dict("os.environ", {"MAPBOX_TOKEN": "t"}), mock.patch.object(poll, "load_dotenv"), \
+                mock.patch.object(poll, "poll_once") as p:
             self.assertEqual(poll.main(["--every", "60"]), 2)
         p.assert_not_called()
 
@@ -86,3 +87,59 @@ class PollCheckTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MuniTests(unittest.TestCase):
+    def test_muni_rows_compacts_and_skips_bad_locations(self):
+        activity = [
+            {"RecordedAtTime": "2026-09-26T08:53:49Z", "MonitoredVehicleJourney": {
+                "VehicleRef": "10", "LineRef": "14", "DirectionRef": "IB", "Bearing": "90.0",
+                "Occupancy": "seatsAvailable", "VehicleLocation": {"Longitude": "-122.41", "Latitude": "37.79"}}},
+            {"RecordedAtTime": "2026-09-26T08:53:49Z", "MonitoredVehicleJourney": {
+                "VehicleRef": "11", "VehicleLocation": {"Longitude": "", "Latitude": ""}}},
+        ]
+        rows = poll.muni_rows(activity, datetime(2026, 9, 26, 8, 54, tzinfo=timezone.utc))
+        self.assertEqual(len(rows), 1)
+        self.assertEqual((rows[0]["vehicle"], rows[0]["line"], rows[0]["lon"], rows[0]["bearing"]), ("10", "14", -122.41, 90.0))
+
+
+class EventPollerTests(unittest.TestCase):
+    def test_writes_only_new_or_updated_events(self):
+        batches = iter([
+            ([{"id": "a", "updated": "1", "headline": "x"}, {"id": "b", "updated": "1", "headline": "y"}], {}),
+            # a: only `updated` bumped (511 does this constantly) -> skipped; b: content changed -> written
+            ([{"id": "a", "updated": "2", "headline": "x"}, {"id": "b", "updated": "2", "headline": "y2"}], {}),
+        ])
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(poll, "EVENTS_DIR", Path(tmp)), \
+                mock.patch.object(poll.feeds, "sf511_traffic_events", side_effect=lambda: next(batches)):
+            poller = poll.EventPoller()
+            self.assertEqual(poller(), (2, 2))
+            self.assertEqual(poller(), (1, 2))
+            rows = [json.loads(line) for f in Path(tmp).glob("*.jsonl") for line in f.read_text().splitlines()]
+        self.assertEqual([(r["id"], r["updated"]) for r in rows], [("a", "1"), ("b", "1"), ("b", "2")])
+
+
+class Sf511BudgetTests(unittest.TestCase):
+    def test_refuses_muni_schedule_over_hourly_limit(self):
+        env = {"SF511_API_KEY": "k"}
+        with mock.patch.dict("os.environ", env), mock.patch.object(poll, "load_dotenv"), \
+                mock.patch.object(poll, "poll_muni") as p:
+            self.assertEqual(poll.main(["--only", "muni", "--muni-every", "30"]), 2)
+        p.assert_not_called()
+
+
+class TileMathTests(unittest.TestCase):
+    def test_sf_zoom13_tiles_and_corner_roundtrip(self):
+        from pull.tiles import tile_point_to_lonlat, tiles_for_bbox
+        tiles = tiles_for_bbox(z=13)
+        self.assertEqual(len(tiles), 25)
+        z, x, y = tiles[0]
+        lon, lat = tile_point_to_lonlat(z, x, y, 0, 0, 4096)  # tile's north-west corner
+        self.assertLessEqual(lon, SF_BBOX[0])
+        self.assertGreaterEqual(lat, SF_BBOX[3])
+
+    def test_line_key_is_stable_under_float_noise(self):
+        from pull.tiles import line_key
+        self.assertEqual(line_key([(-122.4, 37.78), (-122.401, 37.781)]),
+                         line_key([(-122.4000001, 37.7800001), (-122.401, 37.781)]))

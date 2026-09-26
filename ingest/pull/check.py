@@ -377,27 +377,127 @@ def run() -> int:
             warns += f.level == WARN
             print(f"  {f.level}  {f.check:<16} {f.detail}")
 
-    polls = load_polls()
-    print(f"\nmapbox_corridors [time series]  {len(polls)} route polls")
-    for f in check_polls(polls, now) if polls else [Finding(WARN, "history", "no polls yet (python -m pull.poll)")]:
-        fails += f.level == FAIL
-        warns += f.level == WARN
-        print(f"  {f.level}  {f.check:<16} {f.detail}")
+    from .poll import EVENTS_DIR, MAPBOX_TILES_DIR, MUNI_DIR, TOMTOM_DIR, TS_DIR
+    for name, directory, checker, unit in [("mapbox_corridors", TS_DIR, check_polls, "route polls"),
+                                           ("tomtom_flow", TOMTOM_DIR, check_tomtom, "tile polls"),
+                                           ("mapbox_traffic", MAPBOX_TILES_DIR, check_mapbox_tiles, "tile polls"),
+                                           ("muni_vehicles", MUNI_DIR, check_muni, "vehicle fixes"),
+                                           ("sf511_events", EVENTS_DIR, check_events, "event versions")]:
+        rows = load_polls(directory)
+        print(f"\n{name} [time series]  {len(rows)} {unit}")
+        for f in checker(rows, now) if rows else [Finding(WARN, "history", "no polls yet (python -m pull.poll)")]:
+            fails += f.level == FAIL
+            warns += f.level == WARN
+            print(f"  {f.level}  {f.check:<16} {f.detail}")
     print(f"\n{fails} FAIL, {warns} WARN")
     return 1 if fails else 0
 
 
-# --- speed time series -----------------------------------------------------
+# --- time series -----------------------------------------------------------
 
 CONGESTION_LEVELS = {"unknown", "low", "moderate", "heavy", "severe"}
 
 
-def load_polls() -> list[dict]:
-    from .poll import TS_DIR
+def load_polls(directory=None) -> list[dict]:
+    if directory is None:
+        from .poll import TS_DIR as directory
     rows = []
-    for path in sorted(TS_DIR.glob("*.jsonl")) if TS_DIR.exists() else []:
+    for path in sorted(directory.glob("2*.jsonl")) if directory.exists() else []:  # dated files only
         rows += [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
     return rows
+
+
+def haversine_m(a: tuple[float, float], b: tuple[float, float]) -> float:
+    import math
+    lon1, lat1, lon2, lat2 = map(math.radians, (*a, *b))
+    h = math.sin((lat2 - lat1) / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2) ** 2
+    return 2 * 6_371_000 * math.asin(math.sqrt(h))
+
+
+def check_muni(rows: list[dict], now: datetime) -> list[Finding]:
+    times = sorted({datetime.fromisoformat(r["polled_at"]) for r in rows})
+    per_poll = Counter(r["polled_at"] for r in rows)
+    in_service = [r for r in rows if r.get("line")]
+    outside = sum(1 for r in rows if not inside((r["lon"], r["lat"]), BAY_BBOX))
+    # Speeds from consecutive fixes of the same in-service vehicle.
+    last: dict[str, dict] = {}
+    speeds = []
+    for r in sorted(in_service, key=lambda r: r["polled_at"]):
+        prev = last.get(r["vehicle"])
+        if prev:
+            dt = (datetime.fromisoformat(r["polled_at"]) - datetime.fromisoformat(prev["polled_at"])).total_seconds()
+            if 0 < dt <= 300:
+                speeds.append(haversine_m((prev["lon"], prev["lat"]), (r["lon"], r["lat"])) / dt)
+        last[r["vehicle"]] = r
+    moving = sorted(s for s in speeds if s > 0.5)
+    implausible = sum(1 for s in speeds if s > 35)
+    found = [
+        freshness(times[-1], now, timedelta(minutes=10), timedelta(hours=1), "poll"),
+        Finding(PASS, "fleet", f"{len(times)} polls; median {sorted(per_poll.values())[len(per_poll) // 2]} vehicles/poll; "
+                               f"{pct(len(in_service), len(rows))} of fixes in service (have a line)"),
+        Finding(PASS if not outside else WARN, "in-area", f"{outside} fixes outside the Bay Area"),
+    ]
+    if speeds:
+        found.append(Finding(PASS if implausible <= 0.01 * len(speeds) else WARN, "derived speed",
+                             f"{len(speeds)} speed samples; moving median "
+                             f"{(moving[len(moving) // 2] * 2.237 if moving else 0):.1f} mph; {implausible} > 35 m/s (GPS jumps)"))
+    else:
+        found.append(Finding(WARN, "derived speed", "need 2+ polls of in-service vehicles to compute speeds"))
+    return found
+
+
+def check_tomtom(rows: list[dict], now: datetime) -> list[Finding]:
+    found = []
+    for style in ("absolute", "relative"):
+        rs = [r for r in rows if r.get("style") == style]
+        if not rs:
+            found.append(Finding(WARN, style, "no polls yet"))
+            continue
+        ok = [r for r in rs if r.get("ok")]
+        latest = max(r["polled_at"] for r in rs)
+        last = [r for r in ok if r["polled_at"] == latest]
+        levels = [ln[1] for r in last for ln in r["lines"] if ln[1] is not None]
+        closed = sum(1 for r in last for ln in r["lines"] if ln[3])
+        lo, hi = (0, 150) if style == "absolute" else (0, 1.0)
+        bad = sum(1 for v in levels if not lo <= v <= hi)
+        warn_after = timedelta(minutes=30) if style == "absolute" else timedelta(hours=2)
+        found += [
+            Finding(PASS if len(ok) == len(rs) else WARN, f"{style} tiles",
+                    f"{pct(len(ok), len(rs))} of tile requests ok over {len({r['polled_at'] for r in rs})} polls"),
+            freshness(datetime.fromisoformat(latest), now, warn_after, 3 * warn_after, f"{style} poll"),
+            Finding(PASS if levels and not bad else WARN, f"{style} values",
+                    f"latest poll: {len(levels)} road lines with a value "
+                    + (f"(median {sorted(levels)[len(levels) // 2] * 0.621:.0f} mph)" if style == "absolute" and levels else "")
+                    + f"; {bad} outside {lo}-{hi}; {closed} flagged closed"),
+        ]
+    return found
+
+
+def check_mapbox_tiles(rows: list[dict], now: datetime) -> list[Finding]:
+    ok = [r for r in rows if r.get("ok")]
+    latest = max(r["polled_at"] for r in rows)
+    last = [r for r in ok if r["polled_at"] == latest]
+    levels = Counter(ln[1] for r in last for ln in r["lines"])
+    bad = sum(n for lvl, n in levels.items() if lvl not in CONGESTION_LEVELS)
+    return [
+        Finding(PASS if len(ok) == len(rows) else WARN, "tiles",
+                f"{pct(len(ok), len(rows))} of tile requests ok over {len({r['polled_at'] for r in rows})} polls"),
+        freshness(datetime.fromisoformat(latest), now, timedelta(minutes=50), timedelta(hours=3), "poll"),
+        Finding(PASS if levels and not bad else WARN, "values",
+                f"latest poll: {sum(levels.values())} road lines; {dict(levels.most_common())}"),
+    ]
+
+
+def check_events(rows: list[dict], now: datetime) -> list[Finding]:
+    ids = {r.get("id") for r in rows}
+    sf = {r.get("id") for r in rows if any(a.get("name") == "San Francisco" for a in r.get("areas", []))}
+    # No freshness check: rows are only written when an event is new or updated.
+    newest = max(datetime.fromisoformat(r["polled_at"]) for r in rows)
+    return [
+        Finding(PASS, "last change", f"newest new/updated event written {age(newest, now)} ago"),
+        Finding(PASS, "events", f"{len(ids)} distinct events ({len(sf)} in SF), {len(rows)} versions; "
+                                f"types {dict(Counter(r.get('event_type') for r in rows).most_common(4))}"),
+    ]
 
 
 def check_polls(rows: list[dict], now: datetime) -> list[Finding]:

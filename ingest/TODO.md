@@ -31,9 +31,13 @@ Check: `.venv/Scripts/python -m pull.check`
 | # | What | Source (`pull` name) | Status |
 |---|------|--------|--------|
 | 14 | Real-time police dispatch calls (~20 min lag) | DataSF `gnap-fj3t` (`police_dispatch`) | ✅ |
-| 15 | Traffic incidents, closures, Muni vehicles | 511.org 🔑 (`sf511_traffic_events`, `sf511_muni_vehicles`; free; ~60 req/hr per token) | 🟡 response shapes unverified until we have a key |
+| 15 | Traffic incidents, closures, construction (Bay Area; ~100 events, one request) | 511.org 🔑 (`sf511_traffic_events`; polled into `timeseries/sf511_events` when new/updated) | ✅ |
+| 15b | Muni vehicle positions every 90 s → bus speeds on most major streets | 511.org 🔑 (`sf511_muni_vehicles`; `timeseries/muni_vehicles`; speeds derived from consecutive fixes) | ✅ collecting |
 | 16 | Freeway crashes and hazards | CHP feed (`chp_incidents`); sometimes served truncated, parsed entry by entry | ✅ |
-| 17 | Live speed + congestion per road segment on 9 corridors (17 routes), every 10 min → time series | Mapbox Directions `driving-traffic` 🔑 (`python -m pull.poll`, corridors in `pull/corridors.py`) | 🟡 needs `MAPBOX_TOKEN` |
+| 17 | Live speed + congestion per road segment on 9 corridors (17 routes), every 10 min → time series | Mapbox Directions `driving-traffic` 🔑 (`python -m pull.poll`, corridors in `pull/corridors.py`) | ✅ collecting |
+| 17b | Longer multi-waypoint venue loops (up to 25 waypoints, same request cost) | Mapbox Directions | ⬜ |
+| 17c | **City-wide speed (km/h) + closure flag on every road line**, zoom 13 (25 tiles): absolute every 10 min, relative (fraction of free-flow) every 6 h | TomTom Traffic API vector flow tiles 🔑 (`tomtom_flow`; ~111k of 200k free tiles/month) | ✅ collecting |
+| 17d | Congestion level on every road line incl. residential, zoom 14 (81 tiles, 63 with roads) every 20 min | Mapbox `mapbox-traffic-v1` tiles (`mapbox_traffic`; ~137–175k of 200k free tiles/month, separate from Directions) | ✅ collecting |
 
 ## 4. Simulation
 | # | What | Source | Status |
@@ -53,7 +57,23 @@ Check: `.venv/Scripts/python -m pull.check`
 - **Nothing free gives historical speeds for SF city streets.** Start polling now so history accumulates (~1 h for zero-shot forecasts, 2–4 weeks to evaluate/fine-tune, months to learn event effects).
 - Mapbox free tier: 100k requests/month → 17 routes every 10 min (~73k). `pull.poll` refuses schedules over 90k unless `--allow-paid`.
 - Free historical freeway speeds exist (Caltrans PeMS / LargeST Bay Area) if we want pretraining/eval data; not SF surface streets.
+- 511 token limit is ~60 requests/hour: Muni every 90 s (40/h) + events every 10 min (6/h). `pull.poll` refuses schedules over 55/h.
 - Polling runs wherever it's started; a laptop that sleeps leaves gaps (`pull.check` reports them). Move to DigitalOcean with the ingestion worker.
+
+### Coverage (2026-09-26, share of SF's 1,158 miles of drivable road, from the OSM graph)
+| Road type | Miles | Mapbox routes (exact speed) | TomTom tiles (speed) | Mapbox tiles (congestion level) | Muni (night) | Combined |
+|---|---|---|---|---|---|---|
+| Freeway | 67 | 0.2% | 100% | 100% | 1.8% | 100% |
+| Trunk/primary | 106 | 18.6% | 99.8% | 100% | 8.5% | 100% |
+| Secondary | 133 | 6.0% | 100% | 100% | 7.4% | 100% |
+| Tertiary | 136 | 2.0% | 92.9% | 100% | 4.0% | 100% |
+| Residential/other | 716 | 1.2% | 35.6% | 99.8% | 1.6% | 99.9% |
+| All | 1,158 | 3.4% | 59.4% | 99.9% | 3.2% | 99.9% |
+
+- Actual speed (km/h) on ~59% of road length (TomTom); congestion level only on the rest (Mapbox tiles), to be converted to mph using roads where both Mapbox congestion and an exact speed exist (Mapbox routes).
+- TomTom's residential gap is missing data, not zoom: zoom 13/14/15 all gave the same coverage in the Sunset and Mission tests.
+- Mapbox residential lines were ~all "low" at 2 AM; confirm in daytime that they vary (real signal, not a default).
+- Measured by sampling every ~25 m along each OSM road and checking for a source's line within ~15–45 m, so parallel roads can be slightly overcounted.
 
 ## Integration work (ingestion worker step, not started)
 - Link DataSF segments (`cnn`) to OSM roads by location (OSMnx nearest-edge match); redo on each refresh.
