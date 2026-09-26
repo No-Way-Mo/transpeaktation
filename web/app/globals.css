@@ -425,7 +425,82 @@ input::placeholder { color: var(--muted); }
 .mob .smart-title { font-size: 16px; }
 .mob .trip-note { border-radius: 14px; }
 
+/* ---------- AI & privacy ---------- */
+/* Shield button: the desktop header's round button, or a twin of the mic in the mobile start row. */
+.ai-btn { flex: none; display: flex; align-items: center; justify-content: center; color: var(--action-text); }
+.brand .ai-btn { margin-left: auto; }
+.brand .ai-btn + .theme-btn { margin-left: 0; }
+.where-row .ai-btn { width: 48px; height: 48px; border-radius: 12px; background: var(--fill); }
+.ai-btn[aria-pressed='true'] { background: var(--action-tint); }
+/* One line under the transPEAKtation card: who picked, who wrote it, whether it was kept. Opens the panel. */
+.trace-strip { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 6px 10px 6px 12px; border-radius: 10px; background: var(--fill); font-size: 13px; font-weight: 550; line-height: 1.35; text-align: left; }
+.trace-strip .lead:first-child { color: var(--action-text); }
+
+.aip { display: flex; flex-direction: column; gap: 28px; outline: none; }
+.aip-lede { margin: 0; font-size: 14px; line-height: 1.45; color: var(--muted); text-wrap: pretty; }
+.aip-sec { display: flex; flex-direction: column; gap: 12px; }
+.aip-h { margin: 0; font-size: 15px; font-weight: 650; letter-spacing: -0.01em; text-wrap: balance; }
+.aip-empty { margin: 0; padding: 14px; border-radius: 14px; background: var(--fill); font-size: 14px; line-height: 1.45; color: var(--muted); text-wrap: pretty; }
+.aip-foot { margin: 0; padding: 0 2px; line-height: 1.45; text-wrap: pretty; }
+
+/* Where the trip's data went: the from/to box's dotted rail, one stop per service or model.
+   Teal = our servers, blue = AI on our servers, amber = sent to another company, dashed = skipped. */
+.trace { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.stop { position: relative; display: grid; grid-template-columns: 12px 1fr; column-gap: 14px; padding-bottom: 16px; }
+.stop:last-child { padding-bottom: 0; }
+.stop:not(:last-child)::before { content: ''; position: absolute; left: 5px; top: 19px; bottom: 3px; width: 2px; background: radial-gradient(circle, var(--muted) 1px, transparent 1.5px) 0 0 / 2px 5px repeat-y; opacity: 0.7; }
+.stop .dot { width: 12px; height: 12px; margin-top: 3px; border-radius: 50%; background: var(--marker-ring); border: 3px solid var(--origin); }
+.stop.ai .dot { border-color: var(--action); }
+.stop.out .dot { border-color: var(--warn); }
+.stop.off .dot { border: 2px solid var(--line-strong); background: transparent; }
+.stop .stack { gap: 3px; }
+.stop-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.stop-head b { font-size: 14px; font-weight: 650; }
+.stop.off b { color: var(--muted); }
+.stop .tag { font-size: 11px; padding: 1px 7px; }
+.tag.off { color: var(--muted); background: var(--fill); }
+.stop-did { font-size: 13px; line-height: 1.45; color: var(--muted); text-wrap: pretty; }
+
+.aip-record { border-radius: 12px; background: var(--fill); }
+.aip-record summary { padding: 10px 12px; font-size: 13px; font-weight: 600; color: var(--action-text); cursor: pointer; }
+.aip-record summary .sub { margin-left: 6px; font-weight: 500; }
+.aip-record dl { margin: 0; padding: 0 12px 12px; display: grid; gap: 4px; font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.aip-record dl div { display: grid; grid-template-columns: minmax(0, 12ch) 1fr; gap: 10px; }
+.aip-record dt { color: var(--muted); overflow-wrap: anywhere; }
+.aip-record dd { margin: 0; overflow-wrap: anywhere; }
+
+/* Switches: one grouped list, the whole row is the control. */
+.aip-switches { display: flex; flex-direction: column; border-radius: 14px; background: var(--fill); overflow: hidden; }
+.aip-switch { display: flex; align-items: center; gap: 14px; width: 100%; padding: 12px 14px; text-align: left; }
+.aip-switch + .aip-switch { border-top: 1px solid var(--line); }
+.aip-switch .stack { gap: 3px; }
+.aip-switch .sub { line-height: 1.4; text-wrap: pretty; }
+.switch { flex: none; position: relative; width: 44px; height: 26px; border-radius: 999px; background: color-mix(in srgb, var(--muted) 55%, transparent); transition: background-color 0.2s var(--ease-out); }
+.switch i { position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #FFFFFF; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25); transition: transform 0.2s var(--ease-out); }
+.aip-switch[aria-checked='true'] .switch { background: var(--action); }
+.aip-switch[aria-checked='true'] .switch i { transform: translateX(18px); }
+.aip-stale { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-radius: 12px; background: var(--action-tint); font-size: 13px; line-height: 1.4; }
+.aip-stale .pill-btn { flex: none; align-self: center; }
+
+.aip-keep { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.aip-keep li { display: grid; grid-template-columns: 16px 1fr; gap: 10px; font-size: 14px; line-height: 1.4; text-wrap: pretty; }
+.aip-keep svg { margin-top: 1px; }
+.aip-keep .yes { color: var(--good); }
+.aip-keep .no { color: var(--bad); }
+
+.ai-sheet .search-bar .title { font-size: 20px; font-weight: 700; }
+.mob .aip-switch { padding: 14px; }
+.mob .aip-switch .name { font-size: 16px; }
+.mob .aip-switch .sub, .mob .stop-did { font-size: 14px; }
+.mob .stop-head b { font-size: 15px; }
+.mob .trace-strip { min-height: 44px; border-radius: 12px; font-size: 14px; }
+.mob .aip-stale .pill-btn { height: 40px; }
+@media (hover: hover) {
+  .where-row .ai-btn:hover, .trace-strip:hover { background: var(--fill-2); }
+  .aip-switch:hover { background: var(--fill); }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .sheet, .route { transition: none; }
+  .sheet, .route, .switch, .switch i { transition: none; }
   .leaflet-zoom-anim .leaflet-zoom-animated { transition: none !important; }
 }

@@ -183,10 +183,13 @@ async def plan_trip(
     arrive_by: str | None = Query(None, description="Arrive by (ISO 8601 with offset)"),
     replay: bool = Query(False, description="Simulate a trip at a past time with the data stored for then (demo); "
                                             "not logged as a trip"),
+    save: bool = Query(True, description="Log this request to Mongo `trips` (area-level, no identity); false = nothing stored"),
+    ai_text: bool = Query(True, description="Let Gemini word the explanation; false = template, nothing sent to Google"),
 ):
     """The trip planner: candidate routes (Mapbox/OSRM) -> events, closures, traffic and forecasts for their road
     segments at the trip's time (Mongo / Tiger, written by ingest/ and ml/) -> event-aware model -> pick,
-    explanation and a better departure time. Logs the request to Mongo `trips` (no user identity).
+    explanation and a better departure time. Logs the request to Mongo `trips` (no user identity) unless save=false;
+    data.trip_record is exactly what was logged.
     Traffic by trip time: live (now), observed (past, replay), typical (future); see Store.traffic_at.
     With ML_URL set, ml/ makes the decision (app/ml.py, contracts/route_decision.md); otherwise the heuristic."""
     a, b = lonlat(from_), lonlat(to)
@@ -238,13 +241,16 @@ async def plan_trip(
             decided_by = f"ml:{decision['model']}"
     result = model.plan(found, departs, mode, ctx, now=now, ml=decision)
     note_by = "ml" if decision and decision.get("reasons") else "template"
-    if note_by == "template":  # ml/'s own reasons win; otherwise Gemini words the facts, template on any failure
+    if note_by == "template" and not ai_text:  # the rider turned AI text off: nothing goes to Google
+        note_by = "template (ai text off)"
+    elif note_by == "template":  # ml/'s own reasons win; otherwise Gemini words the facts, template on any failure
         text, note_by = await advice.explain(state["http"], advice.facts(found, departs, mode, ctx, result))
         result["note"] = text or result["note"]
     best = result["preds"][result["best"]]
 
-    if not replay:  # a simulation isn't demand
-        background.add_task(store.save_trip, {
+    record = None
+    if save and not replay:  # a simulation isn't demand
+        record = {
             "requested_at": now, "source": "web", "mode": mode, "depart_at": departs[result["best"]],
             # ~100 m: enough for demand by area, without storing exact addresses
             "origin": {"lon": round(a[0], 3), "lat": round(a[1], 3)}, "destination": {"lon": round(b[0], 3), "lat": round(b[1], 3)},
@@ -253,7 +259,8 @@ async def plan_trip(
             "event_ids": [h["id"] for h in best["event_hits"]], "blocked": best["blocked"], "model": best["model"],
             # the picked route, so ml/ can count riders on the same roads at the same time; ponytail: 3 segments
             # (~1-3 blocks) cut off each end to keep exact addresses out, trim by metres if that's too coarse
-            "road_segment_ids": (found[result["best"]].get("road_segment_ids") or [])[3:-3]})
+            "road_segment_ids": (found[result["best"]].get("road_segment_ids") or [])[3:-3]}
+        background.add_task(store.save_trip, dict(record))  # a copy: insert_one adds _id
     return {
         "routes": found, "source": got["source"], "plan": result,
         "events": [model.event_view(e) for e in evs if _near_any(e, found)],
@@ -262,7 +269,8 @@ async def plan_trip(
                  "incidents": "mongo" if incidents is not None else "unavailable",
                  "traffic": f"tiger:{traffic_kind}" if traffic is not None else "unavailable",
                  "predictions": "tiger" if predictions else "none (event-impact heuristic)",
-                 "decision": decided_by, "note": note_by},
+                 "decision": decided_by, "note": note_by,
+                 "stored": "replay" if replay else "trips" if save else "off", "trip_record": record},
     }
 
 

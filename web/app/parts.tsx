@@ -1,5 +1,5 @@
 'use client';
-import { useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { fmtDist, fmtWhen, fromPtInput, longerThanItLooks, mins, ptInput, RECENT, REPLAY, routeTag, stepIcon, type Place, type Route, type Step, type When } from '@/lib/route.ts';
 import { EVENT_KINDS, eventKind, type EventKind, type MapEvent } from '@/lib/context.ts';
 import { eventGlyph } from './map-view.tsx';
@@ -7,6 +7,8 @@ import { smartSuggestions } from '@/lib/suggest.ts';
 import type { Card, useRoutePlanner } from '@/lib/use-route-planner.ts';
 import { useTheme } from '@/lib/use-theme.ts';
 import { useVoice } from '@/lib/use-voice.ts';
+import { dataPath, planStale, traceLine, type Privacy, type Stop } from '@/lib/privacy.ts';
+import { usePrivacy } from '@/lib/use-privacy.ts';
 
 type Planner = ReturnType<typeof useRoutePlanner>;
 
@@ -52,6 +54,8 @@ const ICONS = {
   mic: 'M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5 11a7 7 0 0 0 14 0M12 18v3',
   sun: 'M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4',
   moon: 'M20.5 14.1A8.5 8.5 0 1 1 9.9 3.5a6.6 6.6 0 0 0 10.6 10.6z',
+  shield: 'M12 3l7 3v5.5c0 4.3-2.9 8-7 9.5-4.1-1.5-7-5.2-7-9.5V6l7-3zM9 12l2 2 4-4',
+  check: 'M5 12.5l4.5 4.5L19 7.5',
 } as const;
 export type IconName = keyof typeof ICONS;
 
@@ -181,6 +185,7 @@ export function TripNote({ note }: { note: string }) {
 /** Tap to say a trip ("Plan and book my ride to Chase Center at 6:30"); it opens the route screen. Errors show under it. */
 export function MicButton({ p }: { p: Planner }) {
   const v = useVoice(p.applyVoice);
+  if (!usePrivacy().privacy.voice) return null; // voice switched off: no mic, so no audio can reach ElevenLabs
   return (
     <span className="mic-wrap">
       <button className={`mic ${v.state}`} title="Say where to go" aria-label={v.state === 'listening' ? 'Stop and send' : 'Say where to go'}
@@ -265,6 +270,11 @@ export function RouteList({ p, action }: { p: Planner; action?: ReactNode }) {
           note={note} selected={p.choice.tp} onPick={() => p.setChoice({ i: best, tp: true })} as={as}>
           {p.choice.tp && action}
         </RouteCard>
+        {p.trace && (
+          <button className="trace-strip" aria-label={`AI and privacy for this trip: ${traceLine(p.trace.data)}`} onClick={() => p.setAiOpen(true)}>
+            <Icon name="shield" size={16} className="lead" /><span className="grow">{traceLine(p.trace.data)}</span><Icon name="chevron" size={14} rotate={-90} className="lead" />
+          </button>
+        )}
         {advice && <button className="pill-btn advice" onClick={p.applyAdvice}>{`Leave at ${fmtWhen(Date.parse(advice.depart_at))}`}</button>}
       </section>
       <section className="route-sec" aria-label="Normal routes">
@@ -343,5 +353,115 @@ export function RouteCard({ route, card, when, tag, tone, note, selected, onPick
       {note && <span className="route-note">{note}</span>}
       {children}
     </Tag>
+  );
+}
+
+/** Opens / closes the AI & privacy panel (desktop header, mobile start sheet). */
+export function AiButton({ p, className = '' }: { p: Planner; className?: string }) {
+  return (
+    <button className={`ai-btn ${className}`} aria-label="AI and privacy" title="AI & privacy" aria-pressed={p.aiOpen}
+      onClick={() => p.setAiOpen(!p.aiOpen)}>
+      <Icon name="shield" size={18} />
+    </button>
+  );
+}
+
+const SWITCHES: { key: keyof Privacy; label: string; detail: string }[] = [
+  { key: 'saveTrips', label: 'Save my trips',
+    detail: 'Keeps an area-level record of each trip (no exact start or end, no name or device ID) so we can forecast crowds. Off: nothing is written.' },
+  { key: 'aiText', label: 'AI-written explanations',
+    detail: 'Google Gemini words the route card from trip facts, never addresses. Off: a built-in sentence, and nothing is sent to Google.' },
+  { key: 'voice', label: 'Voice requests',
+    detail: 'Your clip goes to ElevenLabs to become text; we don’t keep the audio. Off: the mic button is hidden.' },
+];
+
+function Toggle({ label, detail, on, onChange }: { label: string; detail: string; on: boolean; onChange(v: boolean): void }) {
+  const id = useId();
+  return (
+    <button className="aip-switch" role="switch" aria-checked={on} aria-labelledby={`${id}l`} aria-describedby={`${id}d`} onClick={() => onChange(!on)}>
+      <span className="stack grow"><span id={`${id}l`} className="name">{label}</span><span id={`${id}d`} className="sub">{detail}</span></span>
+      <span className="switch" aria-hidden="true"><i /></span>
+    </button>
+  );
+}
+
+/** Where a trip's data went: the same dotted rail as the from/to box, one stop per service or model. */
+function DataPath({ stops }: { stops: Stop[] }) {
+  return (
+    <ol className="trace">
+      {stops.map(s => (
+        <li key={s.who + s.did} className={`stop${s.off ? ' off' : s.outside ? ' out' : s.ai ? ' ai' : ''}`}>
+          <i className="dot" aria-hidden="true" />
+          <span className="stack">
+            <span className="stop-head">
+              <b>{s.who}</b>
+              {s.ai && <span className="tag fast">AI</span>}
+              {s.outside && <span className="tag">Leaves our servers</span>}
+              {s.off && <span className="tag off">Off</span>}
+            </span>
+            <span className="stop-did">{s.did}</span>
+          </span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+const shown = (v: unknown) => typeof v === 'string' ? v : JSON.stringify(v);
+
+/** The AI & privacy panel: this trip's data path, the switches, and what is and isn't kept. Esc closes it. */
+export function AiPrivacy({ p }: { p: Planner }) {
+  const { privacy, set } = usePrivacy();
+  const t = p.trace, record = t?.data.trip_record;
+  const top = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    top.current?.focus({ preventScroll: true }); // keep the panel's title in view
+    const onKey = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape') p.setAiOpen(false); };
+    addEventListener('keydown', onKey);
+    return () => removeEventListener('keydown', onKey);
+  }, []); // mount only: setAiOpen is a state setter
+  return (
+    <div className="aip" ref={top} tabIndex={-1}>
+      <p className="aip-lede">Every service and model that touches your trip, and the switches that control them.</p>
+
+      <section className="aip-sec" aria-labelledby="aip-trip">
+        <h3 id="aip-trip" className="aip-h">{t ? `Where your trip to ${p.to?.label ?? 'there'} went` : 'Where your trip goes'}</h3>
+        {t ? <DataPath stops={dataPath(t.data, t.source)} /> : p.loading ? <div className="status">Finding routes…</div> : (
+          <p className="aip-empty">Plan a route and its path shows up here, stop by stop: the map service, our event and traffic data, whatever picked the route, whoever wrote the explanation, and what was saved.</p>
+        )}
+        {record && (
+          <details className="aip-record">
+            <summary>Exactly what was saved <span className="sub">{Object.keys(record).length} fields</span></summary>
+            <dl>{Object.entries(record).map(([k, v]) => <div key={k}><dt>{k}</dt><dd>{shown(v)}</dd></div>)}</dl>
+          </details>
+        )}
+      </section>
+
+      <section className="aip-sec" aria-labelledby="aip-controls">
+        <h3 id="aip-controls" className="aip-h">Your controls</h3>
+        <div className="aip-switches">
+          {SWITCHES.map(s => <Toggle key={s.key} label={s.label} detail={s.detail} on={privacy[s.key]} onChange={v => set(s.key, v)} />)}
+        </div>
+        {t && planStale(t.used, privacy) && (
+          <div className="aip-stale" role="status">
+            <span>This trip was planned with your old settings.</span>
+            <button className="pill-btn" onClick={p.retry}>Re-plan it</button>
+          </div>
+        )}
+        <p className="sub aip-foot">Kept on this device only. There are no accounts.</p>
+      </section>
+
+      <section className="aip-sec" aria-labelledby="aip-keep">
+        <h3 id="aip-keep" className="aip-h">What we keep</h3>
+        <ul className="aip-keep">
+          <li><Icon name="check" size={16} className="yes" />Trips, if saving is on: start and end rounded to ~100 m, the roads used minus a few blocks at each end, the time, and which route won.</li>
+          <li><Icon name="check" size={16} className="yes" />These switches and your light / dark choice, in this browser.</li>
+          <li><Icon name="close" size={16} className="no" />Your name, email, account or device ID.</li>
+          <li><Icon name="close" size={16} className="no" />Exact addresses or a location history.</li>
+          <li><Icon name="close" size={16} className="no" />Voice recordings.</li>
+        </ul>
+        <p className="sub aip-foot">Saved trips aren’t linked to you, so nobody can look up or delete “your” trips later. To keep one out, turn saving off before you plan it.</p>
+      </section>
+    </div>
   );
 }

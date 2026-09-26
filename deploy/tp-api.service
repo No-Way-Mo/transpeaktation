@@ -7,7 +7,8 @@ Wants=network-online.target
 User=tp
 WorkingDirectory=/opt/transpeaktation/api
 Environment=ALLOWED_ORIGINS=https://167-172-23-38.sslip.io
-ExecStart=/opt/transpeaktation/api/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+# --no-access-log: request lines hold exact trip coordinates + the rider's IP; the privacy panel promises we don't keep those
+ExecStart=/opt/transpeaktation/api/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --no-access-log
 Restart=always
 RestartSec=10
 
