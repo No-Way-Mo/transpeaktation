@@ -38,6 +38,9 @@ MAX_MPH = 100.0
 # Mapbox traffic-tile congestion -> congestion_ratio, until calibrated per road class against
 # segments that also have a measured speed (AGENTS.md).
 TILE_CONGESTION_RATIO = {"low": 0.1, "moderate": 0.4, "heavy": 0.65, "severe": 0.85}
+# ~94% of tile rows are "low" (~450 MB/day in Tiger), so they aren't stored: no mapbox_tiles row for a segment in a
+# bucket = flowing freely, or not covered. A segment whose readings average above "low" is kept.
+TILE_KEEP_ABOVE = TILE_CONGESTION_RATIO["low"]
 
 MAPBOX_MIN_COVERAGE = 0.5          # a corridor must drive >= half an edge to report its speed
 TOMTOM_RELATIVE_MAX_AGE = timedelta(hours=12)  # relative tiles come every 6 h
@@ -157,6 +160,8 @@ class SourceRun:
                 ratio = _clamp01(1 - speed / ff)
             else:
                 ratio = a.ratio_sum / a.ratio_w if a.ratio_w else None
+            if self.source == "mapbox_tiles" and ratio is not None and ratio <= TILE_KEEP_ABOVE + 1e-9:
+                continue
             travel = (round(edge.length_m / (speed * 0.44704), 1)
                       if speed and self.source in ("tomtom", "mapbox_route") else None)
             out.append({"time": b, "road_segment_id": sid, "source": self.source,

@@ -59,7 +59,7 @@ Forecast models need one fixed road list, one unit, and one time step. Raw feeds
 2. **One unit.** Store `speed_mph`, `free_flow_speed_mph`, and `congestion_ratio = 1 - speed/free_flow` (0 = free flow, 1 = stopped), clamped to [0, 1]. Per source:
    - `tomtom`: absolute tiles km/h → mph; free-flow = absolute ÷ relative (relative tiles every 6 h).
    - `mapbox_route`: annotation speed m/s → mph; free-flow from TomTom on the same segment, else the posted limit (DataSF speed limits / OSM `maxspeed`; unposted = 25 mph). `duration_typical` is *typical* traffic, not free flow; don't use it as free-flow.
-   - `mapbox_tiles`: congestion level only; map low/moderate/heavy/severe to a ratio calibrated per road class on segments that also have a measured speed (until calibrated: 0.1 / 0.4 / 0.65 / 0.85), and leave `speed_mph` null.
+   - `mapbox_tiles`: congestion level only; map low/moderate/heavy/severe to a ratio calibrated per road class on segments that also have a measured speed (until calibrated: 0.1 / 0.4 / 0.65 / 0.85), and leave `speed_mph` null. Rows that average "low" aren't stored (~94% of rows, ~450 MB/day): no `mapbox_tiles` row = flowing freely or not covered.
    - `muni`: speed between consecutive fixes of an in-service vehicle; runs low (stops), so keep it its own `source`, never averaged into others.
 3. **One time step.** 10-minute UTC buckets; `time` = bucket start. Within a bucket, average a source's readings. Store only observed values (the schema has no "filled" flag): 20-min Mapbox tiles land in every other bucket. Gap filling (forward-fill ≤ 2 buckets, longer stays missing) happens when `ml/` builds model inputs, not in Tiger.
 
