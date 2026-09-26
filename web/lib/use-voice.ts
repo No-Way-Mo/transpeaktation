@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { sendVoice, voiceNote, type VoiceIntent } from './route.ts';
+import { sendVoice, voiceError, voiceNote, type VoiceIntent } from './route.ts';
 
 const MAX_MS = 10_000; // a trip request is a few seconds; stop runaway recordings
 
@@ -35,8 +35,9 @@ export function useVoice(onIntent: (v: VoiceIntent) => boolean) {
       try {
         const v = await sendVoice(new Blob(chunks, { type: r.mimeType }));
         if (!onIntentRef.current(v)) setNote(voiceNote(v));
-      } catch {
-        setNote("Couldn't understand that. Try again.");
+      } catch (e) {
+        console.error('voice request failed', e);
+        setNote(voiceError(e));
       } finally {
         setState('idle');
       }
