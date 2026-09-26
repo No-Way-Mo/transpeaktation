@@ -15,6 +15,7 @@ One owner per folder. Only edit another folder with its owner's OK.
 | `ios/`       | TBD | SwiftUI shell that loads the `web/` app (mobile layout) in a WKWebView | SwiftUI, XcodeGen |
 | `contracts/` | everyone | Shared data shapes (events, routes, forecasts, fleet state) | JSON Schema / Pydantic |
 | `demo/`      | — | Standalone transPEAKtation SF demo (`node demo/check.mjs`) | HTML |
+| `deploy/`    | everyone | DigitalOcean droplet (https://167-172-23-38.sslip.io): Caddy, systemd units, setup + redeploy scripts | Caddy, systemd |
 
 ## Rules
 - `contracts/` is the only seam between folders. Change it in its own small PR and tell the team first.
@@ -75,3 +76,4 @@ Forecast models need one fixed road list, one unit, and one time step. Raw feeds
 - api: `cd api && python3 -m venv .venv && .venv/bin/pip install -e .[test]` · run: `.venv/bin/uvicorn app.main:app --reload` → http://localhost:8000/docs · test: `.venv/bin/python -m unittest discover -s tests -t .`
 - web: `cd web && npm install && npm run dev` → http://localhost:3000 (≤760px wide = mobile layout) · test: `npm test` · build: `npm run build` · replay demo (past dates allowed; `/plan?replay=true` uses the traffic/closures stored for then): `NEXT_PUBLIC_REPLAY=1 npm run dev`
 - ios: start web first, then `open ios/Transpeaktation.xcodeproj` and Run on a simulator. Web URL = `WEB_APP_URL` in `ios/project.yml`; after editing that file run `cd ios && xcodegen`.
+- ci/cd: `.github/workflows/ci.yml` runs api, ingest, web (test + build) and the demo check on every PR and push; a green push to `main` runs `deploy/tp-redeploy` on the droplet (secret `DEPLOY_SSH_KEY`). Manual redeploy: `ssh tp@167.172.23.38 tp-redeploy`.

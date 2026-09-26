@@ -1,0 +1,15 @@
+[Unit]
+Description=transPEAKtation worker
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=tp
+WorkingDirectory=/opt/transpeaktation/ingest
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/transpeaktation/ingest/.venv/bin/python -m worker schedule
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

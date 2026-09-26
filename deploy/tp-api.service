@@ -1,0 +1,15 @@
+[Unit]
+Description=transPEAKtation api
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=tp
+WorkingDirectory=/opt/transpeaktation/api
+Environment=ALLOWED_ORIGINS=https://167-172-23-38.sslip.io
+ExecStart=/opt/transpeaktation/api/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

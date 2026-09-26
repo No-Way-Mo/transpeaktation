@@ -1,0 +1,10 @@
+167-172-23-38.sslip.io {
+	encode gzip
+	# api/ under /api (same origin as the web app, so no CORS needed); uvicorn and next listen on localhost only
+	handle_path /api/* {
+		reverse_proxy 127.0.0.1:8000
+	}
+	handle {
+		reverse_proxy 127.0.0.1:3000
+	}
+}

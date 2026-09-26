@@ -1,0 +1,10 @@
+#cloud-config
+users:
+  - name: tp
+    groups: [sudo]
+    shell: /bin/bash
+    sudo: ["ALL=(ALL) NOPASSWD:ALL"]
+    ssh_authorized_keys:
+      - <your ssh public key>
+ssh_pwauth: false
+disable_root: true

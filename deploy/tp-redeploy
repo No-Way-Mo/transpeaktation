@@ -1,0 +1,19 @@
+#!/bin/bash
+# Pull main, rebuild what changed, restart transPEAKtation. Run as tp: tp-redeploy
+# Installed at /usr/local/bin/tp-redeploy (a copy, so git pull can't rewrite it mid-run; after editing:
+# sudo install -m 755 deploy/tp-redeploy /usr/local/bin/). CI runs it via a forced-command key in ~tp/.ssh/authorized_keys.
+set -euo pipefail
+[ "$(id -un)" = tp ] || { echo "run as tp: sudo -iu tp tp-redeploy" >&2; exit 1; }
+cd /opt/transpeaktation
+old=$(git rev-parse HEAD)
+git pull -q --ff-only origin main
+new=$(git rev-parse HEAD)
+echo "main: ${old:0:7} -> ${new:0:7}"
+changed() { git diff --name-only "$old" "$new" -- "$@" | grep -q .; }
+changed api/pyproject.toml && api/.venv/bin/pip install -q -e api
+changed ingest/pyproject.toml && ingest/.venv/bin/pip install -q -e 'ingest[osm,live,db]'
+changed web/package.json web/package-lock.json && (cd web && npm ci --no-audit --no-fund --loglevel=error)
+(cd web && NEXT_PUBLIC_API_URL=https://167-172-23-38.sslip.io/api NEXT_PUBLIC_REPLAY=1 npm run build > /tmp/next-build.log 2>&1) \
+  || { tail -30 /tmp/next-build.log; echo "web build failed; restart skipped" >&2; exit 1; }
+sudo systemctl restart tp-api tp-web tp-poll tp-worker
+sleep 5; systemctl is-active tp-api tp-web tp-poll tp-worker caddy | paste -sd' ' -
