@@ -200,3 +200,17 @@ class Endpoints(StoreBase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PlannerIncidents(unittest.TestCase):
+    def test_permits_cannot_crowd_a_closure_out(self):
+        db, seg, span = mongomock.MongoClient(tz_aware=True).db, "1-2-0", {"start_time": T0, "end_time": T0 + timedelta(hours=2)}
+        db.road_incidents.insert_many(
+            [{"source": "street_use_permits", "source_id": str(i), "category": "street_use_permit", "is_closure": False,
+              "road_segment_ids": [seg], **span} for i in range(600)]
+            + [{"source": "street_closures", "source_id": "x", "category": "street_closure", "is_closure": True,
+                "road_segment_ids": [seg], **span}])
+        s = store.Store()
+        with mock.patch.object(s, "db", return_value=db):
+            got = s.incidents_on([seg], T0, T0 + timedelta(hours=1))
+        self.assertEqual((got[0]["source"], len(got)), ("street_closures", 501))  # closure first; permits capped at 500
