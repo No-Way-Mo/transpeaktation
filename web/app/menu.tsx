@@ -134,7 +134,7 @@ export function MapLayers({ n, sheet, className = '' }: { n: NavApi; sheet?: boo
   return (
     <div className={`nav-wrap layers-wrap ${className}`} ref={wrap}>
       <button className="layers-btn" aria-label="Map layers" title="Map layers" aria-expanded={on} aria-haspopup="dialog" onClick={() => n.toggle('layers')}>
-        <Icon name="layers" size={20} />
+        <Icon name="layers" size={18} />
       </button>
       {on && (sheet ? <BottomSheet label="Map layers" onClose={n.close}>{body}</BottomSheet> : <Popover label="Map layers" className="layers-pop">{body}</Popover>)}
     </div>

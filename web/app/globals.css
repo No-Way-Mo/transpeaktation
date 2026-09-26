@@ -515,12 +515,12 @@ input::placeholder { color: var(--muted); }
 .menu-sep { height: 1px; margin: 6px; border: none; background: var(--line); }
 
 /* Map layers: top-right of the desktop map (clear of zoom, compass and attribution at the bottom); under the compass on a phone. */
-.layers-btn { width: 44px; height: 44px; border-radius: 12px; background: var(--pop); box-shadow: var(--shadow); color: var(--ink); display: flex; align-items: center; justify-content: center; }
-.desk-layers { position: absolute; top: 16px; right: 16px; z-index: 6; }
+.layers-btn { position: relative; width: 36px; height: 36px; padding: 0; border-radius: 50%; background: var(--pop); box-shadow: var(--shadow-sm); color: var(--ink); display: flex; align-items: center; justify-content: center; }
+.layers-btn::before { content: ''; position: absolute; inset: -6px; border-radius: 50%; } /* 48px tap target around the small circle */
+.desk-layers { position: absolute; top: 16px; right: 20px; z-index: 6; } /* centred over the 44px zoom column below */
 .layers-pop { right: 0; width: 320px; max-height: calc(100dvh - 100px); overflow: auto; padding: 14px; }
-.mob-layers { position: absolute; right: 12px; top: calc(var(--safe-top) + 206px); z-index: 28; }
+.mob-layers { position: absolute; right: 18px; top: calc(var(--safe-top) + 206px); z-index: 28; } /* centred under the 48px compass */
 .mob-layers.high { top: calc(var(--safe-top) + 60px); }
-.mob-layers .layers-btn { width: 48px; height: 48px; border-radius: 50%; }
 .layers { display: flex; flex-direction: column; gap: 16px; }
 .pop-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .pop-title { font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
