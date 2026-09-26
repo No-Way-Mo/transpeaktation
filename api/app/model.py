@@ -221,7 +221,8 @@ def predict_route(route: dict, depart: datetime, ctx: dict, *, now: datetime) ->
 
 
 def fmt_clock(t: datetime) -> str:
-    return t.astimezone(SF_TZ).strftime("%-I:%M %p")
+    t = t.astimezone(SF_TZ)
+    return f"{t.hour % 12 or 12}:{t:%M %p}"  # not %-I: Windows strftime rejects it
 
 
 def mins(s: float) -> int:
