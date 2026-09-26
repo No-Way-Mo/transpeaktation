@@ -1,11 +1,10 @@
 'use client';
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { fmtDist, fmtWhen, fromPtInput, longerThanItLooks, mins, ptInput, RECENT, REPLAY, routeTag, stepIcon, type Place, type Route, type Step, type When } from '@/lib/route.ts';
 import { EVENT_KINDS, eventKind, type EventKind, type MapEvent } from '@/lib/context.ts';
 import { eventGlyph } from './map-view.tsx';
 import { smartSuggestions } from '@/lib/suggest.ts';
 import type { Card, useRoutePlanner } from '@/lib/use-route-planner.ts';
-import { useTheme } from '@/lib/use-theme.ts';
 import { useVoice } from '@/lib/use-voice.ts';
 import { dataPath, planStale, traceLine, type Privacy, type Stop } from '@/lib/privacy.ts';
 import { usePrivacy } from '@/lib/use-privacy.ts';
@@ -56,6 +55,15 @@ const ICONS = {
   moon: 'M20.5 14.1A8.5 8.5 0 1 1 9.9 3.5a6.6 6.6 0 0 0 10.6 10.6z',
   shield: 'M12 3l7 3v5.5c0 4.3-2.9 8-7 9.5-4.1-1.5-7-5.2-7-9.5V6l7-3zM9 12l2 2 4-4',
   check: 'M5 12.5l4.5 4.5L19 7.5',
+  menu: 'M4 7h16M4 12h16M4 17h16',
+  layers: 'M12 3.5l9 5-9 5-9-5 9-5zM3 13l9 5 9-5M3 17.5l9 5 9-5',
+  layersOff: 'M12 3.5l9 5-9 5-9-5 9-5zM3 13l9 5 9-5M3 17.5l9 5 9-5M3 2.5l18 20',
+  star: 'M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z',
+  history: 'M3.5 12a8.5 8.5 0 1 0 2.5-6M3.5 4v4h4M12 7.5V12l3 2',
+  settings: 'M4 7h9M17 7h3M15 5v4M4 17h3M11 17h9M9 15v4M4 12h14',
+  help: 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0zM9.6 9.4a2.5 2.5 0 1 1 3.6 2.3c-.7.3-1.2 1-1.2 1.7v.4M12 17h.01',
+  info: 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0zM12 11v6M12 7.5h.01',
+  bell: 'M6 16v-5a6 6 0 0 1 12 0v5l2 2H4l2-2zM10 21h4',
 } as const;
 export type IconName = keyof typeof ICONS;
 
@@ -71,18 +79,6 @@ export function Icon({ name, size = 20, rotate, className }: { name: IconName; s
 export function TurnIcon({ step, size = 18 }: { step: Step; size?: number }) {
   const { name, rotate } = stepIcon(step);
   return <Icon name={name} rotate={rotate} size={size} />;
-}
-
-/** Light / dark switch. A toggle button ("Dark mode", pressed = dark); the icon shows what a press switches to. */
-export function ThemeToggle({ className = '' }: { className?: string }) {
-  const { theme, toggle } = useTheme();
-  const dark = theme === 'dark';
-  return (
-    <button className={`theme-btn ${className}`} aria-label="Dark mode" aria-pressed={dark}
-      title={dark ? 'Switch to light mode' : 'Switch to dark mode'} onClick={toggle}>
-      <Icon name={dark ? 'sun' : 'moon'} size={18} />
-    </button>
-  );
 }
 
 const COMPASS_KEY = 'transpeaktation.compass';
@@ -258,7 +254,7 @@ export function PlaceRow({ place, onPick, plain }: { place: Place; onPick(): voi
 
 /** The two route sections: transPEAKtation's event-aware pick, then the normal alternatives. `action` (e.g. a
  *  Directions button) goes inside the selected card. */
-export function RouteList({ p, action }: { p: Planner; action?: ReactNode }) {
+export function RouteList({ p, action, onTrace }: { p: Planner; action?: ReactNode; onTrace(): void }) {
   if (!p.tp || !p.routes.length) return null;
   const { best, tag, note, advice } = p.tp, as = action ? 'div' : 'button';
   const fastest = p.routes[0].dur;
@@ -271,7 +267,7 @@ export function RouteList({ p, action }: { p: Planner; action?: ReactNode }) {
           {p.choice.tp && action}
         </RouteCard>
         {p.trace && (
-          <button className="trace-strip" aria-label={`AI and privacy for this trip: ${traceLine(p.trace.data)}`} onClick={() => p.setAiOpen(true)}>
+          <button className="trace-strip" aria-label={`AI and privacy for this trip: ${traceLine(p.trace.data)}`} onClick={onTrace}>
             <Icon name="shield" size={16} className="lead" /><span className="grow">{traceLine(p.trace.data)}</span><Icon name="chevron" size={14} rotate={-90} className="lead" />
           </button>
         )}
@@ -356,16 +352,6 @@ export function RouteCard({ route, card, when, tag, tone, note, selected, onPick
   );
 }
 
-/** Opens / closes the AI & privacy panel (desktop header, mobile start sheet). */
-export function AiButton({ p, className = '' }: { p: Planner; className?: string }) {
-  return (
-    <button className={`ai-btn ${className}`} aria-label="AI and privacy" title="AI & privacy" aria-pressed={p.aiOpen}
-      onClick={() => p.setAiOpen(!p.aiOpen)}>
-      <Icon name="shield" size={18} />
-    </button>
-  );
-}
-
 const SWITCHES: { key: keyof Privacy; label: string; detail: string }[] = [
   { key: 'saveTrips', label: 'Save my trips',
     detail: 'Keeps an area-level record of each trip (no exact start or end, no name or device ID) so we can forecast crowds. Off: nothing is written.' },
@@ -375,12 +361,18 @@ const SWITCHES: { key: keyof Privacy; label: string; detail: string }[] = [
     detail: 'Your clip goes to ElevenLabs to become text; we don’t keep the audio. Off: the mic button is hidden.' },
 ];
 
-function Toggle({ label, detail, on, onChange }: { label: string; detail: string; on: boolean; onChange(v: boolean): void }) {
+/** One switch row (the whole row is the control). `status` = can't be switched on yet: disabled, reads as off, and
+ *  says why in words, not just by fading. */
+export function Toggle({ label, detail, on, onChange, status }: { label: string; detail: string; on: boolean; onChange(v: boolean): void; status?: string }) {
   const id = useId();
   return (
-    <button className="aip-switch" role="switch" aria-checked={on} aria-labelledby={`${id}l`} aria-describedby={`${id}d`} onClick={() => onChange(!on)}>
-      <span className="stack grow"><span id={`${id}l`} className="name">{label}</span><span id={`${id}d`} className="sub">{detail}</span></span>
-      <span className="switch" aria-hidden="true"><i /></span>
+    <button className="aip-switch" role="switch" aria-checked={status ? false : on} aria-labelledby={`${id}l`} aria-describedby={`${id}d`}
+      disabled={!!status} onClick={() => onChange(!on)}>
+      <span className="stack grow">
+        <span className="switch-head"><span id={`${id}l`} className="name">{label}</span>{status && <span className="tag off">{status}</span>}</span>
+        <span id={`${id}d`} className="sub">{detail}</span>
+      </span>
+      {!status && <span className="switch" aria-hidden="true"><i /></span>}
     </button>
   );
 }
@@ -409,19 +401,12 @@ function DataPath({ stops }: { stops: Stop[] }) {
 
 const shown = (v: unknown) => typeof v === 'string' ? v : JSON.stringify(v);
 
-/** The AI & privacy panel: this trip's data path, the switches, and what is and isn't kept. Esc closes it. */
+/** Settings → AI & Privacy: this trip's data path, the switches, and what is and isn't kept. */
 export function AiPrivacy({ p }: { p: Planner }) {
   const { privacy, set } = usePrivacy();
   const t = p.trace, record = t?.data.trip_record;
-  const top = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    top.current?.focus({ preventScroll: true }); // keep the panel's title in view
-    const onKey = (e: globalThis.KeyboardEvent) => { if (e.key === 'Escape') p.setAiOpen(false); };
-    addEventListener('keydown', onKey);
-    return () => removeEventListener('keydown', onKey);
-  }, []); // mount only: setAiOpen is a state setter
   return (
-    <div className="aip" ref={top} tabIndex={-1}>
+    <div className="aip">
       <p className="aip-lede">Every service and model that touches your trip, and the switches that control them.</p>
 
       <section className="aip-sec" aria-labelledby="aip-trip">
@@ -455,7 +440,7 @@ export function AiPrivacy({ p }: { p: Planner }) {
         <h3 id="aip-keep" className="aip-h">What we keep</h3>
         <ul className="aip-keep">
           <li><Icon name="check" size={16} className="yes" />Trips, if saving is on: start and end rounded to ~100 m, the roads used minus a few blocks at each end, the time, and which route won.</li>
-          <li><Icon name="check" size={16} className="yes" />These switches and your light / dark choice, in this browser.</li>
+          <li><Icon name="check" size={16} className="yes" />These switches, your theme and map choices, and (on a phone) where you dragged the compass, in this browser.</li>
           <li><Icon name="close" size={16} className="no" />Your name, email, account or device ID.</li>
           <li><Icon name="close" size={16} className="no" />Exact addresses or a location history.</li>
           <li><Icon name="close" size={16} className="no" />Voice recordings.</li>

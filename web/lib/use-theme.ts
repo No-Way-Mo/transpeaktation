@@ -1,32 +1,47 @@
 'use client';
 import { useLayoutEffect, useSyncExternalStore } from 'react';
-import { applyTheme, otherTheme, readTheme, resolveTheme, SYSTEM_DARK, THEME_KEY, type Theme } from './theme.ts';
+import { applyThemePref, readTheme, readThemePref, resolveTheme, SYSTEM_DARK, THEME_KEY, type Theme, type ThemePref } from './theme.ts';
 
 // The source of truth is <html data-theme>, set before paint by THEME_SCRIPT (app/layout.tsx); React only reads it.
+// The pick (System / Light / Dark) is the saved key, which the attribute alone can't tell apart (System on a dark OS
+// looks like Dark), so picks also ping `picked`.
 const root = () => document.documentElement;
 const current = (): Theme => (root().getAttribute('data-theme') === 'dark' ? 'dark' : 'light');
 const storage = () => { try { return localStorage; } catch { return undefined; } };
-const resolved = () => resolveTheme(readTheme(storage()), matchMedia(SYSTEM_DARK).matches);
+const systemDark = () => matchMedia(SYSTEM_DARK).matches;
+const resolved = () => resolveTheme(readTheme(storage()), systemDark());
+const picked = new Set<() => void>();
+let memPref: ThemePref | null = null; // this visit's pick, for when storage is blocked
+const pref = (): ThemePref => { const saved = readThemePref(storage()); return saved === 'system' && memPref ? memPref : saved; };
 
 function subscribe(cb: () => void) {
-  // Any change to the attribute (this tab's toggle, the dev-mode re-apply below) re-renders the readers.
+  // Any change to the attribute (a pick in Settings, the dev-mode re-apply below) re-renders the readers.
   const mo = new MutationObserver(cb);
   mo.observe(root(), { attributes: true, attributeFilter: ['data-theme'] });
-  // No saved choice yet: keep following the OS as it flips. A saved choice is left alone.
+  picked.add(cb);
+  // System: keep following the OS as it flips. A saved choice is left alone.
   const mq = matchMedia(SYSTEM_DARK);
-  const onSystem = () => { if (!readTheme(storage())) root().setAttribute('data-theme', resolved()); };
+  const onSystem = () => { if (pref() === 'system') root().setAttribute('data-theme', resolved()); };
   // Another tab picked a theme: follow it.
-  const onStorage = (e: StorageEvent) => { if (e.key === THEME_KEY) root().setAttribute('data-theme', resolved()); };
+  const onStorage = (e: StorageEvent) => { if (e.key === THEME_KEY) { memPref = null; root().setAttribute('data-theme', resolved()); cb(); } };
   mq.addEventListener('change', onSystem);
   addEventListener('storage', onStorage);
-  return () => { mo.disconnect(); mq.removeEventListener('change', onSystem); removeEventListener('storage', onStorage); };
+  return () => { mo.disconnect(); picked.delete(cb); mq.removeEventListener('change', onSystem); removeEventListener('storage', onStorage); };
 }
 
-/** Current theme + setters. The page only renders in the browser (app/page.tsx), so there's no server snapshot to match. */
+/** Current theme, the rider's pick, and its setter. The page only renders in the browser (app/page.tsx). */
 export function useTheme() {
   const theme = useSyncExternalStore(subscribe, current, () => 'light' as Theme);
+  const choice = useSyncExternalStore(subscribe, pref, () => 'system' as ThemePref);
   // Dev only: Strict Mode's remount resets <html> attributes, dropping the one THEME_SCRIPT set. No-op in production.
-  useLayoutEffect(() => { if (root().getAttribute('data-theme') !== resolved()) root().setAttribute('data-theme', resolved()); }, []);
-  const setTheme = (t: Theme) => applyTheme(t, root(), storage());
-  return { theme, setTheme, toggle: () => setTheme(otherTheme(theme)) };
+  useLayoutEffect(() => {
+    const want = memPref && memPref !== 'system' ? memPref : resolved();
+    if (root().getAttribute('data-theme') !== want) root().setAttribute('data-theme', want);
+  }, []);
+  const setPref = (p: ThemePref) => {
+    memPref = p;
+    applyThemePref(p, root(), storage(), systemDark());
+    picked.forEach(f => f());
+  };
+  return { theme, pref: choice, setPref };
 }

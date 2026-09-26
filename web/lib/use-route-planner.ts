@@ -69,9 +69,8 @@ export function useRoutePlanner() {
   const [when, setWhenState] = useState<When>(NOW);
   const [routes, setRoutes] = useState<Route[]>([]);
   const [tp, setTp] = useState<TransPeak | null>(null);    // api/ /plan: the model's pick + why
-  // What touched the trip on screen (AI & privacy panel): /plan's data + routing source + the switches it was planned with.
+  // What touched the trip on screen (Settings → AI & Privacy): /plan's data + routing source + the switches it was planned with.
   const [trace, setTrace] = useState<{ data: Plan['data']; source: string; used: Privacy } | null>(null);
-  const [aiOpen, setAiOpen] = useState(false); // the AI & privacy panel
   const [events, setEvents] = useState<EventInfo[]>([]);  // today's events, for the search suggestions
   const [choice, setChoice] = useState({ i: 0, tp: true }); // selected card; transPEAKtation's by default
   const [loading, setLoading] = useState(false);
@@ -206,7 +205,7 @@ export function useRoutePlanner() {
     suggestions, searching: fieldSearch.searching,
     showSuggest: !!active && (suggestions.length > 0 || fieldSearch.searching),
     routes, sel, setSel, choice, setChoice, tp, card, loading, error, retry: () => route(),
-    events, trace, aiOpen, setAiOpen, applyAdvice, tripId, arrived, hasArrived: !!tripId && arrivedId === tripId,
+    events, trace, applyAdvice, tripId, arrived, hasArrived: !!tripId && arrivedId === tripId,
     selected: routes[sel] as Route | undefined,
     selectedCard: routes.length ? card(sel, choice.tp) : undefined,
     when, setWhen,
