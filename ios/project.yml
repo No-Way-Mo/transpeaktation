@@ -1,0 +1,32 @@
+# Source of truth for the Xcode project. After editing: `cd ios && xcodegen` (brew install xcodegen).
+name: Transpeaktation
+options:
+  bundleIdPrefix: app.transpeaktation
+  deploymentTarget: { iOS: "17.0" }
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  Transpeaktation:
+    type: application
+    platform: iOS
+    sources: [Transpeaktation]
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: app.transpeaktation.ios
+        TARGETED_DEVICE_FAMILY: "1"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: transPEAKtation
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait
+        INFOPLIST_KEY_UIStatusBarStyle: UIStatusBarStyleLightContent
+        # Web app the shell loads. Simulator reaches the Mac's localhost; a real iPhone needs the Mac's LAN IP or the deployed URL.
+        WEB_APP_URL: "http://localhost:3000"
+    info:
+      path: Transpeaktation/Info.plist
+      properties:
+        WebAppURL: $(WEB_APP_URL)
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true   # plain http to localhost / LAN IPs during development only

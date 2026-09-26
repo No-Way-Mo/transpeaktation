@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>RoadReady Demo</title>
+<title>transPEAKtation Demo</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet">
@@ -162,7 +162,7 @@ canvas { position: absolute; inset: 0; width: 1920px; height: 1080px; transition
       <path d="M16 20V5" stroke="#E7EDF6"/>
       <path d="M16 20c0-7 9-7 9-15" stroke="#6FD3FF"/>
     </svg>
-    <span class="word">RoadReady</span>
+    <span class="word">transPEAKtation</span>
   </header>
   <div id="mode" class="fade"><i></i><span></span></div>
 
@@ -173,7 +173,7 @@ canvas { position: absolute; inset: 0; width: 1920px; height: 1080px; transition
   <svg id="rw" class="fade" viewBox="0 0 54 36" aria-hidden="true"><path d="M26 4v28L4 18zM50 4v28L28 18z" fill="#E7EDF6"/></svg>
 
   <div id="forecast" class="fade">
-    <div class="row"><span>RoadReady forecast</span><b id="fc-time">8:30 PM</b></div>
+    <div class="row"><span>transPEAKtation forecast</span><b id="fc-time">8:30 PM</b></div>
     <div class="bar"><i id="fc-fill"></i></div>
     <div class="ends"><span>Now, 8:30 PM</span><span>9:45 PM</span></div>
   </div>
@@ -182,7 +182,7 @@ canvas { position: absolute; inset: 0; width: 1920px; height: 1080px; transition
     <h3>Fleet assignment</h3>
     <p>AVs leaving the Golden Gate Bridge for the city</p>
     <ol id="assign-list"></ol>
-    <div class="key"><u></u> Share of AVs on this route without RoadReady</div>
+    <div class="key"><u></u> Share of AVs on this route without transPEAKtation</div>
   </aside>
 
   <div id="caption"><h2></h2><p></p></div>
@@ -196,8 +196,8 @@ canvas { position: absolute; inset: 0; width: 1920px; height: 1080px; transition
 
   <div id="compare" class="fade">
     <h2>Same fleet, same fireworks, two different evenings.</h2>
-    <div class="tag" style="left:84px"><i style="background:var(--jam)"></i>Without RoadReady</div>
-    <div class="tag" style="left:996px"><i style="background:var(--signal)"></i>With RoadReady</div>
+    <div class="tag" style="left:84px"><i style="background:var(--jam)"></i>Without transPEAKtation</div>
+    <div class="tag" style="left:996px"><i style="background:var(--signal)"></i>With transPEAKtation</div>
     <div class="col w" id="cmp-w" style="left:64px"></div>
     <div class="col r" id="cmp-r" style="left:976px"></div>
     <p class="foot">Illustrative simulation results, not historical measurements.</p>
@@ -211,7 +211,7 @@ canvas { position: absolute; inset: 0; width: 1920px; height: 1080px; transition
         <path d="M16 20V5" stroke="#E7EDF6"/>
         <path d="M16 20c0-7 9-7 9-15" stroke="#6FD3FF"/>
       </svg>
-      RoadReady
+      transPEAKtation
     </div>
     <p>Route the fleet for the traffic that hasn't happened yet.</p>
   </div>
@@ -337,9 +337,9 @@ const SIM = (() => {
     }
   }
 
-  // Without RoadReady: each AV takes the route that is fastest under current conditions.
+  // Without transPEAKtation: each AV takes the route that is fastest under current conditions.
   const liveCost = e => e.L / e.sp;
-  // RoadReady: forecast event impact 6 s (~30 min) ahead and price in what the rest of the fleet is already assigned.
+  // transPEAKtation: forecast event impact 6 s (~30 min) ahead and price in what the rest of the fleet is already assigned.
   const rrCost = If => e => Math.max(e.L / e.sp, e.L / (e.vf * (1 - 0.45 * e.zw * If)))
     + e.zw * If * e.L / e.vf * 6 + (e.asg / e.cap) ** 2 * 3 * e.L / e.vf;
 
@@ -505,7 +505,7 @@ const SIM = (() => {
     if (T < 22) return [W, T];
     if (T < 24.5) return [W, 22];
     if (T < 27) return [W, 22 - 14 * smooth(24.5, 27, T)];          // rewind to 8:30 PM
-    if (T < 36.5) return [R, 8 + (T - 27) / 9.5];                     // slow motion while RoadReady plans
+    if (T < 36.5) return [R, 8 + (T - 27) / 9.5];                     // slow motion while transPEAKtation plans
     if (T < 49.5) return [R, 9 + (T - 36.5)];
     if (T < 51.5) return [R, 22 + (T - 49.5)];
     return [R, 22];
@@ -857,11 +857,11 @@ const SIM = (() => {
   const CAPTIONS = [
     [0, 'The evening of July 4 in San Francisco.', 'Autonomous vehicles carry riders across the northern waterfront.'],
     [4, 'Fireworks start at 9:30 PM.', 'Crowds will pack the waterfront from the Marina to Aquatic Park.'],
-    [8, 'Without RoadReady, every AV takes the route that looks fastest right now.', 'Each vehicle plans alone, using current traffic only.'],
+    [8, 'Without transPEAKtation, every AV takes the route that looks fastest right now.', 'Each vehicle plans alone, using current traffic only.'],
     [15, 'They all see the same fastest routes.', 'AVs converge on the corridors into the event zone, and traffic slows.'],
     [22, '9:45 PM. Gridlock.', `${r0(W.stats.stopped)} AVs are stopped. Traffic near the event averages ${r0(W.stats.speed)} mph.`],
     [24.5, 'Rewind to 8:30 PM.', 'Same riders, same fireworks, same time window.'],
-    [27, 'Now with RoadReady.', 'RoadReady knows the fireworks are coming.'],
+    [27, 'Now with transPEAKtation.', 'transPEAKtation knows the fireworks are coming.'],
     [29.5, 'It forecasts the congestion before it forms.', 'Roads in the impact zone get a rising future cost.'],
     [33, 'It spreads the fleet across several corridors.', 'Through-traffic stays out of the impact zone. Riders are dropped off around its edge.'],
     [36.5, 'Same fleet. Same time window.', 'This time, every AV is routed with the fireworks already in the plan.'],
@@ -910,7 +910,7 @@ const SIM = (() => {
     N.rw.classList.toggle('on', T >= 24.5 && T < 27);
     const mode = T < 24.5 ? 'w' : T < 27 ? 'rw' : 'rr';
     N.mode.classList.toggle('rw', mode === 'rw'); N.mode.classList.toggle('rr', mode === 'rr');
-    setText(N.modeText, 'mode', { w: 'Without RoadReady', rw: 'Rewinding', rr: 'RoadReady on' }[mode]);
+    setText(N.modeText, 'mode', { w: 'Without transPEAKtation', rw: 'Rewinding', rr: 'transPEAKtation on' }[mode]);
     setText(N.hm, 'hm', fmt(minutes(st)));
 
     const [spd, stp, zn] = fr.m.map(Math.round);

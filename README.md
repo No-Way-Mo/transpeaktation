@@ -5,7 +5,7 @@ Event-aware predictive routing + autonomous fleet orchestration for San Francisc
 - How the system fits together: [`ARCHITECTURE.md`](ARCHITECTURE.md)
 - Who owns which folder, team rules, database schemas: [`AGENTS.md`](AGENTS.md)
 
-What runs today: the **demo** (`demo/`) and the **data pullers** (`ingest/`). `ml/`, `api/`, `web/` are not built yet; their owners add a run command to `AGENTS.md` when they land.
+What runs today: the **demo** (`demo/`), the **data pullers** (`ingest/`), the **route map web app** (`web/`), and the **iOS app** (`ios/`) that wraps it. `ml/` and `api/` are not built yet; their owners add a run command to `AGENTS.md` when they land.
 
 ## 1. Install tools
 
@@ -16,6 +16,7 @@ What runs today: the **demo** (`demo/`) and the **data pullers** (`ingest/`). `m
 | Python 3.10+ | ingest, ml, api | `brew install python` | [python.org](https://www.python.org/downloads/) (tick "Add to PATH") |
 | mongosh | checking MongoDB | `brew install mongosh` | [mongodb.com/try/download/shell](https://www.mongodb.com/try/download/shell) |
 | psql | checking Tiger Data | `brew install libpq`, then `export PATH="$(brew --prefix libpq)/bin:$PATH"` | [postgresql.org/download](https://www.postgresql.org/download/windows/) (command line tools only) |
+| Xcode 16+ | iOS app (macOS only) | App Store | — |
 
 ## 2. Clone and run the demo (no keys needed)
 
@@ -73,6 +74,29 @@ Keep speed history growing with `.venv/bin/python -m pull.poll` (every 10 min un
 
 Pull a single layer with `python -m pull static|planned|live`, or name one source (`python -m pull chp_incidents`). Expect `sf511_*` to say `skip` without a 511 key, and `chp_incidents` freshness to FAIL when CHP's own feed is stale; both are normal. Source list and backlog: `ingest/TODO.md`.
 
+## 6. Run the web app
+
+```bash
+cd web
+npm install
+npm test          # "pass 3"
+npm run dev       # http://localhost:3000
+```
+
+Wide window = desktop layout (sidebar + map). Narrow the window to 760px or less, or open it on a phone, for the mobile layout. Place search and routing use the free OpenStreetMap services (Nominatim, OSRM), so no key is needed yet.
+
+## 7. Run the iOS app
+
+The iOS app is a SwiftUI shell that shows the web app's mobile layout, so **start the web app first** (step 6).
+
+```bash
+open ios/Transpeaktation.xcodeproj   # pick an iPhone simulator, press Run (⌘R)
+```
+
+- The app loads `http://localhost:3000`, which works in the Simulator. On a real iPhone, set `WEB_APP_URL` in `ios/project.yml` to your Mac's LAN address (e.g. `http://192.168.1.20:3000`, same Wi-Fi) or the deployed URL, then run `cd ios && xcodegen` (`brew install xcodegen`).
+- If the web app isn't running, the app shows a "Can't reach transPEAKtation" screen with Retry.
+- Debug the page inside the app: Safari → Develop → Simulator → localhost.
+
 ## Troubleshooting
 
 | Symptom | Fix |
@@ -82,6 +106,7 @@ Pull a single layer with `python -m pull static|planned|live`, or name one sourc
 | `. ingest/.env` prints `command not found` or runs in the background | The URL lost its double quotes; put them back. |
 | `psql: command not found` on macOS | Run the `export PATH=...libpq...` line from step 1 (add it to `~/.zshrc`). |
 | `osm_drive_graph ... skip: needs osmnx` | You ran the system `python` instead of `.venv/bin/python`. |
+| iOS app stuck on "Can't reach transPEAKtation" | `npm run dev` isn't running in `web/`, or on a real iPhone `WEB_APP_URL` still says `localhost`. |
 | `CERTIFICATE_VERIFY_FAILED` to overpass-api.de (Windows) | `.venv/Scripts/pip install certifi`; the pullers use it automatically. |
 
 ## Working on the code
