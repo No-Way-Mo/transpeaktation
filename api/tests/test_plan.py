@@ -255,6 +255,12 @@ class FakeStore:
         self.trips.append(doc)
         return True
 
+    def mark_arrived(self, trip_id, at):
+        hit = [t for t in self.trips if t["trip_id"] == trip_id and t["arrived_at"] is None]
+        for t in hit:
+            t["arrived_at"] = at
+        return len(hit)
+
     def status(self):
         return {"mongo": "not configured", "tiger": "not configured"}
 
@@ -306,6 +312,24 @@ class PlanEndpoint(unittest.TestCase):
         self.assertEqual((trip["origin"], trip["mode"], trip["provider"]), ({"lon": -122.407, "lat": 37.788}, "depart", "mapbox"))
         self.assertNotIn("user", trip)
         self.assertEqual(trip["road_segment_ids"], PAST["road_segment_ids"][3:-3])  # the route, minus its ends
+        self.assertEqual((body["data"]["trip_record"]["trip_id"], trip["arrived_at"]), (trip["trip_id"], None))
+        with mock.patch.object(main, "store", store):
+            arrived = lambda tid: self.client.post(f"/trips/{tid}/arrived").status_code  # noqa: E731
+            self.assertEqual([arrived(trip["trip_id"]), arrived(trip["trip_id"]), arrived("nope")], [200, 404, 422])
+        self.assertIsNotNone(trip["arrived_at"])
+
+    def test_demand_counts_only_riders_still_on_the_way(self):
+        s, seen = store_mod.Store(), []
+        s._mongo_call = lambda fn: seen.append(fn)
+        s.trips_to(-122.39, 37.78, at(18), at(19))
+
+        class DB:
+            class trips:
+                @staticmethod
+                def count_documents(q):
+                    DB.q = q
+        seen[0](DB)
+        self.assertIsNone(DB.q["arrived_at"])
 
     def test_mongo_events_and_closures_flow_into_the_plan(self):
         depart = (datetime.now(SF) + timedelta(hours=2)).replace(second=0, microsecond=0)

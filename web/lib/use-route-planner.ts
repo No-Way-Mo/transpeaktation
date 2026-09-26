@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { fetchEvents, fetchPlan, fmtWhen, mins, ORIGIN, REPLAY, searchPlaces, spokenTime, voiceNote,
+import { fetchEvents, fetchPlan, fmtWhen, markArrived, mins, ORIGIN, REPLAY, searchPlaces, spokenTime, voiceNote,
   type EventInfo, type Plan, type Place, type Route, type TransPeak, type VoiceIntent, type When } from './route.ts';
 // Ingested events (windowed /events) + /road-conditions: map pins and the route card's context line.
 import { conditionWindow, eventWindow, fetchEvents as fetchWindowEvents, fetchRoadConditions, routeContext,
@@ -187,6 +187,15 @@ export function useRoutePlanner() {
     else if (!(choice.tp && i === sel)) setChoice({ i, tp: false });
   };
 
+  // The logged trip (undefined if it wasn't saved): the rider marks it arrived (web button, or iOS GPS) once.
+  const tripId = trace?.data.trip_record?.trip_id as string | undefined;
+  const [arrivedId, setArrivedId] = useState('');
+  const arrived = () => {
+    if (!tripId || arrivedId === tripId) return;
+    setArrivedId(tripId);
+    markArrived(tripId).catch(() => {}); // demand just counts this rider a bit longer
+  };
+
   // Empty "from" box offers "Current location" back.
   const suggestions = active === 'from' && !query.from.trim() ? [ORIGIN] : fieldSearch.results;
 
@@ -197,7 +206,7 @@ export function useRoutePlanner() {
     suggestions, searching: fieldSearch.searching,
     showSuggest: !!active && (suggestions.length > 0 || fieldSearch.searching),
     routes, sel, setSel, choice, setChoice, tp, card, loading, error, retry: () => route(),
-    events, trace, aiOpen, setAiOpen, applyAdvice,
+    events, trace, aiOpen, setAiOpen, applyAdvice, tripId, arrived, hasArrived: !!tripId && arrivedId === tripId,
     selected: routes[sel] as Route | undefined,
     selectedCard: routes.length ? card(sel, choice.tp) : undefined,
     when, setWhen,

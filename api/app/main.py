@@ -10,6 +10,7 @@ import asyncio
 import os
 import threading
 import time
+import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -17,7 +18,7 @@ from typing import Any
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Path as PathParam, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 _API_DIR = Path(__file__).resolve().parent.parent
@@ -251,6 +252,8 @@ async def plan_trip(
     record = None
     if save and not replay:  # a simulation isn't demand
         record = {
+            # random, returned only to this client so it can report arrival; not linked to the rider
+            "trip_id": uuid.uuid4().hex, "arrived_at": None,
             "requested_at": now, "source": "web", "mode": mode, "depart_at": departs[result["best"]],
             # ~100 m: enough for demand by area, without storing exact addresses
             "origin": {"lon": round(a[0], 3), "lat": round(a[1], 3)}, "destination": {"lon": round(b[0], 3), "lat": round(b[1], 3)},
@@ -272,6 +275,18 @@ async def plan_trip(
                  "decision": decided_by, "note": note_by,
                  "stored": "replay" if replay else "trips" if save else "off", "trip_record": record},
     }
+
+
+@app.post("/trips/{trip_id}/arrived")
+async def trip_arrived(trip_id: str = PathParam(pattern="^[0-9a-f]{32}$", description="data.trip_record.trip_id from /plan")):
+    """The rider reached the destination: sets the trip's arrived_at, so demand counts only riders still on the way."""
+    at = datetime.now(timezone.utc)
+    n = await asyncio.to_thread(store.mark_arrived, trip_id, at)
+    if n is None:
+        raise HTTPException(503, "trip store unavailable")
+    if not n:
+        raise HTTPException(404, "unknown trip or already arrived")
+    return {"trip_id": trip_id, "arrived_at": at.isoformat()}
 
 
 async def _resolve(query: str | None) -> dict | None:

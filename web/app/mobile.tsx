@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from 'react';
-import { fmtDist, fmtTime, mins, RECENT, stepText } from '@/lib/route.ts';
+import { fmtDist, fmtTime, iosArrival, mins, RECENT, stepText } from '@/lib/route.ts';
 import { useRoutePlanner } from '@/lib/use-route-planner.ts';
 import MapView, { type MapHandle } from './map-view.tsx';
 import { AiButton, AiPrivacy, Compass, Endpoints, Icon, MicButton, PlaceRow, RouteList, SearchResults, ThemeToggle, TripNote, TurnIcon, WhenPicker, WhereTo } from './parts.tsx';
@@ -73,6 +73,17 @@ export default function Mobile() {
   const rest = steps.slice(step);
   const remDur = rest.reduce((a, x) => a + x.duration, 0), remDist = rest.reduce((a, x) => a + x.distance, 0);
   useEffect(() => sheet.setIdx(1), [p.screen]); // each screen opens at half height
+  // iOS app: while navigating a saved trip, native GPS marks it arrived near the destination. Browser: the button.
+  const ios = iosArrival();
+  const arrivedRef = useRef(p.arrived);
+  arrivedRef.current = p.arrived;
+  useEffect(() => {
+    if (!ios || !nav || !p.to || !p.tripId || p.hasArrived) return;
+    ios.postMessage({ lat: p.to.lat, lon: p.to.lon });
+    const on = () => arrivedRef.current();
+    addEventListener('tp-arrived', on);
+    return () => { removeEventListener('tp-arrived', on); ios.postMessage(null); };
+  }, [nav, p.to, p.tripId, p.hasArrived]);
 
   const goTo = (i: number) => {
     setStep(i);
@@ -189,12 +200,15 @@ export default function Mobile() {
             </span>
             <span className="hint">Tap for next</span>
           </button>
-          <div className="nav-bar">
+          <div className={`nav-bar${p.tripId && (!ios || p.hasArrived) ? ' two-row' : ''}`}>
             <div className="nav-stats">
               <div><b className="good">{mins(remDur)}</b><span>min left</span></div>
               <div><b>{fmtTime(remDur)}</b><span>arrival</span></div>
               <div><b>{fmtDist(remDist)}</b><span>remaining</span></div>
             </div>
+            {p.tripId && (!ios || p.hasArrived) && (
+              <button className="end arrived-btn" disabled={p.hasArrived} onClick={p.arrived}>{p.hasArrived ? 'Arrived ✓' : 'Arrived'}</button>
+            )}
             <button className="end" onClick={() => { setNav(false); setStep(0); map.current?.fit(); }}>End</button>
           </div>
         </>

@@ -366,6 +366,13 @@ input::placeholder { color: var(--muted); }
 .nav-stats { flex: 1; display: grid; grid-template-columns: repeat(3, auto); justify-content: space-between; gap: 12px; }
 .nav-stats b { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; line-height: 1; }
 .end { flex: none; height: 48px; padding: 0 22px; border-radius: 14px; background: var(--bad-fill); color: #FFFFFF; font-size: 17px; font-weight: 650; }
+/* "Arrived" (web; the iOS app marks it from GPS): its own row under the stats so the bar fits a 375px screen. */
+.nav-bar.two-row { flex-wrap: wrap; gap: 14px 12px; }
+.nav-bar.two-row .nav-stats { flex-basis: 100%; }
+.nav-bar .arrived-btn { flex: 1; }
+.arrived-btn { background: var(--action); color: var(--on-action); }
+.arrived-btn:disabled { background: var(--good-tint); color: var(--good); }
+.steps-head .arrived-btn { align-self: center; flex: none; }
 
 /* ---------- start / search ---------- */
 .where-to { display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 10px 0 12px; border-radius: 12px; background: var(--fill); }
