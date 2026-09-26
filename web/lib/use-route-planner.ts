@@ -1,8 +1,10 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { fetchRoutes, fmtWhen, mins, ORIGIN, searchPlaces, spokenTime, voiceNote, type Place, type Route, type VoiceIntent, type When } from './route.ts';
-import { conditionWindow, eventWindow, fetchEvents, fetchRoadConditions, routeContext, tripSpan, type ContextData, type Span } from './context.ts';
-import { transPeakPick } from './suggest.ts';
+import { fetchEvents, fetchPlan, fmtWhen, mins, ORIGIN, REPLAY, searchPlaces, spokenTime, voiceNote,
+  type EventInfo, type Plan, type Place, type Route, type TransPeak, type VoiceIntent, type When } from './route.ts';
+// Ingested events (windowed /events) + /road-conditions: map pins and the route card's context line.
+import { conditionWindow, contextLine, eventWindow, fetchEvents as fetchWindowEvents, fetchRoadConditions, routeContext,
+  type ContextData, type Span } from './context.ts';
 
 type Field = 'from' | 'to';
 export type Screen = 'start' | 'search' | 'route';
@@ -43,7 +45,7 @@ function useTripContext(span: Span): ContextData {
   useEffect(() => {
     const ctl = new AbortController();
     setData(d => ({ ...d, loading: true }));
-    Promise.allSettled([fetchEvents(ev, ctl.signal), fetchRoadConditions(cond, ctl.signal)]).then(([e, c]) => {
+    Promise.allSettled([fetchWindowEvents(ev, ctl.signal), fetchRoadConditions(cond, ctl.signal)]).then(([e, c]) => {
       if (ctl.signal.aborted) return;
       setData({ events: e.status === 'fulfilled' ? e.value : null, conditions: c.status === 'fulfilled' ? c.value : null, loading: false });
     });
@@ -64,22 +66,30 @@ export function useRoutePlanner() {
   const [trip, setTrip] = useState<Trip>({ note: '' });
   const [when, setWhenState] = useState<When>(NOW);
   const [routes, setRoutes] = useState<Route[]>([]);
+  const [tp, setTp] = useState<TransPeak | null>(null);    // api/ /plan: the model's pick + why
+  const [data, setData] = useState<Plan['data'] | null>(null); // where the plan's inputs came from (transparency)
+  const [events, setEvents] = useState<EventInfo[]>([]);  // today's events, for the search suggestions
   const [choice, setChoice] = useState({ i: 0, tp: true }); // selected card; transPEAKtation's by default
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const inflight = useRef<AbortController>(undefined);
   useEffect(() => () => inflight.current?.abort(), []);
+  useEffect(() => {
+    const ctl = new AbortController();
+    fetchEvents(ctl.signal).then(setEvents).catch(() => {}); // suggestions just stay generic without them
+    return () => ctl.abort();
+  }, []);
 
   // Abort the previous request so a slow response can't overwrite a newer trip.
   const route = async (a = from, b = to, w = when) => {
     inflight.current?.abort();
-    setRoutes([]); setError('');
+    setRoutes([]); setTp(null); setError('');
     if (!a || !b) return setLoading(false);
     const ctl = (inflight.current = new AbortController());
     setLoading(true);
     try {
-      const rs = await fetchRoutes(a, b, w, ctl.signal);
-      setRoutes(rs); setChoice({ i: 0, tp: true });
+      const res = await fetchPlan(a, b, w, ctl.signal);
+      setRoutes(res.routes); setTp(res.plan); setData(res.data); setChoice({ i: 0, tp: true });
     } catch {
       if (!ctl.signal.aborted) setError("Couldn't load routes.");
     } finally {
@@ -120,7 +130,7 @@ export function useRoutePlanner() {
     inflight.current?.abort();
     search.run(''); fieldSearch.run('');
     setTo(null); setQuery(q => ({ ...q, to: '' }));
-    setRoutes([]); setError(''); setLoading(false); setActive(null);
+    setRoutes([]); setTp(null); setError(''); setLoading(false); setActive(null);
     setTrip({ note: '' }); setWhenState(NOW);
     setScreen('start');
   };
@@ -144,19 +154,22 @@ export function useRoutePlanner() {
     route(to, from);
   };
   const setWhen = (w: When) => { setWhenState(w); route(from, to, w); };
+  /** The plan's "leaving at 8:00 PM saves ~9 min": re-plan with that departure. */
+  const applyAdvice = () => { if (tp?.advice) setWhen({ mode: 'depart', at: Date.parse(tp.advice.depart_at) }); };
 
   // Departure per estimate: now, the chosen time, or (arrive-by) the chosen time minus that estimate.
   const now = Date.now();
-  const leaveFor = (dur: number) => tripSpan(when, dur, now).from;
+  const leaveFor = (dur: number) => when.mode === 'arrive' ? when.at - dur * 1000 : when.mode === 'depart' ? (REPLAY ? when.at : Math.max(when.at, now)) : now;
+  /** A trip's leave → arrive for a `dur`-second drive, with the same departure rule as the cards. */
+  const spanFor = (dur: number): Span => { const from = leaveFor(dur); return { from, to: from + dur * 1000 }; };
   // Trip span for event / road context: every route's leave → arrive, or just the departure before routes load.
-  const spans = routes.map(r => tripSpan(when, r.dur, now));
+  const spans = routes.map(r => spanFor(r.dur));
   const fetchSpan: Span = spans.length
     ? { from: Math.min(...spans.map(s => s.from)), to: Math.max(...spans.map(s => s.to)) }
-    : tripSpan(when, 0, now);
+    : spanFor(0);
   const context = useTripContext(fetchSpan);
   // Each route is judged over its own leave → arrive, not the union used for fetching.
-  const ctxFor = (r: Route | undefined) => r ? routeContext(r, context.events ?? [], context.conditions ?? [], tripSpan(when, r.dur, now)) : null;
-  const tp = routes.length ? transPeakPick(routes, ctxFor(routes[0]), context) : null;
+  const ctxFor = (r: Route | undefined) => r ? routeContext(r, context.events ?? [], context.conditions ?? [], spanFor(r.dur)) : null;
   const card = (i: number, isTp: boolean): Card => {
     const dur = isTp && tp ? tp.preds[i].dur : routes[i].dur, leave = leaveFor(dur);
     return { i, tp: isTp, dur, leave, arrive: leave + dur * 1000 };
@@ -175,6 +188,7 @@ export function useRoutePlanner() {
     suggestions, searching: fieldSearch.searching,
     showSuggest: !!active && (suggestions.length > 0 || fieldSearch.searching),
     routes, sel, setSel, choice, setChoice, tp, card, loading, error, retry: () => route(),
+    events, data, applyAdvice,
     selected: routes[sel] as Route | undefined,
     selectedCard: routes.length ? card(sel, choice.tp) : undefined,
     when, setWhen,
@@ -182,6 +196,8 @@ export function useRoutePlanner() {
     mapEvents: context.events ?? [],
     /** Events near / conditions on the selected route (null = no route yet). */
     selectedContext: ctxFor(routes[sel]),
+    /** Extra line on the transPEAKtation card: ingested events near / closures on the route it shows, if any. */
+    tpContext: tp && routes[tp.best] ? contextLine(ctxFor(routes[tp.best]), context) : null,
     whenText: when.mode === 'now' ? 'Leave now' : `${when.mode === 'depart' ? 'Leave' : 'Arrive by'} ${fmtWhen(when.at)}`,
     /** "12 min" per route on the map, in whichever estimate (normal / transPEAKtation) is selected. */
     mapLabels: routes.map((_, i) => `${mins(card(i, choice.tp).dur)} min`),

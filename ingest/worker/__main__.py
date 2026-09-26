@@ -6,6 +6,7 @@
     python -m worker run traffic --source tomtom --dry-run
     python -m worker run incidents             # pull snapshots (closures, permits, Caltrans, CHP, dispatch) -> Mongo road_incidents
     python -m worker schedule                  # every 10 min: traffic + fresh incident snapshots; segments when the graph changes
+    python -m worker backfill --date 2026-09-20  # closures/permits in effect that day (DataSF history) -> road_incidents
 
 Needs the OSM graph first: `python -m pull osm_drive_graph` (writes data/raw/osm_drive_graph.graphml).
 `--dry-run` touches no database and prints what would be written; watermarks aren't saved.
@@ -15,11 +16,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
+from datasf import DATASETS, DataSF, pull as datasf_pull
 from datasf.client import load_dotenv
 from pull import DATA_DIR, ENV_FILE
 
@@ -93,6 +97,33 @@ def run_incidents(net: Network | None, dry_run: bool, use_geocoder: bool = True)
     return report
 
 
+# DataSF keeps these after they end, so a past day can be rebuilt. Dispatch, CHP and Caltrans (and traffic) are
+# live-only: a past day has them only if the worker was running then.
+BACKFILL_SOURCES = ("street_closures", "street_use_permits", "excavation_permits")
+
+
+def backfill(day: date, net: Network | None, dry_run: bool, client: DataSF | None = None) -> dict:
+    """Closures and permits in effect on `day` (SF local), queried as of that morning, into road_incidents."""
+    as_of = datetime(day.year, day.month, day.day, tzinfo=ZoneInfo("America/Los_Angeles")).astimezone(timezone.utc)
+    raw = DATA_DIR.parent / "backfill" / day.isoformat()
+    raw.mkdir(parents=True, exist_ok=True)
+    if (DATA_DIR / "streets.json").exists():  # locates cnn-only permits
+        shutil.copyfile(DATA_DIR / "streets.json", raw / "streets.json")
+    client = client or DataSF(timeout=120)
+    for name in BACKFILL_SOURCES:
+        rows = datasf_pull(client, DATASETS[name], now=as_of)
+        (raw / f"{name}.json").write_text(json.dumps(
+            {"source": name, "layer": "planned", "pulled_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+             "count": len(rows), "meta": {"as_of": as_of.isoformat(), "where": DATASETS[name].where_at(as_of)},
+             "records": rows}, ensure_ascii=False, default=str), encoding="utf-8")
+    sink = DryRunSink() if dry_run else MongoSink()
+    report = IncidentJob(raw, sink, net=net, out_dir=raw).run(BACKFILL_SOURCES)
+    report["_as_of"] = as_of.isoformat()
+    if dry_run:
+        report["_dry_run"] = {"would_write": dict(sink.counts)}
+    return report
+
+
 def bootstrap(dry_run: bool) -> dict:
     out: dict = {}
     if dry_run:
@@ -135,6 +166,9 @@ def main(argv: list[str]) -> int:
     r.add_argument("--no-geocode", action="store_true", help="incidents: never call a geocoding API")
     r.add_argument("--dry-run", action="store_true")
     sub.add_parser("schedule")
+    bf = sub.add_parser("backfill")
+    bf.add_argument("--date", required=True, type=date.fromisoformat, help="SF local day, YYYY-MM-DD")
+    bf.add_argument("--dry-run", action="store_true")
     args = p.parse_args(argv)
 
     load_dotenv(ENV_FILE)
@@ -144,6 +178,8 @@ def main(argv: list[str]) -> int:
         elif args.cmd == "schedule":
             schedule()
             return 0
+        elif args.cmd == "backfill":
+            out = backfill(args.date, load_network() if GRAPHML.exists() else None, args.dry_run)
         elif args.job == "segments":
             out = run_segments(load_network(), args.dry_run)
         elif args.job == "incidents":

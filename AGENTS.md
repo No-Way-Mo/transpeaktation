@@ -10,7 +10,7 @@ One owner per folder. Only edit another folder with its owner's OK.
 |--------------|-------|-------|-------|
 | `ingest/`    | TBD | Event, city/road, mobility/AV, map inputs → normalize, dedupe, geocode → write to DBs | Python workers, MongoDB Atlas, Tiger Data, DigitalOcean |
 | `ml/`        | TBD | Event understanding, traffic + demand forecast, fleet optimizer | Python, Gemini API |
-| `api/`       | TBD | Places + traffic-aware routes (Mapbox, OSRM fallback) with OSM segment IDs (OSMnx); later: fleet controller, voice → intent, confirm → Solana tx | FastAPI, Mapbox, OSMnx, ElevenLabs, Solana |
+| `api/`       | TBD | Places + traffic-aware routes (Mapbox, OSRM fallback) with OSM segment IDs (OSMnx); trip plan `/plan` (reads Mongo/Tiger, event-aware model, logs `trips`); voice → intent; later: fleet controller, confirm → Solana tx | FastAPI, Mapbox, OSMnx, ElevenLabs, Solana |
 | `web/`       | TBD | Trip planning app, fleet dashboard, AI transparency / privacy page | Next.js, React, TypeScript, Leaflet |
 | `ios/`       | TBD | SwiftUI shell that loads the `web/` app (mobile layout) in a WKWebView | SwiftUI, XcodeGen |
 | `contracts/` | everyone | Shared data shapes (events, routes, forecasts, fleet state) | JSON Schema / Pydantic |
@@ -68,9 +68,9 @@ Forecast models need one fixed road list, one unit, and one time step. Raw feeds
 - ingest setup: `cd ingest && python -m venv .venv && .venv/Scripts/pip install -e .[osm]` (macOS/Linux: `.venv/bin/`)
 - ingest pull raw data: `cd ingest && .venv/Scripts/python -m pull [static|planned|live|<source>]` · quality report: `.venv/Scripts/python -m pull.check`
 - ingest live polling (Mapbox corridors + traffic tiles, TomTom flow tiles, Muni vehicles, 511 events; keys in `ingest/.env`): `cd ingest && .venv/Scripts/pip install -e .[live] && .venv/Scripts/python -m pull.poll` (`--once`, `--only mapbox|mapbox_tiles|tomtom|muni|events`)
-- ingest worker (OSM graph → Mongo `road_segments`; `pull.poll` JSONL → Tiger `traffic_metrics` + `route_eta_metrics`, Mongo `route_plans`; closures/incidents → Mongo `road_incidents`; needs `python -m pull osm_drive_graph streets speed_limits` first): `cd ingest && .venv/Scripts/pip install -e .[osm,db]` then `.venv/Scripts/python -m worker bootstrap` · one pass: `python -m worker run traffic|incidents|segments [--dry-run]` · long-running: `python -m worker schedule` · design: `ingest/DESIGN.md`
+- ingest worker (OSM graph → Mongo `road_segments`; `pull.poll` JSONL → Tiger `traffic_metrics` + `route_eta_metrics`, Mongo `route_plans`; closures/incidents → Mongo `road_incidents`; needs `python -m pull osm_drive_graph streets speed_limits` first): `cd ingest && .venv/Scripts/pip install -e .[osm,db]` then `.venv/Scripts/python -m worker bootstrap` · one pass: `python -m worker run traffic|incidents|segments [--dry-run]` · long-running: `python -m worker schedule` · past day for a replay demo (DataSF closures/permits in effect then; traffic only exists for times `pull.poll` + worker were running): `python -m worker backfill --date YYYY-MM-DD` · design: `ingest/DESIGN.md`
 - ingest DataSF live check: `cd ingest && python -m datasf` · test: `cd ingest && python -m unittest discover -s tests -t .`
 - ingest data sources plan + backlog: `ingest/TODO.md`
 - api: `cd api && python3 -m venv .venv && .venv/bin/pip install -e .[test]` · run: `.venv/bin/uvicorn app.main:app --reload` → http://localhost:8000/docs · test: `.venv/bin/python -m unittest discover -s tests -t .`
-- web: `cd web && npm install && npm run dev` → http://localhost:3000 (≤760px wide = mobile layout) · test: `npm test` · build: `npm run build`
+- web: `cd web && npm install && npm run dev` → http://localhost:3000 (≤760px wide = mobile layout) · test: `npm test` · build: `npm run build` · replay demo (past dates allowed; `/plan?replay=true` uses the traffic/closures stored for then): `NEXT_PUBLIC_REPLAY=1 npm run dev`
 - ios: start web first, then `open ios/Transpeaktation.xcodeproj` and Run on a simulator. Web URL = `WEB_APP_URL` in `ios/project.yml`; after editing that file run `cd ios && xcodegen`.

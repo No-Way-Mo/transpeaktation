@@ -192,9 +192,9 @@ class Endpoints(StoreBase):
         self.assertEqual(self.client.get("/traffic", params={"segments": ","}).status_code, 400)
 
     def test_health_reports_db_config_without_secrets(self):
-        with mock.patch.dict("os.environ", {"MONGODB_URI": "mongodb+srv://u:secretpw@h", "TIGER_DATABASE_URL": ""}):
+        with mock.patch.dict("os.environ", {"MONGODB_URI": "mongodb+srv://u:secretpw@h", "TIGER_DATABASE_URL": ""}),                 mock.patch.object(store, "_INGEST_ENV", Path("no-such-dir") / ".env"):  # ignore this machine's ingest/.env
             h = self.client.get("/health").json()
-        self.assertEqual((h["mongo"], h["tiger"]), ("configured", "not configured"))
+        self.assertEqual((h["mongo"], h["tiger"]), ("ready", "not configured"))
         self.assertNotIn("secretpw", json.dumps(h))
 
 

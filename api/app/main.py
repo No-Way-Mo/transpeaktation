@@ -1,5 +1,6 @@
-"""transPEAKtation API: place search + traffic-aware routes with OSM road-segment IDs; voice → trip intent; read-only
-views of ingested data (events, road conditions, segment traffic) from Mongo / Tiger.
+"""transPEAKtation API: place search, traffic-aware routes with OSM road-segment IDs, the event-aware trip plan
+(routes + what ingest/ stored + the model), voice → trip intent, and read-only views of ingested data (events,
+road conditions, segment traffic) from Mongo / Tiger.
 
     cd api && .venv/bin/uvicorn app.main:app --reload    # http://localhost:8000/docs
 """
@@ -16,7 +17,7 @@ from typing import Any
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 _API_DIR = Path(__file__).resolve().parent.parent
@@ -24,12 +25,15 @@ load_dotenv(_API_DIR / ".env")  # api/.env; real env vars win
 # Local dev: reuse keys already in ingest/.env (e.g. its MAPBOX_TOKEN) instead of copying them. Never overrides.
 load_dotenv(_API_DIR.parent / "ingest" / ".env")
 
-from . import providers, store, voice
+from . import model, providers, voice
+from . import store as ingested  # map views (find_*); `store` below is the planner's Store
 from .segments import Segments
+from .store import Store
 
 # Accept a little beyond the SF search box so Treasure Island / Daly City edges still route.
 SERVICE_AREA = (-122.62, 37.60, -122.28, 37.93)  # lon_min, lat_min, lon_max, lat_max
 segments = Segments()
+store = Store()
 state: dict[str, Any] = {}
 
 
@@ -76,8 +80,12 @@ def lonlat(raw: str) -> tuple[float, float]:
     return lon, lat
 
 
-def when(raw: str | None) -> str | None:
-    """ISO time with offset → Mapbox's UTC form. Must be from now to 7 days out (a few minutes of slack)."""
+REPLAY_MAX = timedelta(days=365)
+
+
+def when(raw: str | None, replay: bool = False) -> datetime | None:
+    """ISO time with offset -> UTC. Now to 7 days out (a few minutes of slack; earlier = now).
+    replay (a simulated past trip) also allows up to a year back, and keeps the past time."""
     if raw is None:
         return None
     try:
@@ -87,9 +95,21 @@ def when(raw: str | None) -> str | None:
     if t.tzinfo is None:
         raise HTTPException(400, "time needs a UTC offset")
     now = datetime.now(timezone.utc)
-    if not now - timedelta(minutes=5) <= t <= now + timedelta(days=7):
-        raise HTTPException(400, "time must be between now and 7 days from now")
-    return max(t, now).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    if not now - (REPLAY_MAX if replay else timedelta(minutes=5)) <= t <= now + timedelta(days=7):
+        raise HTTPException(400, "time must be between now and 7 days from now"
+                                 + (" (or up to a year back)" if replay else ", or pass replay=true for a past trip"))
+    t = t.astimezone(timezone.utc)
+    return t if replay else max(t, now)
+
+
+def mapbox_time(t: datetime | None, now: datetime) -> str | None:
+    """Mapbox's UTC form. Mapbox only predicts ahead, so a past time asks for the same SF weekday and clock time
+    in the coming week: its typical traffic repeats weekly. (The observed traffic of that day comes from Tiger.)"""
+    if t is None:
+        return None
+    while t < now:
+        t = (t.astimezone(model.SF_TZ) + timedelta(weeks=1)).astimezone(timezone.utc)
+    return t.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 @app.get("/places")
@@ -117,7 +137,11 @@ async def routes(
     a, b = lonlat(from_), lonlat(to)
     if depart_at and arrive_by:
         raise HTTPException(400, "pass depart_at or arrive_by, not both")
-    dep, arr = when(depart_at), when(arrive_by)
+    now = datetime.now(timezone.utc)
+    return await _routes(a, b, mapbox_time(when(depart_at), now), mapbox_time(when(arrive_by), now))
+
+
+async def _routes(a: tuple[float, float], b: tuple[float, float], dep: str | None, arr: str | None) -> dict:
     # ~10 m, to the minute: nearby taps / re-renders share a cached answer
     key = ("routes", *(round(x, 4) for x in (*a, *b)), dep and dep[:16], arr and arr[:16])
     if (hit := _cached(key)) is not None:
@@ -132,6 +156,71 @@ async def routes(
         r["road_segment_ids"] = await asyncio.to_thread(segments.match, r["coords"])
     # Short TTL: Mapbox ETAs include live traffic.
     return _store(key, 60, {"routes": found, "source": source})
+
+
+def _near_any(ev: dict, found: list[dict], radius_m: float = 700) -> bool:
+    return any(model.meters(c, (ev["lat"], ev["lon"])) <= radius_m for r in found for c in r["coords"][::3])
+
+
+@app.get("/plan")
+async def plan_trip(
+    background: BackgroundTasks,
+    from_: str = Query(alias="from", description="Start as 'lon,lat'"),
+    to: str = Query(description="Destination as 'lon,lat'"),
+    depart_at: str | None = Query(None, description="Leave at (ISO 8601 with offset); omit to leave now"),
+    arrive_by: str | None = Query(None, description="Arrive by (ISO 8601 with offset)"),
+    replay: bool = Query(False, description="Simulate a trip at a past time with the data stored for then (demo); "
+                                            "not logged as a trip"),
+):
+    """The trip planner: candidate routes (Mapbox/OSRM) -> events, closures, traffic and forecasts for their road
+    segments at the trip's time (Mongo / Tiger, written by ingest/ and ml/) -> event-aware model -> pick,
+    explanation and a better departure time. Logs the request to Mongo `trips` (no user identity).
+    Traffic by trip time: live (now), observed (past, replay), typical (future); see Store.traffic_at."""
+    a, b = lonlat(from_), lonlat(to)
+    if depart_at and arrive_by:
+        raise HTTPException(400, "pass depart_at or arrive_by, not both")
+    real_now = datetime.now(timezone.utc)
+    dep, arr = when(depart_at, replay), when(arrive_by, replay)
+    got = await _routes(a, b, mapbox_time(dep, real_now), mapbox_time(arr, real_now))
+    found = got["routes"]
+    mode = "arrive" if arr else "depart" if dep else "now"
+    departs = [arr - timedelta(seconds=r["dur"]) if arr else dep or real_now for r in found]
+    t0 = min(departs)
+    # A replayed trip runs as if it were then: the model treats that day's observed traffic as live.
+    now = min(t0, real_now) if replay else real_now
+    t1 = max(d + timedelta(seconds=r["dur"]) for d, r in zip(departs, found)) + timedelta(minutes=90)  # + advice range
+    sids = sorted({s for r in found for s in (r.get("road_segment_ids") or [])})
+
+    events, incidents, (traffic, traffic_kind), predictions, lengths = await asyncio.gather(
+        asyncio.to_thread(store.events_between, t0 - timedelta(hours=1), t1),
+        asyncio.to_thread(store.incidents_on, sids, t0, t1),
+        asyncio.to_thread(store.traffic_at, sids, t0, real_now),
+        asyncio.to_thread(store.predictions, sids, t0, t1),
+        asyncio.to_thread(segments.lengths, sids))
+    evs = [e for e in (model.from_mongo(x) for x in events or []) if e] if events is not None else \
+        model.demo_events(t0)
+    ctx = {"events": evs, "incidents": incidents or [], "traffic": traffic or [], "traffic_kind": traffic_kind,
+           "predictions": predictions or [], "lengths": lengths}
+    result = model.plan(found, departs, mode, ctx, now=now)
+    best = result["preds"][result["best"]]
+
+    if not replay:  # a simulation isn't demand
+        background.add_task(store.save_trip, {
+            "requested_at": now, "source": "web", "mode": mode, "depart_at": departs[result["best"]],
+            # ~100 m: enough for demand by area, without storing exact addresses
+            "origin": {"lon": round(a[0], 3), "lat": round(a[1], 3)}, "destination": {"lon": round(b[0], 3), "lat": round(b[1], 3)},
+            "provider": got["source"], "route_count": len(found), "picked": result["best"],
+            "predicted_sec": [round(p["dur"]) for p in result["preds"]], "baseline_sec": [round(r["dur"]) for r in found],
+            "event_ids": [h["id"] for h in best["event_hits"]], "blocked": best["blocked"], "model": best["model"]})
+    return {
+        "routes": found, "source": got["source"], "plan": result,
+        "events": [model.event_view(e) for e in evs if _near_any(e, found)],
+        "data": {"at": t0.isoformat(), "replay": replay,  # the moment the inputs describe
+                 "events": "mongo" if events is not None else "demo",
+                 "incidents": "mongo" if incidents is not None else "unavailable",
+                 "traffic": f"tiger:{traffic_kind}" if traffic is not None else "unavailable",
+                 "predictions": "tiger" if predictions else "none (event-impact heuristic)"},
+    }
 
 
 async def _resolve(query: str | None) -> dict | None:
@@ -179,7 +268,7 @@ def window(start: str, end: str) -> tuple[datetime, datetime]:
     return a.astimezone(timezone.utc), b.astimezone(timezone.utc)
 
 
-def bbox(raw: str | None) -> store.Box:
+def bbox(raw: str | None) -> ingested.Box:
     if raw is None:
         return SERVICE_AREA
     try:
@@ -197,33 +286,59 @@ async def _read(key: tuple, fn, *args) -> Any:
         return hit
     try:
         return _store(key, 60, await asyncio.to_thread(fn, *args))
-    except store.StoreUnavailable as e:
+    except ingested.StoreUnavailable as e:
         raise HTTPException(503, f"ingested data unavailable: {e}")
     except Exception as e:  # driver errors (timeouts, auth) carry connection details; don't echo them
         raise HTTPException(503, f"ingested data unavailable ({type(e).__name__})")
 
 
-def _mongo_read(fn, a: datetime, b: datetime, box: store.Box, *extra) -> list[dict]:
-    return fn(store.mongo_db(), a, b, box, *extra)
+def _mongo_read(fn, a: datetime, b: datetime, box: ingested.Box, *extra) -> list[dict]:
+    return fn(ingested.mongo_db(), a, b, box, *extra)
 
 
 # Windows are rounded out to 5 minutes for the cache key: "now" moves every request.
-def _key(name: str, a: datetime, b: datetime, box: store.Box) -> tuple:
+def _key(name: str, a: datetime, b: datetime, box: ingested.Box) -> tuple:
     r = lambda t: int(t.timestamp() // 300)
     return (name, r(a), r(b), box)
 
 
 @app.get("/events")
 async def events(
-    start: str = Query(description="Window start (ISO 8601 with offset)"),
-    end: str = Query(description="Window end (ISO 8601 with offset)"),
-    bbox_: str | None = Query(None, alias="bbox", description="'lon_min,lat_min,lon_max,lat_max'; default SF"),
+    start: str | None = Query(None, description="Window start (ISO 8601 with offset); pass with end"),
+    end: str | None = Query(None, description="Window end (ISO 8601 with offset); pass with start"),
+    bbox_: str | None = Query(None, alias="bbox", description="With start/end: 'lon_min,lat_min,lon_max,lat_max'; default SF"),
+    date: str | None = Query(None, description="Without start/end: YYYY-MM-DD, San Francisco local; default today"),
 ):
-    """Ingested events (Mongo `events`, plus DataSF special-event street closures) overlapping the window."""
+    """Two views of events:
+    - start + end (map pins, route context): ingested events (Mongo `events`, plus DataSF special-event street
+      closures) overlapping the window, as contracts/map_context.schema.json MapEvents. 503 without Mongo.
+    - otherwise (search suggestions: drop-offs, "leave at"): one SF day's events, demo events until ingest fills
+      Mongo `events`."""
+    if start is None and end is None:
+        return await events_today(date)
+    if start is None or end is None:
+        raise HTTPException(400, "pass both start and end")
+    if date is not None:
+        raise HTTPException(400, "pass date or start/end, not both")
     a, b = window(start, end)
     box = bbox(bbox_)
-    found = await _read(_key("events", a, b, box), _mongo_read, store.find_events, a, b, box)
+    found = await _read(_key("events", a, b, box), _mongo_read, ingested.find_events, a, b, box)
     return {"events": found}
+
+
+async def events_today(date: str | None) -> dict:
+    """Events for the search suggestions (drop-offs, "leave at"). Demo events until ingest fills Mongo `events`."""
+    try:
+        day = datetime.fromisoformat(date).replace(tzinfo=model.SF_TZ) if date else datetime.now(model.SF_TZ)
+    except ValueError:
+        raise HTTPException(400, "expected YYYY-MM-DD")
+    start = day.replace(hour=0, minute=0, second=0, microsecond=0)
+    key = ("events", start.date().isoformat())
+    if (hit := _cached(key)) is not None:
+        return hit
+    found = await asyncio.to_thread(store.events_between, start, start + timedelta(days=1))
+    evs = [e for e in (model.from_mongo(x) for x in found or []) if e] if found is not None else model.demo_events(start)
+    return _store(key, 300, {"events": [model.event_view(e) for e in evs], "source": "mongo" if found is not None else "demo"})
 
 
 @app.get("/road-conditions")
@@ -236,7 +351,7 @@ async def road_conditions(
     """Ingested closures and incidents (Mongo `road_incidents`) active during the window."""
     a, b = window(start, end)
     box = bbox(bbox_)
-    found = await _read((*_key("conditions", a, b, box), include_permits), _mongo_read, store.find_road_conditions,
+    found = await _read((*_key("conditions", a, b, box), include_permits), _mongo_read, ingested.find_road_conditions,
                         a, b, box, include_permits)
     return {"road_conditions": found}
 
@@ -246,9 +361,9 @@ TRAFFIC_MAX_AGE = timedelta(minutes=30)
 
 
 def _tiger_traffic(ids: list[str], since: datetime) -> list[dict]:
-    conn = store.tiger_conn()
+    conn = ingested.tiger_conn()
     try:
-        return store.find_traffic(conn, ids, since)
+        return ingested.find_traffic(conn, ids, since)
     finally:
         conn.close()
 
@@ -270,7 +385,5 @@ def health():
         mapbox = "no token (using OSRM/Nominatim)"
     else:
         mapbox = "ready" if providers.mapbox_available() else "backing off after an error"
-    configured = lambda name: "configured" if store.configured(name) else "not configured"
-    return {"ok": True, "mapbox": mapbox, "road_graph": segments.status,
-            "voice": "ready" if voice.available() else "no ELEVENLABS_API_KEY",
-            "mongo": configured("MONGODB_URI"), "tiger": configured("TIGER_DATABASE_URL")}
+    return {"ok": True, "mapbox": mapbox, "road_graph": segments.status, **store.status(),
+            "voice": "ready" if voice.available() else "no ELEVENLABS_API_KEY"}

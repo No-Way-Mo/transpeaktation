@@ -203,6 +203,7 @@ input::placeholder { color: var(--muted); }
 .when-pop input { height: 40px; padding: 0 10px; border-radius: 10px; border: none; background: var(--fill); font-size: 15px; }
 .when-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .when-foot .pill-btn { margin-left: auto; }
+.route-sec .advice { margin-top: 8px; }
 
 /* "12 min" bubbles on the lines (Leaflet divIcon; the 12×12 icon box is centred on the point) */
 .eta-pin { background: none; border: none; }

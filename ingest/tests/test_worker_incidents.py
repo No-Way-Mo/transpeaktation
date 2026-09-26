@@ -278,3 +278,27 @@ class JobTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BackfillTests(unittest.TestCase):
+    def test_backfill_queries_datasf_as_of_that_sf_morning(self):
+        from worker import __main__ as cli
+
+        class FakeClient:
+            wheres = {}
+
+            def iter_rows(self, dataset_id, where=None, page_size=None):
+                self.wheres[dataset_id] = where
+                return iter(fx.STREET_CLOSURES if dataset_id == "8x25-yybr" else [])
+
+        with tempfile.TemporaryDirectory() as tmp:
+            data = Path(tmp) / "raw"
+            data.mkdir()
+            (data / "streets.json").write_text(json.dumps({"records": fx.STREETS}))
+            with mock.patch.object(cli, "DATA_DIR", data):
+                out = cli.backfill(datetime(2026, 9, 20).date(), None, dry_run=True, client=FakeClient())
+            self.assertTrue((Path(tmp) / "backfill" / "2026-09-20" / "street_closures.json").exists())
+        self.assertEqual(out["_as_of"], "2026-09-20T07:00:00+00:00")  # SF midnight (PDT)
+        self.assertIn("end_utc >= '2026-09-20T07:00:00'", FakeClient.wheres["8x25-yybr"])  # still open that day
+        self.assertEqual(out["street_closures"]["status"], "ok")
+        self.assertGreater(out["_dry_run"]["would_write"].get("road_incidents", 0), 0)

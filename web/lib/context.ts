@@ -1,7 +1,7 @@
 // Ingested event + road context (api/ /events and /road-conditions, which read what ingest/ wrote to Mongo), the
 // time windows used to ask for it, and which items touch a given route. Deterministic geometry only, no model.
 // Plain TS (no enums etc.) so `node --test` can run it directly.
-import { api, metersToLine, SF_TZ, sfDays, type LatLng, type Route, type When } from './route.ts';
+import { api, metersToLine, sfDays, TZ, type LatLng, type Route, type When } from './route.ts';
 
 // ---- data contract: mirrors contracts/map_context.schema.json -------------------------------------------------
 export type MapEvent = {
@@ -22,7 +22,7 @@ export type RoadCondition = {
 
 // ---- time windows: every "is this relevant then?" knob lives here ---------------------------------------------
 // All instants are epoch ms (absolute), so no browser time zone enters the comparison; SF wall-clock time only
-// matters when reading the picker and printing times (route.ts, SF_TZ).
+// matters when reading the picker and printing times (route.ts, TZ).
 /** A trip's span in epoch ms: leave → arrive. */
 export type Span = { from: number; to: number };
 export const EVENT_LEAD_MIN = 60;  // an event matters from this long before it starts (arriving crowds)...
@@ -137,8 +137,8 @@ export function routeContext(r: Route, events: MapEvent[], conditions: RoadCondi
 // ---- wording (facts only: no delay minutes until ml/ forecasts exist) ------------------------------------------
 export const NO_EVENTS = 'No events on your way at this time.';
 
-const sfDay = (ms: number) => new Date(ms).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: SF_TZ });
-const sfClock = (ms: number) => new Date(ms).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: SF_TZ });
+const sfDay = (ms: number) => new Date(ms).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', timeZone: TZ });
+const sfClock = (ms: number) => new Date(ms).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: TZ });
 
 /** An event's span in SF time with explicit dates, so a multi-day or past-day event can't read as "this week":
  *  "Wed, Sep 23, 6:00 AM – Fri, Oct 2, 6:00 PM", or "Sat, Sep 26, 10:00 AM – 4:00 PM" within one day. */
@@ -171,6 +171,13 @@ export function contextNote(ctx: RouteContext | null, data: ContextData): string
   }
   if (incidents) parts.push(`${plural(incidents, 'reported incident')} on your route.`);
   return parts.join(' ');
+}
+
+/** The extra line under /plan's note on the transPEAKtation card: contextNote, but only when this route actually
+ *  has ingested events near it or conditions on it. Nothing while loading or when there is nothing to add. */
+export function contextLine(ctx: RouteContext | null, data: ContextData): string | null {
+  if (data.loading || !ctx || (!ctx.events.length && !ctx.conditions.length)) return null;
+  return contextNote(ctx, data);
 }
 
 /** Short tag for the transPEAKtation card. */
