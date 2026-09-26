@@ -1,6 +1,5 @@
 import type { Metadata, Viewport } from 'next';
 import 'leaflet/dist/leaflet.css';
-import { THEME_SCRIPT } from '@/lib/theme.ts';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -16,11 +15,7 @@ export const viewport: Viewport = { width: 'device-width', initialScale: 1, view
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    // THEME_SCRIPT sets data-theme on <html> while the HTML is parsed (no light/dark flash); the DOM wins on hydration.
-    <html lang="en" suppressHydrationWarning>
-      <head>
-        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
-      </head>
+    <html lang="en">
       <body>{children}</body>
     </html>
   );

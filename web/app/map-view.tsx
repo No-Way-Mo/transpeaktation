@@ -3,8 +3,6 @@ import { useEffect, useImperativeHandle, useRef, type Ref } from 'react';
 import type * as Leaflet from 'leaflet';
 import { fmtCategory, fmtEventTime, type MapEvent } from '@/lib/context.ts';
 import { labelPoint, trafficRuns, type LatLng, type Place, type Route } from '@/lib/route.ts';
-import type { Theme } from '@/lib/theme.ts';
-import { useTheme } from '@/lib/use-theme.ts';
 
 export type MapHandle = { fit(): void; focus(p: LatLng, zoom?: number): void; zoomIn(): void; zoomOut(): void };
 
@@ -22,8 +20,8 @@ type Props = {
   pad: { topLeft: [number, number]; bottomRight: [number, number] }; // room left for overlays when fitting
 };
 
-// Esri's own light / dark grey basemaps, tinted toward the palette by --map-tint (globals.css).
-const tiles = (t: Theme) => `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_${t === 'dark' ? 'Dark' : 'Light'}_Gray_Base/MapServer/tile/{z}/{y}/{x}`;
+const dark = () => matchMedia('(prefers-color-scheme: dark)'); // browser-only: called from effects, never at import
+const tiles = () => `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_${dark().matches ? 'Dark' : 'Light'}_Gray_Base/MapServer/tile/{z}/{y}/{x}`;
 
 export default function MapView({ ref, routes, sel, tp, labels, from, to, marker, events, onSelect, pad }: Props) {
   const el = useRef<HTMLDivElement>(null);
@@ -31,9 +29,6 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
   const map = useRef<Leaflet.Map>(null);
   const layer = useRef<Leaflet.LayerGroup>(null);
   const base = useRef<Leaflet.TileLayer>(null);
-  const { theme } = useTheme();
-  const themeNow = useRef(theme); // Leaflet loads async: the tile layer must use the theme at that moment
-  themeNow.current = theme;
   const latest = useRef({ routes, sel, tp, labels, from, to, marker, events, pad, onSelect });
   latest.current = { routes, sel, tp, labels, from, to, marker, events, pad, onSelect };
 
@@ -104,19 +99,19 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
       const l = (L.current = mod.default ?? mod);
       const m = (map.current = l.map(el.current, { zoomControl: false }).setView([37.788, -122.4075], 14));
       m.attributionControl.setPrefix(false);
-      base.current = l.tileLayer(tiles(themeNow.current), { attribution: 'Tiles © Esri', maxNativeZoom: 16, maxZoom: 18 }).addTo(m);
+      base.current = l.tileLayer(tiles(), { attribution: 'Tiles © Esri', maxNativeZoom: 16, maxZoom: 18 }).addTo(m);
       layer.current = l.layerGroup().addTo(m);
       draw();
       fit();
     });
     const ro = new ResizeObserver(() => map.current?.invalidateSize());
     if (el.current) ro.observe(el.current);
-    return () => { cancelled = true; ro.disconnect(); map.current?.remove(); map.current = null; };
+    // System light/dark flips: swap the basemap and repaint the lines in the new theme's colours.
+    const onTheme = () => { base.current?.setUrl(tiles()); draw(); };
+    const mq = dark();
+    mq.addEventListener('change', onTheme);
+    return () => { cancelled = true; ro.disconnect(); mq.removeEventListener('change', onTheme); map.current?.remove(); map.current = null; };
   }, []);
-
-  // Light/dark switch (toggle, or the OS when nothing is saved): swap the basemap and repaint the lines and markers
-  // in the new theme's colours. The first run just repeats what the map was created with.
-  useEffect(() => { base.current?.setUrl(tiles(theme)); draw(); }, [theme]);
 
   useEffect(draw, [routes, sel, tp, labels?.join(), from, to, marker, events]);
   // New routes or endpoints: frame them.

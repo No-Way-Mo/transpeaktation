@@ -3,7 +3,6 @@ import { useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { fmtDist, fmtWhen, fromPtInput, mins, ptInput, RECENT, REPLAY, routeTag, stepIcon, type Place, type Route, type Step, type When } from '@/lib/route.ts';
 import { smartSuggestions } from '@/lib/suggest.ts';
 import type { Card, useRoutePlanner } from '@/lib/use-route-planner.ts';
-import { useTheme } from '@/lib/use-theme.ts';
 import { useVoice } from '@/lib/use-voice.ts';
 
 type Planner = ReturnType<typeof useRoutePlanner>;
@@ -35,8 +34,6 @@ const ICONS = {
   search: 'M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4',
   car: 'M5 16V11l2-5h10l2 5v5M5 16h14M5 16v2M19 16v2M3 11h18M8 13.5h.01M16 13.5h.01',
   mic: 'M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5 11a7 7 0 0 0 14 0M12 18v3',
-  sun: 'M12 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4',
-  moon: 'M20.5 14.1A8.5 8.5 0 1 1 9.9 3.5a6.6 6.6 0 0 0 10.6 10.6z',
 } as const;
 export type IconName = keyof typeof ICONS;
 
@@ -52,18 +49,6 @@ export function Icon({ name, size = 20, rotate, className }: { name: IconName; s
 export function TurnIcon({ step, size = 18 }: { step: Step; size?: number }) {
   const { name, rotate } = stepIcon(step);
   return <Icon name={name} rotate={rotate} size={size} />;
-}
-
-/** Light / dark switch. A toggle button ("Dark mode", pressed = dark); the icon shows what a press switches to. */
-export function ThemeToggle({ className = '' }: { className?: string }) {
-  const { theme, toggle } = useTheme();
-  const dark = theme === 'dark';
-  return (
-    <button className={`theme-btn ${className}`} aria-label="Dark mode" aria-pressed={dark}
-      title={dark ? 'Switch to light mode' : 'Switch to dark mode'} onClick={toggle}>
-      <Icon name={dark ? 'sun' : 'moon'} size={18} />
-    </button>
-  );
 }
 
 const COMPASS_KEY = 'transpeaktation.compass';
