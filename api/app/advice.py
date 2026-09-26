@@ -15,7 +15,7 @@ import httpx
 
 from .model import SF_TZ, fmt_clock, mins
 
-TIMEOUT_S = 4.0
+TIMEOUT_S = 2.5  # usually 0.4-0.8 s, but some calls stall 7-30 s: those get the template
 MAX_CHARS = 300
 GEMINI = "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
 TRAFFIC = {"live": "live traffic now", "observed": "traffic recorded at that time",
