@@ -250,7 +250,10 @@ async def plan_trip(
             "origin": {"lon": round(a[0], 3), "lat": round(a[1], 3)}, "destination": {"lon": round(b[0], 3), "lat": round(b[1], 3)},
             "provider": got["source"], "route_count": len(found), "picked": result["best"],
             "predicted_sec": [round(p["dur"]) for p in result["preds"]], "baseline_sec": [round(r["dur"]) for r in found],
-            "event_ids": [h["id"] for h in best["event_hits"]], "blocked": best["blocked"], "model": best["model"]})
+            "event_ids": [h["id"] for h in best["event_hits"]], "blocked": best["blocked"], "model": best["model"],
+            # the picked route, so ml/ can count riders on the same roads at the same time; ponytail: 3 segments
+            # (~1-3 blocks) cut off each end to keep exact addresses out, trim by metres if that's too coarse
+            "road_segment_ids": (found[result["best"]].get("road_segment_ids") or [])[3:-3]})
     return {
         "routes": found, "source": got["source"], "plan": result,
         "events": [model.event_view(e) for e in evs if _near_any(e, found)],

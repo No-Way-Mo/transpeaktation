@@ -289,6 +289,7 @@ class PlanEndpoint(unittest.TestCase):
         [trip] = store.trips
         self.assertEqual((trip["origin"], trip["mode"], trip["provider"]), ({"lon": -122.407, "lat": 37.788}, "depart", "mapbox"))
         self.assertNotIn("user", trip)
+        self.assertEqual(trip["road_segment_ids"], PAST["road_segment_ids"][3:-3])  # the route, minus its ends
 
     def test_mongo_events_and_closures_flow_into_the_plan(self):
         depart = (datetime.now(SF) + timedelta(hours=2)).replace(second=0, microsecond=0)
