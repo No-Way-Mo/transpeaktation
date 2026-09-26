@@ -79,10 +79,12 @@ def lonlat(raw: str) -> tuple[float, float]:
 
 
 REPLAY_MAX = timedelta(days=365)
+AHEAD_MAX = timedelta(days=30)   # ingest pulls planned closures/permits this far ahead (datasf HORIZON)
+MAPBOX_AHEAD = timedelta(days=7)  # Mapbox predicts ETAs at most this far ahead
 
 
 def when(raw: str | None, replay: bool = False) -> datetime | None:
-    """ISO time with offset -> UTC. Now to 7 days out (a few minutes of slack; earlier = now).
+    """ISO time with offset -> UTC. Now to 30 days out (a few minutes of slack; earlier = now).
     replay (a simulated past trip) also allows up to a year back, and keeps the past time."""
     if raw is None:
         return None
@@ -93,20 +95,24 @@ def when(raw: str | None, replay: bool = False) -> datetime | None:
     if t.tzinfo is None:
         raise HTTPException(400, "time needs a UTC offset")
     now = datetime.now(timezone.utc)
-    if not now - (REPLAY_MAX if replay else timedelta(minutes=5)) <= t <= now + timedelta(days=7):
-        raise HTTPException(400, "time must be between now and 7 days from now"
+    if not now - (REPLAY_MAX if replay else timedelta(minutes=5)) <= t <= now + AHEAD_MAX:
+        raise HTTPException(400, "time must be between now and 30 days from now"
                                  + (" (or up to a year back)" if replay else ", or pass replay=true for a past trip"))
     t = t.astimezone(timezone.utc)
     return t if replay else max(t, now)
 
 
 def mapbox_time(t: datetime | None, now: datetime) -> str | None:
-    """Mapbox's UTC form. Mapbox only predicts ahead, so a past time asks for the same SF weekday and clock time
-    in the coming week: its typical traffic repeats weekly. (The observed traffic of that day comes from Tiger.)"""
+    """Mapbox's UTC form. Mapbox only predicts the coming week, so a past or later time asks for the same SF weekday
+    and clock time within it: its typical traffic repeats weekly. (Closures, events and traffic for the day itself
+    come from the databases.)"""
     if t is None:
         return None
+    step = lambda k: (t.astimezone(model.SF_TZ) + timedelta(weeks=k)).astimezone(timezone.utc)  # noqa: E731
     while t < now:
-        t = (t.astimezone(model.SF_TZ) + timedelta(weeks=1)).astimezone(timezone.utc)
+        t = step(1)
+    while t > now + MAPBOX_AHEAD:
+        t = step(-1)
     return t.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 

@@ -16,7 +16,7 @@ from typing import Any
 
 from dotenv import dotenv_values
 
-from .model import LIVE_WINDOW, SF_TZ
+from .model import LIVE_WINDOW, OPEN_ENDED, SF_TZ
 
 _INGEST_ENV = Path(__file__).resolve().parent.parent.parent / "ingest" / ".env"
 PLACEHOLDERS = ("<password>", "<db_password>")
@@ -27,14 +27,17 @@ BUCKET = timedelta(minutes=10)       # ingest's traffic_metrics time step (AGENT
 TYPICAL_WEEKS = 4
 
 
-def typical_buckets(t: datetime) -> list[datetime]:
-    """t's 10-min bucket start on the same SF weekday and wall-clock time, 1..TYPICAL_WEEKS weeks earlier.
-    Stepped in SF local time so a DST change in between doesn't shift the hour."""
-    local = t.astimezone(SF_TZ)
-    out = []
-    for k in range(1, TYPICAL_WEEKS + 1):
+def typical_buckets(t: datetime, now: datetime) -> list[datetime]:
+    """t's 10-min bucket start on the same SF weekday and wall-clock time in the TYPICAL_WEEKS most recent weeks
+    before now (for a trip weeks ahead, the weeks before it haven't happened yet). Stepped in SF local time so a
+    DST change in between doesn't shift the hour."""
+    local, out, k = t.astimezone(SF_TZ), [], 1
+    while len(out) < TYPICAL_WEEKS:
         u = (local - timedelta(weeks=k)).astimezone(timezone.utc)
-        out.append(u - timedelta(minutes=u.minute % 10, seconds=u.second, microseconds=u.microsecond))
+        u -= timedelta(minutes=u.minute % 10, seconds=u.second, microseconds=u.microsecond)
+        if u <= now:
+            out.append(u)
+        k += 1
     return out
 
 
@@ -140,13 +143,15 @@ class Store:
         return self._mongo_call(q)
 
     def incidents_on(self, segment_ids: list[str], t0: datetime, t1: datetime) -> list[dict] | None:
-        """road_incidents touching these segments whose time span overlaps [t0, t1]."""
+        """road_incidents touching these segments whose time span overlaps [t0, t1]. One with no end time counts
+        for OPEN_ENDED after it started, so today's crash doesn't block a trip next week."""
         if not segment_ids:
             return []
         return self._mongo_call(lambda db: list(db.road_incidents.find(
             {"road_segment_ids": {"$in": segment_ids},
              "$and": [{"$or": [{"start_time": {"$lte": t1}}, {"start_time": None}]},
-                      {"$or": [{"end_time": {"$gte": t0}}, {"end_time": None}]}]},
+                      # no published end (crashes, dispatch calls): active OPEN_ENDED from its start, never indefinitely
+                      {"$or": [{"end_time": {"$gte": t0}}, {"end_time": None, "start_time": {"$gte": t0 - OPEN_ENDED}}]}]},
             {"source": 1, "source_id": 1, "incident_type": 1, "category": 1, "is_closure": 1, "start_time": 1,
              "end_time": 1, "road_segment_ids": 1, "details.name": 1, "details.street": 1,
              "details.location_text": 1, "details.call_type": 1, "details.route": 1}).limit(500)))
@@ -168,8 +173,8 @@ class Store:
         """Traffic for a trip at `t`, and what kind it is:
         live      t within LIVE_WINDOW of now: the newest readings (traffic_latest)
         observed  t in the past: the newest readings at or before t (TRAFFIC_MAX_AGE), i.e. what we saw then
-        typical   t in the future: the same SF weekday + 10-min bucket averaged over the last TYPICAL_WEEKS
-                  weeks; stand-in until ml/ writes prediction_metrics
+        typical   t in the future: the same SF weekday + 10-min bucket averaged over the TYPICAL_WEEKS most
+                  recent weeks; stand-in until ml/ writes prediction_metrics
         """
         if abs(t - now) <= LIVE_WINDOW:
             return self.traffic_latest(segment_ids), "live"
@@ -189,7 +194,7 @@ class Store:
             "avg(congestion_ratio) FROM traffic_metrics "
             "WHERE road_segment_id = ANY(%s) AND source = ANY(%s) AND time = ANY(%s) "
             "GROUP BY road_segment_id, source",
-            (segment_ids, list(TRAFFIC_SOURCES), typical_buckets(t)))
+            (segment_ids, list(TRAFFIC_SOURCES), typical_buckets(t, now)))
         return (None if rows is None else [dict(zip(cols, r)) for r in rows]), "typical"
 
     def predictions(self, segment_ids: list[str], t0: datetime, t1: datetime) -> list[dict] | None:
