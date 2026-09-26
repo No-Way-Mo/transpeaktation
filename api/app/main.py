@@ -1,4 +1,4 @@
-"""transPEAKtation API: place search + traffic-aware routes with OSM road-segment IDs.
+"""transPEAKtation API: place search + traffic-aware routes with OSM road-segment IDs; voice → trip intent.
 
     cd api && .venv/bin/uvicorn app.main:app --reload    # http://localhost:8000/docs
 """
@@ -15,7 +15,7 @@ from typing import Any
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 _API_DIR = Path(__file__).resolve().parent.parent
@@ -23,7 +23,7 @@ load_dotenv(_API_DIR / ".env")  # api/.env; real env vars win
 # Local dev: reuse keys already in ingest/.env (e.g. its MAPBOX_TOKEN) instead of copying them. Never overrides.
 load_dotenv(_API_DIR.parent / "ingest" / ".env")
 
-from . import providers
+from . import providers, voice
 from .segments import Segments
 
 # Accept a little beyond the SF search box so Treasure Island / Daly City edges still route.
@@ -44,7 +44,7 @@ app = FastAPI(title="transPEAKtation API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "http://localhost:3000").split(",") if o.strip()],
-    allow_methods=["GET"],
+    allow_methods=["GET", "POST"],
 )
 
 # ponytail: in-process TTL cache, cleared wholesale when it grows. Protects the shared Mapbox quota from
@@ -133,10 +133,41 @@ async def routes(
     return _store(key, 60, {"routes": found, "source": source})
 
 
+async def _resolve(query: str | None) -> dict | None:
+    """Spoken place name -> {query, place}. place is the top search hit, or None if nothing matched."""
+    if not query:
+        return None
+    try:
+        found = await places(query)
+    except HTTPException:
+        found = {"places": []}
+    return {"query": query, "place": (found["places"] or [None])[0]}
+
+
+@app.post("/voice")
+async def voice_intent(audio: UploadFile = File(description="Recorded speech (webm, m4a, wav, ...)")):
+    """Speech -> trip intent. Plans only: the app must still ask the user to confirm any booking."""
+    if not voice.available():
+        raise HTTPException(503, "voice unavailable (no ELEVENLABS_API_KEY)")
+    data = await audio.read(voice.MAX_AUDIO_BYTES + 1)
+    if not data:
+        raise HTTPException(400, "empty audio")
+    if len(data) > voice.MAX_AUDIO_BYTES:
+        raise HTTPException(413, "audio too long")
+    try:
+        text = await voice.transcribe(state["http"], data, audio.filename or "audio", audio.content_type or "application/octet-stream")
+    except providers.ProviderError:
+        raise HTTPException(502, "speech-to-text unavailable")
+    intent = voice.parse_intent(text)
+    dest, origin = await asyncio.gather(_resolve(intent["destination"]), _resolve(intent["origin"]))
+    return {"transcript": text, **intent, "destination": dest, "origin": origin}
+
+
 @app.get("/health")
 def health():
     if not os.environ.get("MAPBOX_TOKEN"):
         mapbox = "no token (using OSRM/Nominatim)"
     else:
         mapbox = "ready" if providers.mapbox_available() else "backing off after an error"
-    return {"ok": True, "mapbox": mapbox, "road_graph": segments.status}
+    return {"ok": True, "mapbox": mapbox, "road_graph": segments.status,
+            "voice": "ready" if voice.available() else "no ELEVENLABS_API_KEY"}

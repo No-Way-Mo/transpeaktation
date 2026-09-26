@@ -1,4 +1,4 @@
-"""Offline checks: provider normalization, Mapbox→OSRM fallback, input validation, caching, segment matching.
+"""Offline checks: provider normalization, Mapbox→OSRM fallback, input validation, caching, segment matching, voice intent.
 
     cd api && .venv/bin/python -m unittest discover -s tests -t .
 """
@@ -9,7 +9,7 @@ import httpx
 import networkx as nx
 from fastapi.testclient import TestClient
 
-from app import main, providers
+from app import main, providers, voice
 from app.segments import Segments
 
 MAPBOX_ROUTE = {
@@ -132,6 +132,73 @@ class Api(unittest.TestCase):
     def test_no_route_is_404(self):
         with mock.patch.object(providers, "find_routes", mock.AsyncMock(side_effect=providers.NoRoute())):
             self.assertEqual(self.client.get("/routes", params={"from": "-122.41,37.78", "to": "-122.40,37.79"}).status_code, 404)
+
+
+class VoiceIntent(unittest.TestCase):
+    def test_parses_trip_requests(self):
+        cases = {
+            "Plan and book my ride to Chase Center at 6:30": ("plan_and_book", "Chase Center", None, "6:30", "depart"),
+            "I want to go to Oracle Park.": ("plan", "Oracle Park", None, None, None),
+            "Take me from the Ferry Building to Oracle Park by 7 pm please": ("plan", "Oracle Park", "Ferry Building", "7 pm", "arrive"),
+            "Navigate to the Chase Center from here": ("plan", "Chase Center", None, None, None),
+            "What's the weather like?": ("unknown", None, None, None, None),
+        }
+        for text, want in cases.items():
+            got = voice.parse_intent(text)
+            self.assertEqual((got["action"], got["destination"], got["origin"], got["time"], got["time_mode"]), want, text)
+
+
+class VoiceEndpoint(unittest.TestCase):
+    def setUp(self):
+        main._cache.clear()
+        self.load = mock.patch.object(main.segments, "load")
+        self.load.start()
+        self.client = TestClient(main.app).__enter__()
+
+    def tearDown(self):
+        self.client.__exit__(None, None, None)
+        self.load.stop()
+
+    def post(self, audio=b"RIFF....WAVE"):
+        return self.client.post("/voice", files={"audio": ("clip.wav", audio, "audio/wav")})
+
+    def test_transcribes_parses_and_resolves_the_destination(self):
+        chase = {"label": "Chase Center", "sub": "1 Warriors Way", "lat": 37.768, "lon": -122.3877}
+        stt = mock.AsyncMock(return_value="Plan and book my ride to Chase Center at 6:30")
+        search = mock.AsyncMock(return_value=([chase], "mapbox"))
+        with mock.patch.dict("os.environ", {"ELEVENLABS_API_KEY": "sk_test"}), \
+                mock.patch.object(voice, "transcribe", stt), mock.patch.object(providers, "search_places", search):
+            body = self.post().json()
+        self.assertEqual(body["action"], "plan_and_book")
+        self.assertEqual(body["destination"], {"query": "Chase Center", "place": chase})
+        self.assertIsNone(body["origin"])
+        self.assertEqual(stt.await_args.args[1], b"RIFF....WAVE")
+
+    def test_errors(self):
+        with mock.patch.dict("os.environ", {"ELEVENLABS_API_KEY": ""}):
+            self.assertEqual(self.post().status_code, 503)
+        with mock.patch.dict("os.environ", {"ELEVENLABS_API_KEY": "sk_test"}):
+            self.assertEqual(self.post(b"").status_code, 400)
+            self.assertEqual(self.post(b"x" * (voice.MAX_AUDIO_BYTES + 1)).status_code, 413)
+            with mock.patch.object(voice, "transcribe", mock.AsyncMock(side_effect=providers.ProviderError())):
+                self.assertEqual(self.post().status_code, 502)
+
+
+class Transcribe(unittest.IsolatedAsyncioTestCase):
+    async def test_sends_key_model_and_file(self):
+        seen = {}
+
+        def handler(req: httpx.Request):
+            seen["key"], seen["body"] = req.headers["xi-api-key"], req.content
+            return httpx.Response(200, json={"text": " Take me to Oracle Park. "})
+
+        with mock.patch.dict("os.environ", {"ELEVENLABS_API_KEY": "sk_test"}):
+            async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as c:
+                text = await voice.transcribe(c, b"AUDIO", "clip.webm", "audio/webm")
+        self.assertEqual(text, "Take me to Oracle Park.")
+        self.assertEqual(seen["key"], "sk_test")
+        self.assertIn(b"scribe_v1", seen["body"])
+        self.assertIn(b"AUDIO", seen["body"])
 
 
 class SegmentMatching(unittest.TestCase):

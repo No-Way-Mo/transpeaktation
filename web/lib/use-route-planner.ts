@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { fetchRoutes, fmtWhen, mins, ORIGIN, searchPlaces, type Place, type Route, type When } from './route.ts';
+import { fetchRoutes, fmtWhen, mins, ORIGIN, searchPlaces, spokenTime, voiceNote, type Place, type Route, type VoiceIntent, type When } from './route.ts';
 import { transPeakPick } from './suggest.ts';
 
 type Field = 'from' | 'to';
@@ -81,6 +81,22 @@ export function useRoutePlanner() {
     route(f, dest, w);
   };
 
+  /** Voice request → route screen, with whatever it recognized (start, time). False if no destination was found. */
+  const applyVoice = (v: VoiceIntent) => {
+    const dest = v.destination?.place;
+    if (!dest) return false;
+    const f = v.origin?.place ?? from ?? ORIGIN, at = v.time && spokenTime(v.time);
+    const w: When = at ? { mode: v.time_mode === 'arrive' ? 'arrive' : 'depart', at } : NOW;
+    setFrom(f); setTo(dest);
+    setQuery({ from: f.label, to: dest.label });
+    setActive(null); search.run(''); fieldSearch.run('');
+    setTrip({ note: voiceNote(v) });
+    setWhenState(w);
+    setScreen('route');
+    route(f, dest, w);
+    return true;
+  };
+
   const goStart = () => {
     inflight.current?.abort();
     search.run(''); fieldSearch.run('');
@@ -126,7 +142,7 @@ export function useRoutePlanner() {
   const suggestions = active === 'from' && !query.from.trim() ? [ORIGIN] : fieldSearch.results;
 
   return {
-    screen, setScreen, go, goStart,
+    screen, setScreen, go, goStart, applyVoice,
     search, trip,
     from, to, query, active, setActive, focusField, onQuery, pick, swap,
     suggestions, searching: fieldSearch.searching,

@@ -346,6 +346,22 @@ input::placeholder { color: var(--muted); }
 @media (hover: hover) { .smart-card:hover { border-color: var(--brand-strong); } }
 
 .where-to.fake { flex: none; height: 48px; padding: 0 14px; color: var(--muted); font-size: 17px; font-weight: 500; text-align: left; }
+.where-row { display: flex; align-items: center; gap: 8px; }
+.where-row .where-to.fake { flex: 1; min-width: 0; }
+.where-row .mic { width: 48px; height: 48px; border-radius: 12px; background: var(--fill); }
+
+/* Voice: tap-to-talk mic, used in the Where-to box, the start sheet, and next to swap. */
+.mic-wrap { position: relative; flex: none; display: flex; }
+.mic { width: 36px; height: 36px; border-radius: 10px; color: var(--action-text); display: flex; align-items: center; justify-content: center; }
+.mob .endpoints .mic { width: 44px; height: 44px; border-radius: 12px; background: var(--fill); }
+.mic.listening { color: #FFFFFF; background: var(--bad-fill); animation: mic-pulse 1.2s ease-in-out infinite; }
+.mic:disabled { color: var(--muted); }
+.mic-dots { font-weight: 700; letter-spacing: 1px; }
+@keyframes mic-pulse { 50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--bad-fill) 22%, transparent); } }
+@media (prefers-reduced-motion: reduce) { .mic.listening { animation: none; } }
+.voice-note { position: absolute; top: calc(100% + 8px); right: 0; z-index: 50; width: max-content; max-width: min(280px, calc(100vw - 32px));
+  padding: 8px 12px; border-radius: 12px; background: var(--pop); color: var(--ink); font-size: 13px; line-height: 1.4; box-shadow: var(--shadow); text-wrap: pretty; }
+@media (hover: hover) { .mic:not(.listening):not(:disabled):hover { background: var(--fill-2); } }
 .search-sheet { position: absolute; left: 0; right: 0; top: max(env(safe-area-inset-top), 12px); bottom: 0; z-index: 40; display: flex; flex-direction: column; border-radius: 16px 16px 0 0; background: var(--panel); box-shadow: var(--shadow); }
 .grabber.static { margin-top: 8px; }
 .search-bar { display: flex; align-items: center; gap: 12px; padding: 12px 16px; }

@@ -49,6 +49,45 @@ export async function fetchRoutes(from: Place, to: Place, when: When = { mode: '
   return (await api<{ routes: Route[] }>(`/routes?from=${from.lon},${from.lat}&to=${to.lon},${to.lat}${t}`, signal)).routes;
 }
 
+/** POST /voice: what the user said, parsed into a trip. Places are already resolved (place = null if not found). */
+export type VoiceIntent = {
+  transcript: string;
+  action: 'plan' | 'plan_and_book' | 'unknown';
+  destination: { query: string; place: Place | null } | null;
+  origin: { query: string; place: Place | null } | null;
+  time: string | null;                       // as spoken, e.g. "6:30" or "7:00 PM"
+  time_mode: 'depart' | 'arrive' | null;     // "at 6:30" vs "by 7 pm"
+};
+
+export async function sendVoice(audio: Blob, signal?: AbortSignal): Promise<VoiceIntent> {
+  const body = new FormData();
+  body.append('audio', audio, `speech.${audio.type.includes('mp4') ? 'm4a' : 'webm'}`);
+  const res = await fetch(`${API}/voice`, { method: 'POST', body, signal });
+  if (!res.ok) throw new Error((await res.json().catch(() => null))?.detail ?? `HTTP ${res.status}`);
+  return res.json();
+}
+
+/** Spoken time -> the next time it happens (epoch ms). No am/pm: whichever of the two comes next. */
+export function spokenTime(t: string, now = Date.now()): number | null {
+  const m = /^(\d{1,2})(?::(\d{2}))?\s*(?:([ap])\.?\s?m\.?)?$/i.exec(t.trim());
+  if (!m) return null;
+  if (+m[1] > 12 || +(m[2] ?? 0) > 59) return null;
+  const h = +m[1] % 12, min = +(m[2] ?? 0), ap = m[3]?.toLowerCase();
+  const at = (hour: number) => {
+    const d = new Date(now); d.setHours(hour, min, 0, 0);
+    if (d.getTime() <= now) d.setDate(d.getDate() + 1);
+    return d.getTime();
+  };
+  return ap ? at(h + (ap === 'p' ? 12 : 0)) : Math.min(at(h), at(h + 12));
+}
+
+/** One line on the route screen saying what voice did. Voice only plans; booking always needs a tap (AGENTS.md). */
+export function voiceNote(v: VoiceIntent): string {
+  if (v.destination && !v.destination.place) return `Couldn't find "${v.destination.query}". Try another name.`;
+  if (!v.destination?.place) return `Heard "${v.transcript}". Try "Take me to Oracle Park".`;
+  return `You said "${v.transcript}".` + (v.action === 'plan_and_book' ? ' Pick a route, then confirm to book.' : '');
+}
+
 export function fmtDist(m: number, units: Units = 'mi'): string {
   if (units === 'km') return m < 1000 ? `${Math.round(m / 10) * 10} m` : `${(m / 1000).toFixed(1)} km`;
   const mi = m / 1609.34;

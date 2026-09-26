@@ -3,6 +3,7 @@ import { useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { fmtDist, fmtWhen, mins, RECENT, routeTag, stepIcon, type Place, type Route, type Step, type When } from '@/lib/route.ts';
 import { smartSuggestions } from '@/lib/suggest.ts';
 import type { Card, useRoutePlanner } from '@/lib/use-route-planner.ts';
+import { useVoice } from '@/lib/use-voice.ts';
 
 type Planner = ReturnType<typeof useRoutePlanner>;
 
@@ -32,6 +33,7 @@ const ICONS = {
   pin: 'M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21zM12 12a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z',
   search: 'M11 18a7 7 0 1 0 0-14 7 7 0 0 0 0 14zM20 20l-4-4',
   car: 'M5 16V11l2-5h10l2 5v5M5 16h14M5 16v2M19 16v2M3 11h18M8 13.5h.01M16 13.5h.01',
+  mic: 'M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3zM5 11a7 7 0 0 0 14 0M12 18v3',
 } as const;
 export type IconName = keyof typeof ICONS;
 
@@ -146,6 +148,20 @@ export function TripNote({ note }: { note: string }) {
   return note ? <div className="trip-note"><Logo size={17} stroke={3} /><span>{note}</span></div> : null;
 }
 
+/** Tap to say a trip ("Plan and book my ride to Chase Center at 6:30"); it opens the route screen. Errors show under it. */
+export function MicButton({ p }: { p: Planner }) {
+  const v = useVoice(p.applyVoice);
+  return (
+    <span className="mic-wrap">
+      <button className={`mic ${v.state}`} title="Say where to go" aria-label={v.state === 'listening' ? 'Stop and send' : 'Say where to go'}
+        aria-pressed={v.state === 'listening'} disabled={v.state === 'thinking'} onClick={v.toggle}>
+        {v.state === 'thinking' ? <span className="mic-dots" aria-hidden="true">…</span> : <Icon name="mic" size={18} />}
+      </button>
+      {v.note && <span className="voice-note" role="status">{v.note}</span>}
+    </span>
+  );
+}
+
 /** "Where to?" input shared by the desktop sidebar and the mobile search sheet. Enter picks the top result. */
 export function WhereTo({ p, autoFocus, onFocus, children }: { p: Planner; autoFocus?: boolean; onFocus?(): void; children?: ReactNode }) {
   const top = p.search.results[0];
@@ -156,6 +172,7 @@ export function WhereTo({ p, autoFocus, onFocus, children }: { p: Planner; autoF
         onChange={e => { p.search.run(e.target.value); p.setScreen('search'); }} onFocus={onFocus}
         onKeyDown={e => { if (e.key === 'Enter' && top) p.go(top); }} />
       {p.search.q && <button className="clear-btn" aria-label="Clear" title="Clear" onClick={() => p.search.run('')}><Icon name="close" size={12} /></button>}
+      <MicButton p={p} />
       {children}
     </div>
   );
@@ -175,6 +192,7 @@ export function Endpoints({ p, placeholders, onPicked }: { p: Planner; placehold
             onChange={e => p.onQuery('to', e.target.value)} onFocus={() => p.focusField('to')} onBlur={() => p.setActive(null)} />
         </div>
         <button className="swap" title="Swap start and destination" aria-label="Swap start and destination" onClick={p.swap}><Icon name="swap" /></button>
+        <MicButton p={p} />
       </div>
 
       {p.showSuggest && (
