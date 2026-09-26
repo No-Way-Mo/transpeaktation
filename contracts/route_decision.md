@@ -46,7 +46,7 @@ Optional: `ml/` may also write its per-segment forecasts to Tiger `prediction_me
     "predictions": [{"road_segment_id", "time", "predicted_delay_sec", "model_version"}],  // ml/'s own stored forecasts, if any
     "segment_lengths_m": {"65333347-6319310995-0": 84.2, ...}
   },
-  "demand": {                                 // other riders going to about the same place (Mongo trips)
+  "demand": {                                 // other riders still on the way to about the same place (Mongo trips, arrived_at null)
     "trips_to_destination": 12,               // null if the database is unavailable
     "radius_m": 400,
     "window": ["2026-09-20T00:30:00+00:00", "2026-09-20T02:30:00+00:00"]   // their departure times

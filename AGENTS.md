@@ -35,7 +35,7 @@ Mongo = long-lived entities / nested JSON. Tiger = time-series + fast-changing n
 | `events` | concerts, sports, festivals (type, time, attendance) | — |
 | `venues` | venue locations, capacity | — |
 | `users` | riders | — |
-| `trips` | trip requests (api `/plan`, not replays): `requested_at`, `depart_at`, origin/destination rounded to ~100 m, picked route's `road_segment_ids` minus 3 at each end | — |
+| `trips` | trip requests (api `/plan`, not replays): `requested_at`, `depart_at`, origin/destination rounded to ~100 m, picked route's `road_segment_ids` minus 3 at each end, `trip_id` (random, not linked to the rider), `arrived_at` (null until the app reports arrival via `POST /trips/{trip_id}/arrived`) | — |
 | `route_plans` | candidate / chosen routes, explanations | — |
 | `bookings` | confirmed bookings + Solana tx | — |
 | `privacy_settings` | per-user AI / data choices | — |

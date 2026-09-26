@@ -28,5 +28,6 @@ targets:
       path: Transpeaktation/Info.plist
       properties:
         WebAppURL: $(WEB_APP_URL)
+        NSLocationWhenInUseUsageDescription: "transPEAKtation uses your location during navigation to mark the trip arrived when you reach the destination."
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true   # plain http to localhost / LAN IPs during development only

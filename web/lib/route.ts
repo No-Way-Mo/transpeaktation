@@ -118,6 +118,17 @@ export async function fetchPlan(from: Place, to: Place, when: When = { mode: 'no
   return api<Plan>(planPath(from, to, when) + extra, signal);
 }
 
+/** Inside the iOS app (ios/WebView.swift): native GPS watches for arrival. Post the destination {lat, lon} to start,
+ *  null to stop; the app fires a `tp-arrived` window event when the rider gets there. Undefined in a browser. */
+export const iosArrival = () => (globalThis as { webkit?: { messageHandlers?: { arrival?: { postMessage(m: unknown): void } } } })
+  .webkit?.messageHandlers?.arrival;
+
+/** POST /trips/{id}/arrived: the rider reached the destination, so the logged trip stops counting as demand. */
+export async function markArrived(tripId: string): Promise<void> {
+  const res = await fetch(`${API}/trips/${tripId}/arrived`, { method: 'POST' });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+}
+
 /** GET /events: today's events for the search suggestions (demo events until ingest fills Mongo). */
 export async function fetchEvents(signal?: AbortSignal): Promise<EventInfo[]> {
   return (await api<{ events: EventInfo[] }>('/events', signal)).events;

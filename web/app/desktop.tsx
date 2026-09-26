@@ -81,7 +81,10 @@ export default function Desktop() {
                 <>
                   <div className="steps-head">
                     <button className="round-btn" title="Back to routes" aria-label="Back to routes" onClick={closeSteps}><Icon name="back" size={18} /></button>
-                    <span className="title">Directions to {p.to?.label}</span>
+                    <span className="title grow">Directions to {p.to?.label}</span>
+                    {p.tripId && (
+                      <button className="pill-btn arrived-btn" disabled={p.hasArrived} onClick={p.arrived}>{p.hasArrived ? 'Arrived ✓' : 'Arrived'}</button>
+                    )}
                   </div>
                   <div className="summary">
                     <div><b className="good">{mins(c.dur)} min</b><span>{c.tp ? 'transPEAKtation' : 'drive time'}</span></div>

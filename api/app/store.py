@@ -226,17 +226,22 @@ class Store:
 
     def trips_to(self, lon: float, lat: float, t0: datetime, t1: datetime, radius_m: float = 400) -> int | None:
         """Other riders heading to about the same place: logged trips (Mongo trips) ending within ~radius_m
-        (a box; trips store ~100 m rounded points) that depart in [t0, t1]."""
+        (a box; trips store ~100 m rounded points) that depart in [t0, t1] and haven't arrived yet."""
         dlat, dlon = radius_m / 111_132, radius_m / (111_320 * math.cos(math.radians(lat)))
         return self._mongo_call(lambda db: db.trips.count_documents({
             "destination.lat": {"$gte": lat - dlat, "$lte": lat + dlat},
             "destination.lon": {"$gte": lon - dlon, "$lte": lon + dlon},
-            "depart_at": {"$gte": t0, "$lte": t1}}))
+            "depart_at": {"$gte": t0, "$lte": t1}, "arrived_at": None}))  # None also matches older trips without it
 
     # --- writes ----------------------------------------------------------------------------------------------
     def save_trip(self, doc: dict[str, Any]) -> bool:
         """One trip request (Mongo trips): the start of real demand data for ml/. No user identity is stored."""
         return self._mongo_call(lambda db: db.trips.insert_one(doc).acknowledged) or False
+
+    def mark_arrived(self, trip_id: str, at: datetime) -> int | None:
+        """Set a trip's arrived_at, once. 1 = marked, 0 = unknown trip or already arrived, None = no database."""
+        return self._mongo_call(lambda db: db.trips.update_one(
+            {"trip_id": trip_id, "arrived_at": None}, {"$set": {"arrived_at": at}}).matched_count)
 
 
 # === map views (/events window, /road-conditions, /traffic) ======================================================
