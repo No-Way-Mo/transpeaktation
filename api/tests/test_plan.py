@@ -53,7 +53,14 @@ class EventImpact(unittest.TestCase):
         self.assertEqual((round(est["dur"]), est["delay"]), (PAST["dur"] + 482, 482))
         self.assertEqual(est["why"], ["Giants vs. Dodgers at Oracle Park"])
         self.assertEqual(p["tag"], "Events on the way")
-        self.assertIn("Giants vs. Dodgers at Oracle Park", p["note"])
+        self.assertEqual(p["note"], "")  # the transPEAKtation card gets no note; the slower normal routes do
+        self.assertEqual(p["preds"][0]["note"], "8 min slower: Giants vs. Dodgers at Oracle Park.")
+        self.assertEqual(p["preds"][1]["note"], "1 min slower: longer or busier roads.")
+        tie = model.plan([AROUND, AROUND], [at(12)] * 2, "depart", CTX, now=now)  # same time: nothing to explain
+        self.assertEqual(([x["note"] for x in tie["preds"]], tie["note"]),
+                         ([None, None], "No events or traffic slowing the fastest normal route."))
+        long = model.slower_note({"blocked": False, "estimate": {"why": ["Some Very Long Festival Name"] * 9}}, 3)
+        self.assertEqual((len(long), long[-1]), (model.NOTE_MAX, "…"))
         self.assertEqual(model.plan([PAST, AROUND], [at(12)] * 2, "depart", CTX, now=now)["tag"], "Clear")
 
     def test_special_event_closure_counts_like_any_event(self):
@@ -64,7 +71,7 @@ class EventImpact(unittest.TestCase):
                                      "source": "street_closures"})
         p = model.plan([PAST], [at(12)], "depart", {**CTX, "events": [amzn]}, now=at(9))
         self.assertNotEqual(p["tag"], "Clear")
-        self.assertIn("AMZN Unboxed", p["note"])
+        self.assertIn("AMZN Unboxed", p["preds"][0]["note"])
 
 
 class RoadData(unittest.TestCase):
@@ -315,28 +322,31 @@ class PlanEndpoint(unittest.TestCase):
         self.assertEqual(store.traffic_asked[0], depart)
         self.assertEqual(self.plan(FakeStore(), depart + timedelta(days=7)).status_code, 400)  # 31 days: too far
 
-    def test_gemini_words_the_note_from_the_facts_only(self):
+    def test_gemini_words_the_normal_route_notes_from_the_facts_only(self):
         depart = (datetime.now(SF) + timedelta(hours=1)).replace(second=0, microsecond=0)
         self.assertEqual(self.plan(FakeStore(), depart).json()["data"]["note"], "template (no GEMINI_API_KEY)")
         sent = []
 
-        def run(reply):
+        def run(note):
             def handler(req: httpx.Request):
                 sent.append(req)
-                return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": reply}]}}]})
+                n = len(json.loads(json.loads(req.content)["contents"][0]["parts"][0]["text"])["normal_routes"])
+                return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": json.dumps([note] * n)}]}}]})
             advice._cache.clear()
             with mock.patch.dict("os.environ", {"GEMINI_API_KEY": "k"}), \
                     mock.patch.dict(main.state, {"http": httpx.AsyncClient(transport=httpx.MockTransport(handler))}):
                 return self.plan(FakeStore(), depart).json()
 
-        body = run("Roads look clear; about 10 min.")
-        self.assertEqual((body["plan"]["note"], body["data"]["note"]), ("Roads look clear; about 10 min.", "gemini:gemini-flash-lite-latest"))
+        body = run("Longer way round; about 11 min.")  # AROUND (11 min) is always slower than PAST's 10
+        self.assertEqual((body["plan"]["preds"][1]["note"], body["data"]["note"]),
+                         ("Longer way round; about 11 min.", "gemini:gemini-flash-lite-latest"))
+        self.assertNotEqual(body["plan"]["note"], "Longer way round; about 11 min.")  # never on the transPEAKtation card
         self.assertEqual(sent[0].headers["x-goog-api-key"], "k")
         self.assertNotIn("37.7", sent[0].content.decode())  # facts only: no coordinates leave the api
-        for made_up in ("Saves 987 min by taking the ferry.", "Saves eleven minutes."):  # not in the facts
+        for made_up in ("Saves 987 min by taking the ferry.", "Saves eleven minutes.", "Slow. " * 20):
             body = run(made_up)
             self.assertEqual(body["data"]["note"], "template (gemini reply rejected)")
-            self.assertNotEqual(body["plan"]["note"], made_up)
+            self.assertEqual(body["plan"]["preds"][1]["note"], "1 min slower: longer or busier roads.")
 
     def test_rider_can_turn_off_saving_and_ai_text(self):
         depart = (datetime.now(SF) + timedelta(hours=1)).replace(second=0, microsecond=0)
@@ -378,7 +388,7 @@ class PlanEndpoint(unittest.TestCase):
         self.assertIn("heuristic", req["candidates"][0])
         plan = body["plan"]
         self.assertEqual((plan["best"], plan["preds"][1]["dur"], plan["preds"][1]["model"]), (1, 700, "ml:congestion-v0"))
-        self.assertTrue(plan["note"].startswith("Fewer riders heading there"))
+        self.assertTrue(plan["note"].startswith("Fewer riders heading there"))  # ml/'s reasons stay (contract)
         self.assertEqual(body["data"]["decision"], "ml:congestion-v0")
 
     def test_ml_own_route_becomes_the_transpeaktation_route(self):

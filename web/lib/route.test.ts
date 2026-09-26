@@ -111,10 +111,9 @@ test('plan query: past times clamp to now unless replaying', () => {
 });
 
 test('longerThanItLooks: normal routes warn when api/ estimates a minute or more on top of the provider ETA', () => {
-  const rt = { dur: 360 } as Route;
   const pred = (delay: number, blocked = false) => ({ blocked, estimate: { dur: 360 + delay, delay, why: ['AMZN Unboxed at Howard St'] } }) as Prediction;
-  assert.deepEqual(longerThanItLooks(rt, pred(130)), { tag: '+2 min events', note: 'Mapbox says 6 min; AMZN Unboxed at Howard St may add ~2 min.' });
-  assert.equal(longerThanItLooks(rt, pred(40)), null);   // under a minute: not worth a warning
-  assert.equal(longerThanItLooks(rt, undefined), null);  // no plan yet
-  assert.equal(longerThanItLooks(rt, pred(1200, true))!.tag, 'Closure ahead');
+  assert.equal(longerThanItLooks(pred(130)), '+2 min events');
+  assert.equal(longerThanItLooks(pred(40)), null);   // under a minute: not worth a warning
+  assert.equal(longerThanItLooks(undefined), null);  // no plan yet
+  assert.equal(longerThanItLooks(pred(1200, true)), 'Closure ahead');
 });
