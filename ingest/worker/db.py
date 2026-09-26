@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import os
 from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +25,9 @@ BATCH = 5000
 # AGENTS.md road_segments indexes, plus route_plans lookups.
 MONGO_INDEXES: dict[str, list[tuple[list, dict]]] = {
     "road_segments": [([("segment_id", 1)], {"unique": True}), ([("cnn", 1)], {}), ([("geometry", "2dsphere")], {})],
+    "road_incidents": [([("source", 1), ("source_id", 1)], {"unique": True}), ([("location", "2dsphere")], {}),
+                       ([("start_time", 1), ("end_time", 1)], {}), ([("road_segment_ids", 1)], {}),
+                       ([("is_closure", 1), ("end_time", 1)], {})],
     "route_plans": [([("corridor_id", 1), ("direction", 1)], {}), ([("segment_ids", 1)], {})],
 }
 
@@ -109,19 +113,26 @@ class MongoSink:
             for keys, opts in indexes:
                 self.db[coll].create_index(keys, **opts)
 
-    def _upsert(self, coll: str, key: str, docs: list[dict]) -> None:
+    def _upsert(self, coll: str, items: list[tuple[dict, dict]]) -> None:
+        """(filter, document) pairs. `first_seen_at` is set on insert only; `last_ingested_at` every write."""
         from pymongo import UpdateOne
 
-        for i in range(0, len(docs), 1000):
-            ops = [UpdateOne({key: d[key]}, {"$set": d}, upsert=True) for d in docs[i:i + 1000]]
+        now = datetime.now(timezone.utc)
+        for i in range(0, len(items), 1000):
+            ops = [UpdateOne(f, {"$set": {**d, "last_ingested_at": d.get("last_ingested_at", now)},
+                                 "$setOnInsert": {"first_seen_at": now}}, upsert=True)
+                   for f, d in items[i:i + 1000]]
             self.db[coll].bulk_write(ops, ordered=False)
-        self.counts[coll] += len(docs)
+        self.counts[coll] += len(items)
 
     def write_road_segments(self, docs: list[dict]) -> None:
-        self._upsert("road_segments", "segment_id", docs)
+        self._upsert("road_segments", [({"segment_id": d["segment_id"]}, d) for d in docs])
 
     def write_route_plans(self, docs: list[dict]) -> None:
-        self._upsert("route_plans", "_id", docs)
+        self._upsert("route_plans", [({"_id": d["_id"]}, {k: v for k, v in d.items() if k != "_id"}) for d in docs])
+
+    def write_road_incidents(self, items: list[tuple[dict, dict]]) -> None:
+        self._upsert("road_incidents", items)
 
 
 class CombinedSink:
@@ -163,3 +174,6 @@ class DryRunSink:
 
     def write_road_segments(self, docs: list[dict]) -> None:
         self._keep("road_segments", docs)
+
+    def write_road_incidents(self, items: list[tuple[dict, dict]]) -> None:
+        self._keep("road_incidents", [{**f, **d} for f, d in items])

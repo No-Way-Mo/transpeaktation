@@ -40,6 +40,16 @@ class NetworkTests(unittest.TestCase):
         self.assertEqual([s for s, _ in segs], [EAST])
         self.assertAlmostEqual(segs[0][1], 88.0, delta=1.0)
 
+    def test_prune_detours(self):
+        from worker.network import Edge
+        # a path 1->2->3 with a stray 2->9 cross street matched in the middle
+        for sid, u, v in (("1-2-0", "1", "2"), ("2-3-0", "2", "3"), ("2-9-0", "2", "9"), ("3-2-0", "3", "2")):
+            self.net.edges.setdefault(sid, Edge(sid, u, v, "0", [A, B], 10.0))
+        self.assertEqual(self.net.prune_detours(["1-2-0", "2-9-0", "2-9-0", "2-3-0"]), ["1-2-0", "2-3-0"])
+        self.assertEqual(self.net.prune_detours(["1-2-0", "3-2-0", "2-3-0"]), ["1-2-0", "2-3-0"])  # wrong direction
+        self.assertEqual(self.net.prune_detours(["1-2-0", "2-3-0"]), ["1-2-0", "2-3-0"])
+        self.assertEqual(self.net.prune_detours(["2-9-0", "1-2-0"]), ["2-9-0", "1-2-0"])  # ends are left alone
+
     def test_cnn_link_and_speed_limit(self):
         streets = [{"cnn": "1000", "line": {"type": "MultiLineString", "coordinates": [[list(A), list(B)]]}},
                    {"cnn": "2000", "line": {"type": "LineString", "coordinates": [list(C), list(D)]}}]

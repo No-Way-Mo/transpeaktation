@@ -268,14 +268,14 @@ def read_mapbox_route(run: SourceRun, row: dict) -> None:
         run.stats["bad_rows"] += 1
         return
     per_edge: dict[str, list[float]] = {}
-    order: list[str] = []
-    for i, (d, s) in enumerate(zip(dist, dur)):
-        sid = run.net.snap_piece(tuple(coords[i][:2]), tuple(coords[i + 1][:2]))
-        if sid is None:
-            run.stats["unmatched_pieces"] += 1
+    sids = [run.net.snap_piece(tuple(coords[i][:2]), tuple(coords[i + 1][:2])) for i in range(len(dist))]
+    run.stats["unmatched_pieces"] += sids.count(None)
+    order = run.net.prune_detours([x for x in sids if x])
+    kept = set(order)
+    run.stats["detour_pieces"] += sum(1 for x in sids if x and x not in kept)
+    for sid, d, s in zip(sids, dist, dur):
+        if sid not in kept:
             continue
-        if not order or order[-1] != sid:
-            order.append(sid)
         if d and s and d > 0 and s > 0:
             acc = per_edge.setdefault(sid, [0.0, 0.0])
             acc[0] += d

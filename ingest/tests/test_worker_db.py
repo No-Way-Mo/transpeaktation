@@ -59,5 +59,30 @@ class TigerSinkTests(unittest.TestCase):
         self.assertIn("CREATE TABLE IF NOT EXISTS route_eta_metrics", sql)
 
 
+class MongoSinkTests(unittest.TestCase):
+    def test_first_seen_only_on_insert_and_incident_key(self):
+        try:
+            import pymongo  # noqa: F401
+        except ImportError:
+            self.skipTest("pymongo not installed (pip install -e .[db])")
+        from worker.db import MongoSink
+
+        class Coll:
+            def __init__(self):
+                self.ops = []
+
+            def bulk_write(self, ops, ordered):
+                self.ops += ops
+
+        coll = Coll()
+        sink = MongoSink(db={"road_incidents": coll})
+        sink.write_road_incidents([({"source": "chp_incidents", "source_id": "1"}, {"is_closure": False})])
+        op = coll.ops[0]
+        self.assertEqual(op._filter, {"source": "chp_incidents", "source_id": "1"})
+        self.assertIn("first_seen_at", op._doc["$setOnInsert"])
+        self.assertIn("last_ingested_at", op._doc["$set"])
+        self.assertTrue(op._upsert)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -11,7 +11,7 @@ live = ["mapbox-vector-tile>=2"]  # decode TomTom traffic tiles (pull.poll)
 db = ["pymongo>=4,<5", "psycopg[binary]>=3,<4"]  # worker writers: MongoDB Atlas, Tiger Data
 
 [tool.setuptools]
-packages = ["datasf", "pull", "worker"]
+packages = ["datasf", "pull", "worker", "worker.incidents"]
 
 [tool.setuptools.package-data]
 worker = ["schema.sql"]

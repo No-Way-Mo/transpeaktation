@@ -4,10 +4,12 @@
     python -m worker run segments              # OSM graph (+ DataSF cnn / speed limits) -> Mongo road_segments
     python -m worker run traffic               # pull.poll JSONL -> Tiger traffic_metrics + route_eta_metrics, Mongo route_plans
     python -m worker run traffic --source tomtom --dry-run
-    python -m worker schedule                  # traffic every 10 min; segments again whenever the OSM graph changes
+    python -m worker run incidents             # pull snapshots (closures, permits, Caltrans, CHP, dispatch) -> Mongo road_incidents
+    python -m worker schedule                  # every 10 min: traffic + fresh incident snapshots; segments when the graph changes
 
 Needs the OSM graph first: `python -m pull osm_drive_graph` (writes data/raw/osm_drive_graph.graphml).
 `--dry-run` touches no database and prints what would be written; watermarks aren't saved.
+Rows that fail validation go to data/quarantine/<source>.jsonl. Geocoding is opt-in (GEOCODER=mapbox).
 """
 from __future__ import annotations
 
@@ -22,6 +24,8 @@ from datasf.client import load_dotenv
 from pull import DATA_DIR, ENV_FILE
 
 from .db import CombinedSink, ConfigError, DryRunSink, MongoSink, TigerSink
+from .incidents import geocode
+from .incidents.job import SOURCES as INCIDENT_SOURCES, IncidentJob
 from .network import Network, road_segment_doc
 from .state import STATE_DIR, State
 from .traffic import BUCKET, SOURCES, TrafficJob
@@ -69,6 +73,26 @@ def run_traffic(net: Network, sources: tuple[str, ...], dry_run: bool, state_dir
     return report
 
 
+def refresh_incident_snapshots() -> None:
+    """Re-pull the incident feeds (+ streets for cnn geometry) with `python -m pull`'s own code."""
+    from pull.__main__ import main as pull_main
+
+    pull_main(list(INCIDENT_SOURCES))
+
+
+def run_incidents(net: Network | None, dry_run: bool, use_geocoder: bool = True) -> dict:
+    geocoder, why = geocode.from_env(DATA_DIR.parent / "cache" / "geocode.json") if use_geocoder \
+        else (None, "geocoding disabled (--no-geocode)")
+    sink = DryRunSink() if dry_run else MongoSink()
+    report = IncidentJob(DATA_DIR, sink, net=net, geocoder=geocoder).run()
+    if geocoder is not None:
+        geocoder.save()
+    report["_geocoder"] = why
+    if dry_run:
+        report["_dry_run"] = {"would_write": dict(sink.counts), "sample": sink.samples.get("road_incidents", [])[:1]}
+    return report
+
+
 def bootstrap(dry_run: bool) -> dict:
     out: dict = {}
     if dry_run:
@@ -89,12 +113,13 @@ def schedule() -> None:
         if graph_sig(GRAPHML) != sig:  # weekly `pull osm_drive_graph` refresh
             net, sig = load_network(), graph_sig(GRAPHML)
             print(json.dumps({"segments": run_segments(net, dry_run=False)}), flush=True)
-        try:
-            report = run_traffic(net, SOURCES, dry_run=False)
-            print(json.dumps({"at": datetime.now(timezone.utc), "traffic": report}, default=str), flush=True)
-        except Exception as e:  # a DB blip shouldn't kill the worker; the watermark didn't move
-            print(json.dumps({"at": datetime.now(timezone.utc), "error": f"{type(e).__name__}: {e}"},
-                             default=str), file=sys.stderr, flush=True)
+        for name, job in (("traffic", lambda: run_traffic(net, SOURCES, dry_run=False)),
+                          ("incidents", lambda: (refresh_incident_snapshots(), run_incidents(net, dry_run=False))[1])):
+            try:
+                print(json.dumps({"at": datetime.now(timezone.utc), name: job()}, default=str), flush=True)
+            except Exception as e:  # a feed or DB blip shouldn't kill the worker; watermarks didn't move
+                print(json.dumps({"at": datetime.now(timezone.utc), "job": name, "error": f"{type(e).__name__}: {e}"},
+                                 default=str), file=sys.stderr, flush=True)
         time.sleep(max(0.0, BUCKET.total_seconds() - (time.monotonic() - started)))
 
 
@@ -105,8 +130,9 @@ def main(argv: list[str]) -> int:
     b = sub.add_parser("bootstrap")
     b.add_argument("--dry-run", action="store_true")
     r = sub.add_parser("run")
-    r.add_argument("job", choices=["segments", "traffic"])
+    r.add_argument("job", choices=["segments", "traffic", "incidents"])
     r.add_argument("--source", action="append", choices=SOURCES, help="traffic source (repeatable; default all)")
+    r.add_argument("--no-geocode", action="store_true", help="incidents: never call a geocoding API")
     r.add_argument("--dry-run", action="store_true")
     sub.add_parser("schedule")
     args = p.parse_args(argv)
@@ -120,6 +146,9 @@ def main(argv: list[str]) -> int:
             return 0
         elif args.job == "segments":
             out = run_segments(load_network(), args.dry_run)
+        elif args.job == "incidents":
+            net = load_network() if GRAPHML.exists() else None
+            out = run_incidents(net, args.dry_run, use_geocoder=not args.no_geocode)
         else:
             out = run_traffic(load_network(), tuple(args.source or SOURCES), args.dry_run)
     except ConfigError as e:

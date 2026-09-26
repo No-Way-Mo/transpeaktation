@@ -4,7 +4,7 @@ Layer 2 of `ARCHITECTURE.md`. Takes every source in `TODO.md` plus PredictHQ and
 
 This builds on what already runs (`pull/`, `datasf/`) and on the reference worker in `~/Downloads/transpeaktation-ingest`. §11 lists where it deliberately differs from that reference.
 
-**Status:** step 1 (road segments) and step 2 (traffic loaders) are built in `worker/` (see `TODO.md`); the rest is proposal. Neither database is set up yet. The collections in `AGENTS.md` and the tables in `contracts/tiger_schema.sql` are drafts. §4–§6 propose the schema from what each source actually returns (§3b). Once the team agrees, it replaces those drafts in one `contracts/` PR. Traffic rows follow the rules already in `AGENTS.md` → "Traffic data normalization": 10-min buckets, `speed_mph` / `free_flow_speed_mph` / `congestion_ratio`, sources `tomtom`, `mapbox_route`, `mapbox_tiles`, `muni`.
+**Status:** steps 1–3 are built in `worker/` (road segments, traffic loaders, closures/incidents except 511; see `TODO.md`); events, Google and SUMO are proposal. Neither database is set up yet. The collections in `AGENTS.md` and the tables in `contracts/tiger_schema.sql` are drafts. §4–§6 propose the schema from what each source actually returns (§3b). Once the team agrees, it replaces those drafts in one `contracts/` PR. Traffic rows follow the rules already in `AGENTS.md` → "Traffic data normalization": 10-min buckets, `speed_mph` / `free_flow_speed_mph` / `congestion_ratio`, sources `tomtom`, `mapbox_route`, `mapbox_tiles`, `muni`.
 
 ## 1. Pipeline shape
 
@@ -85,43 +85,36 @@ Not ingested for now:
 
 All times are UTC `Date`s and all geometry is GeoJSON `[lon, lat]`. Every ingest-written doc carries `source`, `first_seen_at`, `last_seen_at`, `content_hash`, `updated_at`. The field names in `AGENTS.md` are kept exactly.
 
-**`road_segments`**: one per OSM edge, `_id = segment_id`.
+**`road_segments`**: one per OSM edge (as built).
 ```js
-{ segment_id: "65290756-65303491-0", u, v, key, osm_way_ids: [..],
-  name, highway, oneway, lanes, length_m,
-  maxspeed_mph,          // OSM tag, ~26% of edges
-  speed_limit_mph,       // DataSF posted (0 -> 25 CA default, 99 -> null: freeway sentinel)
-  free_flow_speed_mph,   // speed_limit_mph ?? maxspeed_mph ?? OSMnx highway-type default
-  cnn: "1234000",        // nearest DataSF street segment (§7)
-  tow_away: [{days, start, end}],
-  geometry: LineString }
+{ segment_id: "65290756-65303491-0", u, v, key, osmid, name, highway, oneway, lanes, length_m,
+  maxspeed_mph,          // OSM tag (~26% of edges)
+  speed_limit_mph,       // DataSF posted limit via cnn (0 = unposted and 99 = freeway are not limits)
+  free_flow_speed_mph,   // speed_limit_mph ?? maxspeed_mph ?? road-class default (25 mph unposted)
+  cnn,                   // nearest DataSF street to the edge midpoint (99% of edges)
+  geometry: LineString, first_seen_at, last_ingested_at }
 // indexes (AGENTS.md): segment_id unique, cnn, geometry 2dsphere
 ```
 
-**`road_incidents`**: closures, permits, crashes, dispatch, work zones. `_id = "<source>:<source_id>"`.
+**`road_incidents`**: closures, permits, crashes, dispatch (as built; closure code ported from `ingestion-workers-v1`). Upsert key `source` + `source_id`.
 ```js
-{ source: "datasf_street_closures" | "datasf_permits" | "datasf_excavation" | "datasf_dispatch"
-        | "caltrans" | "chp" | "sf511" | "sf511_wzdx",
-  source_id,
-  kind: "closure" | "lane_closure" | "work_zone" | "detour" | "permit" | "crash" | "hazard"
-      | "dispatch" | "special_event",
-  title, description, severity, direction,
-  status: "planned" | "active" | "ended" | "removed",
-  is_closure: true,               // all lanes closed -> hard routing constraint
-  lanes_closed,
-  start_time, end_time,           // overall envelope (end null = open-ended)
-  windows: [{start, end}],        // recurring schedules expanded 14 days ahead
-  location: Point,                // representative point (2dsphere index lives here)
-  geometry: LineString | ...,     // full shape when the source has one
-  road_segment_ids: [..], cnn: [..],
-  event_id,                       // set when the closure is for a known event
-  source_updated_at }
-// indexes (AGENTS.md): source+source_id unique, location 2dsphere, start_time+end_time, road_segment_ids
+{ source: "street_closures" | "street_use_permits" | "excavation_permits" | "caltrans_lane_closures"
+        | "chp_incidents" | "police_dispatch",        // 511 + WZDx next
+  source_id,                     // natural key; Caltrans = row index (one per closure window)
+  incident_type: "closure" | "incident",
+  category,                      // street_closure | street_use_permit | excavation | lane_closure | collision | hazard | closure
+  is_closure: true,              // closed to traffic -> hard routing constraint
+  location: GeoJSON,             // source shape (Point / LineString / MultiLineString); 2dsphere
+  location_status: "exact" | "from_cnn" | "geocoded" | "withheld" | "unlocated",
+  start_time, end_time, reported_at,
+  road_segment_ids: [..], cnn, cnn_match,
+  details: {...},                // normalized per-source attributes (lanes, route, call type, ...)
+  source_fields: {...},          // raw row minus geometry
+  provenance: {source, source_id, pulled_at, also_reported_by: [..]},
+  schema_version, first_seen_at, last_ingested_at }
+// indexes: source+source_id unique, location 2dsphere, start_time+end_time, road_segment_ids, is_closure+end_time
 ```
-Per-source rules:
-- Excavation permits are one row per permit per `cnn`. Group them into one doc per `permit_number` with a `cnn[]` array.
-- Intersection `cnn`s resolve through `streets.f_node_cnn` / `t_node_cnn`.
-- Dispatch keeps only traffic call types (collisions, traffic hazards, blocked roadway). Rows without a location are dropped, and so is the narrative text.
+Rules: police keeps traffic calls only (collision, hazard, closure); sensitive calls stay `withheld` and are never geocoded; parking signs aren't stored; bad rows go to `data/quarantine/<source>.jsonl`; a report seen by two sources is stored once, on the higher-priority source, with the other in `provenance.also_reported_by`.
 
 **`events`**: one canonical doc per real-world event, merged across sources, `_id = event_id`.
 ```js

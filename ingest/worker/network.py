@@ -171,7 +171,7 @@ class Network:
         return self.index.nearest_heading(midpoint(a, b), bearing_deg(a, b), radius_m, SNAP_MAX_ANGLE)
 
     def snap_line(self, coords: Sequence[LonLat]) -> list[tuple[str, float]]:
-        """Ordered [(segment_id, metres of the line on it)] for a provider line."""
+        """Ordered [(segment_id, metres of the line on it)] for a provider line, detours pruned."""
         out: list[tuple[str, float]] = []
         for a, b in zip(coords, coords[1:]):
             sid = self.snap_piece(a, b)
@@ -182,7 +182,28 @@ class Network:
                 out[-1] = (sid, out[-1][1] + d)
             else:
                 out.append((sid, d))
-        return out
+        keep = set(self.prune_detours([sid for sid, _ in out]))
+        return [(sid, d) for sid, d in out if sid in keep]
+
+    def prune_detours(self, seq: Sequence[str]) -> list[str]:
+        """Drop matches that break an otherwise connected path.
+
+        Snapping pieces one by one lets a noisy piece near an intersection land on a short cross
+        street or the opposite direction. If the neighbours on both sides connect to each other
+        (prev.v == next.u) and the middle match doesn't link them, it's a detour the route never
+        drove. Consecutive duplicates are collapsed first; ends are left alone (a missed edge in
+        the middle would otherwise make a real end look disconnected)."""
+        path = [s for i, s in enumerate(seq) if i == 0 or s != seq[i - 1]]
+        changed = True
+        while changed and len(path) >= 3:
+            changed = False
+            for i in range(1, len(path) - 1):
+                p, s, n = (self.edges[x] for x in path[i - 1:i + 2])
+                if p.v == n.u and not (p.v == s.u and s.v == n.u):
+                    del path[i]
+                    changed = True
+                    break
+        return path
 
 
 def _snapshot_records(path: Path) -> list[dict]:
