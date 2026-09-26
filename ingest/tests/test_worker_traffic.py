@@ -124,6 +124,16 @@ class TrafficTests(unittest.TestCase):
         self.assertEqual((row["road_segment_id"], row["speed_mph"], row["congestion_ratio"]), (WEST, None, 0.65))
         self.assertEqual(row["free_flow_speed_mph"], 25.0)
 
+    def test_mapbox_tiles_low_is_not_stored(self):
+        write_jsonl(self.dirs["mapbox_tiles"] / "geometry.jsonl", [{"key": "w", "coords": along(B, A, 3)}])
+        write_jsonl(self.dirs["mapbox_tiles"] / f"{DAY}.jsonl", [
+            {"polled_at": ts(9, 55), "style": "congestion", "ok": True, "lines": [["w", "low", "street", False]]},
+            {"polled_at": ts(10, 5), "style": "congestion", "ok": True, "lines": [["w", "low", "street", False],
+                                                                                  ["w", "moderate", "street", False]]}])
+        sink, _ = self.run_job("mapbox_tiles")
+        [row] = self.rows(sink)  # 9:50 all low: no row; 10:00 low + moderate averages above low: kept
+        self.assertEqual(row["congestion_ratio"], 0.25)
+
     # --- muni ---------------------------------------------------------------------
 
     def test_muni_speed_from_consecutive_fixes(self):
