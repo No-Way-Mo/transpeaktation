@@ -34,33 +34,42 @@ class EventImpact(unittest.TestCase):
     def test_delay_only_near_the_venue_while_the_crowd_is_there(self):
         now = at(9)
         self.assertEqual(model.predict_route(PAST, at(12), CTX, now=now)["delay"], 0)       # noon: no crowd
-        self.assertEqual(model.predict_route(PAST, at(18, 30), CTX, now=now)["delay"], 482)  # arrival window: ~8 min
+        self.assertEqual(model.predict_route(PAST, at(18, 30), CTX, now=now)["delay"], 600)  # arrival window: high tier
         edge = model.predict_route(PAST, at(17, 25), CTX, now=now)["delay"]                  # passes ~17:30: ramping in
-        self.assertTrue(0 < edge < 482, edge)
+        self.assertTrue(0 < edge < 600, edge)
         self.assertEqual(model.predict_route(AROUND, at(18, 30), CTX, now=now)["delay"], 0)  # ~1 km away
         self.assertGreater(model.predict_route(PAST, at(22, 20), CTX, now=now)["delay"], 0)  # crowd leaving
 
-    def test_size_and_type_scale_the_delay(self):
-        small = {**ORACLE, "capacity": 1300, "category": "conference"}
-        self.assertEqual(round(model.event_max_delay_s(ORACLE)), 482)
-        self.assertEqual(round(model.event_max_delay_s(small)), 72)  # 2 min floor x 0.6
+    def test_size_and_type_pick_the_tier(self):
+        tier = lambda **kw: model.event_tier({**ORACLE, **kw})  # noqa: E731
+        self.assertEqual((tier(), tier(capacity=8000, category="community"), tier(capacity=1300, category="conference"),
+                          tier(capacity=None, category=None)), ("high", "medium", "low", "low"))
+        self.assertEqual([model.event_max_delay_s({**ORACLE, "capacity": c}) for c in (41265, 6000, 100)], [600, 300, 120])
+
+    def test_a_route_gets_its_worst_event_not_the_sum(self):
+        small = [{**ORACLE, "id": f"c{i}", "title": f"Conf {i}", "capacity": 500, "category": "conference"} for i in range(9)]
+        p = model.predict_route(PAST, at(18, 30), {**CTX, "events": [*small, ORACLE]}, now=at(9))
+        self.assertEqual((p["delay"], p["events"][0], len(p["events"])), (600, "Giants vs. Dodgers at Oracle Park", 10))
 
     def test_without_ml_the_card_is_the_fastest_route_unchanged(self):
         now = at(9)
         p = model.plan([PAST, AROUND], [at(18, 30)] * 2, "depart", CTX, now=now)  # Giants crowd on PAST
         self.assertEqual((p["best"], p["preds"][0]["dur"], p["advice"]), (0, PAST["dur"], None))  # no re-pick/re-time
         est = p["preds"][0]["estimate"]                          # api/'s estimate: shown on the normal route only
-        self.assertEqual((round(est["dur"]), est["delay"]), (PAST["dur"] + 482, 482))
+        self.assertEqual((round(est["dur"]), est["delay"]), (PAST["dur"] + 600, 600))
         self.assertEqual(est["why"], ["Giants vs. Dodgers at Oracle Park"])
         self.assertEqual(p["tag"], "Events on the way")
         self.assertEqual(p["note"], "")  # the transPEAKtation card gets no note; the slower normal routes do
-        self.assertEqual(p["preds"][0]["note"], "8 min slower: Giants vs. Dodgers at Oracle Park.")
+        self.assertEqual(p["preds"][0]["note"], "10 min slower: Giants vs. Dodgers at Oracle Park.")
         self.assertEqual(p["preds"][1]["note"], "1 min slower: longer or busier roads.")
         tie = model.plan([AROUND, AROUND], [at(12)] * 2, "depart", CTX, now=now)  # same time: nothing to explain
         self.assertEqual(([x["note"] for x in tie["preds"]], tie["note"]),
                          ([None, None], "No events or traffic slowing the fastest normal route."))
-        long = model.slower_note({"blocked": False, "estimate": {"why": ["Some Very Long Festival Name"] * 9}}, 3)
-        self.assertEqual((len(long), long[-1]), (model.NOTE_MAX, "…"))
+        note = lambda *why: model.slower_note({"blocked": False, "estimate": {"why": list(why)}}, 3)  # noqa: E731
+        self.assertEqual(note("LIVE Spinal Manual Therapy Course", "Catawba and Cherokee American Revolution Symposium",
+                              "Other"), "3 min slower: LIVE Spinal Manual Therapy Course +2 more.")
+        self.assertEqual(note("Catawba and Cherokee American Revolution Symposium at Moscone West"),
+                         "3 min slower: Catawba and Cherokee American Revolution…")  # whole words only
         self.assertEqual(model.plan([PAST, AROUND], [at(12)] * 2, "depart", CTX, now=now)["tag"], "Clear")
 
     def test_special_event_closure_counts_like_any_event(self):
@@ -163,8 +172,8 @@ class RoadData(unittest.TestCase):
 class Events(unittest.TestCase):
     def test_views_match_the_web_shape(self):
         o, c, f = (model.event_view(e) for e in model.demo_events(DAY))
-        self.assertEqual((o["time"], o["start"], o["crowd"]), ("7:15 PM", [19, 15], {"from": [17, 45], "to": [19, 30], "delay": 8}))
-        self.assertEqual(o["drop"]["badge"], "Saves ~8 min")
+        self.assertEqual((o["time"], o["start"], o["crowd"]), ("7:15 PM", [19, 15], {"from": [17, 45], "to": [19, 30], "delay": 10}))
+        self.assertEqual(o["drop"]["badge"], "Saves ~10 min")
         self.assertEqual((c["crowd"]["from"], c["crowd"]["to"]), ([18, 30], [20, 15]))
         self.assertEqual((f["start"], f["time"]), (None, "until 2:00 PM"))  # market: no fixed start
 
