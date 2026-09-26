@@ -35,6 +35,7 @@ def fetch(
     data: dict[str, str] | None = None,
     timeout: float = 60,
     retries: int = 3,
+    retry_on: frozenset[int] = frozenset(),
 ) -> bytes:
     """GET (or form POST when `data` is given) and return the body."""
     if params:
@@ -46,7 +47,7 @@ def fetch(
             with urllib.request.urlopen(req, timeout=timeout, context=SSL_CONTEXT) as resp:
                 return resp.read()
         except urllib.error.HTTPError as e:
-            if e.code in RETRY_STATUSES and attempt < retries:
+            if (e.code in RETRY_STATUSES or e.code in retry_on) and attempt < retries:
                 time.sleep(float(e.headers.get("Retry-After") or 2**attempt))
                 continue
             raise FetchError(f"{e.code} from {url.split('?')[0]}: {e.read()[:200]!r}") from e

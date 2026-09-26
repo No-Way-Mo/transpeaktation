@@ -56,5 +56,6 @@ Mongo = long-lived entities / nested JSON. Tiger = time-series + fast-changing n
 - demo: `open demo/index.html` · test: `node demo/check.mjs`
 - ingest setup: `cd ingest && python -m venv .venv && .venv/Scripts/pip install -e .[osm]` (macOS/Linux: `.venv/bin/`)
 - ingest pull raw data: `cd ingest && .venv/Scripts/python -m pull [static|planned|live|<source>]` · quality report: `.venv/Scripts/python -m pull.check`
+- ingest speed polling (needs `MAPBOX_TOKEN`): `cd ingest && python -m pull.poll` (every 10 min; `--once` for one round)
 - ingest DataSF live check: `cd ingest && python -m datasf` · test: `cd ingest && python -m unittest discover -s tests -t .`
 - ingest data sources plan + backlog: `ingest/TODO.md`

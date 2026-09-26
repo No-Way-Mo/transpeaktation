@@ -376,8 +376,69 @@ def run() -> int:
             fails += f.level == FAIL
             warns += f.level == WARN
             print(f"  {f.level}  {f.check:<16} {f.detail}")
+
+    polls = load_polls()
+    print(f"\nmapbox_corridors [time series]  {len(polls)} route polls")
+    for f in check_polls(polls, now) if polls else [Finding(WARN, "history", "no polls yet (python -m pull.poll)")]:
+        fails += f.level == FAIL
+        warns += f.level == WARN
+        print(f"  {f.level}  {f.check:<16} {f.detail}")
     print(f"\n{fails} FAIL, {warns} WARN")
     return 1 if fails else 0
+
+
+# --- speed time series -----------------------------------------------------
+
+CONGESTION_LEVELS = {"unknown", "low", "moderate", "heavy", "severe"}
+
+
+def load_polls() -> list[dict]:
+    from .poll import TS_DIR
+    rows = []
+    for path in sorted(TS_DIR.glob("*.jsonl")) if TS_DIR.exists() else []:
+        rows += [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return rows
+
+
+def check_polls(rows: list[dict], now: datetime) -> list[Finding]:
+    from .corridors import requests_per_poll
+    times = sorted({datetime.fromisoformat(r["polled_at"]) for r in rows})
+    ok = [r for r in rows if r.get("ok")]
+    errors = Counter(r.get("error", "")[:60] for r in rows if not r.get("ok"))
+    gaps = [(b - a) for a, b in zip(times, times[1:])]
+    step = sorted(gaps)[len(gaps) // 2] if gaps else None  # typical interval
+    big = [g for g in gaps if step and g > 2.5 * step]
+    found = [
+        Finding(PASS if len(ok) == len(rows) else WARN if len(ok) >= 0.9 * len(rows) else FAIL, "success",
+                f"{pct(len(ok), len(rows))} of requests ok" + (f"; errors {dict(errors.most_common(3))}" if errors else "")),
+        freshness(times[-1], now, timedelta(minutes=30), timedelta(hours=3), "poll"),
+        Finding(PASS if not big else WARN, "coverage",
+                f"{len(times)} polls over {age(times[0], now)}; typical interval {step or 'n/a'}; "
+                f"{len(big)} gaps > 2.5x interval (machine asleep / network down?)"),
+    ]
+    bad_shape = bad_speed = bad_level = 0
+    typical_ratio = []
+    for r in ok:
+        seg, geom = r["segments"], r.get("geometry") or []
+        n = len(seg.get("speed_mps") or [])
+        if not n or len(seg.get("distance_m") or []) != n or (geom and len(geom) != n + 1):
+            bad_shape += 1
+        bad_speed += sum(1 for v in seg.get("speed_mps") or [] if v is not None and not 0 <= v <= 40)
+        bad_level += sum(1 for v in seg.get("congestion") or [] if v not in CONGESTION_LEVELS)
+        if r.get("duration_typical_s"):
+            typical_ratio.append(r["duration_s"] / r["duration_typical_s"])
+    found += [
+        Finding(PASS if not bad_shape else WARN, "segment arrays",
+                f"{bad_shape} routes whose speed/distance/geometry lengths disagree"),
+        Finding(PASS if not (bad_speed or bad_level) else WARN, "values",
+                f"{bad_speed} speeds outside 0-40 m/s, {bad_level} unknown congestion labels"),
+        Finding(PASS if typical_ratio else WARN, "vs typical",
+                f"live/typical travel time median {sorted(typical_ratio)[len(typical_ratio) // 2]:.2f}"
+                if typical_ratio else "no duration_typical returned"),
+        Finding(PASS, "corridors", f"{len({(r['corridor'], r['direction']) for r in ok})} of "
+                                   f"{requests_per_poll()} corridor-directions have data"),
+    ]
+    return found
 
 
 if __name__ == "__main__":

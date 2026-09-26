@@ -33,7 +33,7 @@ Check: `.venv/Scripts/python -m pull.check`
 | 14 | Real-time police dispatch calls (~20 min lag) | DataSF `gnap-fj3t` (`police_dispatch`) | ✅ |
 | 15 | Traffic incidents, closures, Muni vehicles | 511.org 🔑 (`sf511_traffic_events`, `sf511_muni_vehicles`; free; ~60 req/hr per token) | 🟡 response shapes unverified until we have a key |
 | 16 | Freeway crashes and hazards | CHP feed (`chp_incidents`); sometimes served truncated, parsed entry by entry | ✅ |
-| 17 | Candidate routes, polyline, baseline + live ETA, per-segment traffic | Mapbox Directions or Google Routes 🔑 (pick one) | ⬜ (blocked on decision + key) |
+| 17 | Live speed + congestion per road segment on 9 corridors (17 routes), every 10 min → time series | Mapbox Directions `driving-traffic` 🔑 (`python -m pull.poll`, corridors in `pull/corridors.py`) | 🟡 needs `MAPBOX_TOKEN` |
 
 ## 4. Simulation
 | # | What | Source | Status |
@@ -49,12 +49,17 @@ Check: `.venv/Scripts/python -m pull.check`
 - **Street closures** carry true UTC in `start_utc`/`end_utc`; every other DataSF timestamp is SF local with no offset.
 - Some Windows cert stores break TLS to overpass-api.de; `pull/http.py` uses certifi's bundle when installed.
 
+## Speed history (target data for forecasting models)
+- **Nothing free gives historical speeds for SF city streets.** Start polling now so history accumulates (~1 h for zero-shot forecasts, 2–4 weeks to evaluate/fine-tune, months to learn event effects).
+- Mapbox free tier: 100k requests/month → 17 routes every 10 min (~73k). `pull.poll` refuses schedules over 90k unless `--allow-paid`.
+- Free historical freeway speeds exist (Caltrans PeMS / LargeST Bay Area) if we want pretraining/eval data; not SF surface streets.
+- Polling runs wherever it's started; a laptop that sleeps leaves gaps (`pull.check` reports them). Move to DigitalOcean with the ingestion worker.
+
 ## Integration work (ingestion worker step, not started)
 - Link DataSF segments (`cnn`) to OSM roads by location (OSMnx nearest-edge match); redo on each refresh.
 - Normalize, dedupe, geocode, write to MongoDB / Tiger Data.
 
 ## Open decisions
-- Mapbox vs Google Routes (only one).
 - PredictHQ vs Ticketmaster, depending on PredictHQ pricing.
 - Keep or drop the ~1-day-lagged feeds still in the DataSF registry but not pulled: fire/EMS calls (`nuek-vuh3`), 311 blocked-street/road-defect cases (`vw6y-z8j6`).
 
