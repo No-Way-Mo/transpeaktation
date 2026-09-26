@@ -279,7 +279,7 @@ def plan(routes: list[dict], departs: list[datetime], mode: str, ctx: dict, *, n
         if not advice:
             note += " Leaving earlier or later helps."
     else:
-        tag, note = "Clear", "No events or closures on your way at this time."
+        tag, note = "Clear", "No delays expected from events or closures at this time."
     if ml and ml.get("reasons"):
         note = " ".join(ml["reasons"])
     if advice:
@@ -302,6 +302,14 @@ def from_mongo(e: dict) -> dict | None:
             "lat": loc[1], "lon": loc[0], "start": e["start_time"], "end": e.get("end_time"),
             "attendance": e.get("attendance"), "capacity": e.get("capacity") or v.get("capacity"),
             "drop": v.get("drop_off"), "source": "mongo"}
+
+
+def from_map_event(e: dict) -> dict:
+    """A MapEvent (store.find_closure_events: DataSF special-event closures) -> the planner's event shape."""
+    end = e.get("end_time")
+    return {"id": e["id"], "title": e["name"], "category": e.get("category"), "venue": e.get("venue") or e["name"],
+            "keys": [], "lat": e["lat"], "lon": e["lon"], "start": datetime.fromisoformat(e["start_time"]),
+            "end": datetime.fromisoformat(end) if end else None, "source": e["source"]}
 
 
 def demo_events(day: datetime) -> list[dict]:

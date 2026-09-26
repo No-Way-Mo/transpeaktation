@@ -151,6 +151,11 @@ class Store:
             return found
         return self._mongo_call(q)
 
+    def closure_events(self, t0: datetime, t1: datetime) -> list[dict] | None:
+        """DataSF special-event closures as events (find_closure_events): the same ones /events puts on the map, so
+        the plan and ml/ see them too until ingest merges them into `events`."""
+        return self._mongo_call(lambda db: find_closure_events(db, t0, t1))
+
     def incidents_on(self, segment_ids: list[str], t0: datetime, t1: datetime) -> list[dict] | None:
         """road_incidents touching these segments whose time span overlaps [t0, t1]. One with no end time counts
         for OPEN_ENDED after it started, so today's crash doesn't block a trip next week."""
@@ -396,6 +401,13 @@ def events_from_closures(docs: Iterable[dict]) -> list[dict]:
     return out
 
 
+def find_closure_events(db: Any, start: datetime, end: datetime) -> list[dict]:
+    """Approved DataSF special-event closures overlapping [start, end], as MapEvents (events_from_closures)."""
+    q = {"details.is_special_event": True, "start_time": {"$lte": end}, "end_time": {"$gte": start}}
+    return events_from_closures(d for d in db["road_incidents"].find(q, CLOSURE_FIELDS).limit(MAX_ITEMS * 5)
+                                if _approved(d))
+
+
 def find_events(db: Any, start: datetime, end: datetime, box: Box) -> list[dict]:
     """Events whose time window overlaps [start, end] and whose point is inside `box`, soonest first."""
     q_events = {
@@ -408,11 +420,7 @@ def find_events(db: Any, start: datetime, end: datetime, box: Box) -> list[dict]
     venue_ids = sorted({d["venue_id"] for d in docs if d.get("venue_id")})
     venues = {str(v["_id"]): v.get("name") for v in db["venues"].find({"_id": {"$in": venue_ids}}, {"name": 1})} \
         if venue_ids else {}
-    out = [e for d in docs if (e := event_from_doc(d, venues))]
-
-    q_closures = {"details.is_special_event": True, "start_time": {"$lte": end}, "end_time": {"$gte": start}}
-    closures = [d for d in db["road_incidents"].find(q_closures, CLOSURE_FIELDS).limit(MAX_ITEMS * 5) if _approved(d)]
-    out += events_from_closures(closures)
+    out = [e for d in docs if (e := event_from_doc(d, venues))] + find_closure_events(db, start, end)
     out = [e for e in out if _inside((e["lon"], e["lat"]), box)]
     return sorted(out, key=lambda e: (e["start_time"], e["id"]))[:MAX_ITEMS]
 
