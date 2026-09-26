@@ -1,4 +1,5 @@
-"""transPEAKtation API: place search + traffic-aware routes with OSM road-segment IDs; voice → trip intent.
+"""transPEAKtation API: place search + traffic-aware routes with OSM road-segment IDs; voice → trip intent; read-only
+views of ingested data (events, road conditions, segment traffic) from Mongo / Tiger.
 
     cd api && .venv/bin/uvicorn app.main:app --reload    # http://localhost:8000/docs
 """
@@ -23,7 +24,7 @@ load_dotenv(_API_DIR / ".env")  # api/.env; real env vars win
 # Local dev: reuse keys already in ingest/.env (e.g. its MAPBOX_TOKEN) instead of copying them. Never overrides.
 load_dotenv(_API_DIR.parent / "ingest" / ".env")
 
-from . import providers, voice
+from . import providers, store, voice
 from .segments import Segments
 
 # Accept a little beyond the SF search box so Treasure Island / Daly City edges still route.
@@ -163,11 +164,113 @@ async def voice_intent(audio: UploadFile = File(description="Recorded speech (we
     return {"transcript": text, **intent, "destination": dest, "origin": origin}
 
 
+MAX_WINDOW = timedelta(days=14)
+
+
+def window(start: str, end: str) -> tuple[datetime, datetime]:
+    try:
+        a, b = datetime.fromisoformat(start), datetime.fromisoformat(end)
+    except ValueError:
+        raise HTTPException(400, "expected ISO 8601 times, e.g. 2026-09-26T19:00:00-07:00")
+    if a.tzinfo is None or b.tzinfo is None:
+        raise HTTPException(400, "times need a UTC offset")
+    if not timedelta(0) <= b - a <= MAX_WINDOW:
+        raise HTTPException(400, "end must be after start, at most 14 days later")
+    return a.astimezone(timezone.utc), b.astimezone(timezone.utc)
+
+
+def bbox(raw: str | None) -> store.Box:
+    if raw is None:
+        return SERVICE_AREA
+    try:
+        box = tuple(float(x) for x in raw.split(","))
+    except ValueError:
+        box = ()
+    if len(box) != 4 or not (box[0] < box[2] and box[1] < box[3]):
+        raise HTTPException(400, "expected bbox 'lon_min,lat_min,lon_max,lat_max'")
+    return box  # type: ignore[return-value]
+
+
+async def _read(key: tuple, fn, *args) -> Any:
+    """Cached, threaded DB read. A missing or unreachable database is a 503, never a crash: routing doesn't need it."""
+    if (hit := _cached(key)) is not None:
+        return hit
+    try:
+        return _store(key, 60, await asyncio.to_thread(fn, *args))
+    except store.StoreUnavailable as e:
+        raise HTTPException(503, f"ingested data unavailable: {e}")
+    except Exception as e:  # driver errors (timeouts, auth) carry connection details; don't echo them
+        raise HTTPException(503, f"ingested data unavailable ({type(e).__name__})")
+
+
+def _mongo_read(fn, a: datetime, b: datetime, box: store.Box, *extra) -> list[dict]:
+    return fn(store.mongo_db(), a, b, box, *extra)
+
+
+# Windows are rounded out to 5 minutes for the cache key: "now" moves every request.
+def _key(name: str, a: datetime, b: datetime, box: store.Box) -> tuple:
+    r = lambda t: int(t.timestamp() // 300)
+    return (name, r(a), r(b), box)
+
+
+@app.get("/events")
+async def events(
+    start: str = Query(description="Window start (ISO 8601 with offset)"),
+    end: str = Query(description="Window end (ISO 8601 with offset)"),
+    bbox_: str | None = Query(None, alias="bbox", description="'lon_min,lat_min,lon_max,lat_max'; default SF"),
+):
+    """Ingested events (Mongo `events`, plus DataSF special-event street closures) overlapping the window."""
+    a, b = window(start, end)
+    box = bbox(bbox_)
+    found = await _read(_key("events", a, b, box), _mongo_read, store.find_events, a, b, box)
+    return {"events": found}
+
+
+@app.get("/road-conditions")
+async def road_conditions(
+    start: str = Query(description="Window start (ISO 8601 with offset)"),
+    end: str = Query(description="Window end (ISO 8601 with offset)"),
+    bbox_: str | None = Query(None, alias="bbox", description="'lon_min,lat_min,lon_max,lat_max'; default SF"),
+    include_permits: bool = Query(False, description="Also return street-use / excavation permits (road stays open)"),
+):
+    """Ingested closures and incidents (Mongo `road_incidents`) active during the window."""
+    a, b = window(start, end)
+    box = bbox(bbox_)
+    found = await _read((*_key("conditions", a, b, box), include_permits), _mongo_read, store.find_road_conditions,
+                        a, b, box, include_permits)
+    return {"road_conditions": found}
+
+
+MAX_SEGMENTS = 400
+TRAFFIC_MAX_AGE = timedelta(minutes=30)
+
+
+def _tiger_traffic(ids: list[str], since: datetime) -> list[dict]:
+    conn = store.tiger_conn()
+    try:
+        return store.find_traffic(conn, ids, since)
+    finally:
+        conn.close()
+
+
+@app.get("/traffic")
+async def traffic(segments_: str = Query(alias="segments", description="Comma-separated road_segment_ids (u-v-key)")):
+    """Latest observed speed / congestion per road segment (Tiger `traffic_metrics`, last 30 min)."""
+    ids = sorted({s for s in segments_.split(",") if s.strip()})
+    if not ids or len(ids) > MAX_SEGMENTS:
+        raise HTTPException(400, f"pass 1 to {MAX_SEGMENTS} segment ids")
+    since = datetime.now(timezone.utc) - TRAFFIC_MAX_AGE
+    found = await _read(("traffic", tuple(ids), int(since.timestamp() // 300)), _tiger_traffic, ids, since)
+    return {"traffic": found}
+
+
 @app.get("/health")
 def health():
     if not os.environ.get("MAPBOX_TOKEN"):
         mapbox = "no token (using OSRM/Nominatim)"
     else:
         mapbox = "ready" if providers.mapbox_available() else "backing off after an error"
+    configured = lambda name: "configured" if store.configured(name) else "not configured"
     return {"ok": True, "mapbox": mapbox, "road_graph": segments.status,
-            "voice": "ready" if voice.available() else "no ELEVENLABS_API_KEY"}
+            "voice": "ready" if voice.available() else "no ELEVENLABS_API_KEY",
+            "mongo": configured("MONGODB_URI"), "tiger": configured("TIGER_DATABASE_URL")}

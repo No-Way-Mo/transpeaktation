@@ -71,6 +71,6 @@ Forecast models need one fixed road list, one unit, and one time step. Raw feeds
 - ingest worker (OSM graph → Mongo `road_segments`; `pull.poll` JSONL → Tiger `traffic_metrics` + `route_eta_metrics`, Mongo `route_plans`; closures/incidents → Mongo `road_incidents`; needs `python -m pull osm_drive_graph streets speed_limits` first): `cd ingest && .venv/Scripts/pip install -e .[osm,db]` then `.venv/Scripts/python -m worker bootstrap` · one pass: `python -m worker run traffic|incidents|segments [--dry-run]` · long-running: `python -m worker schedule` · design: `ingest/DESIGN.md`
 - ingest DataSF live check: `cd ingest && python -m datasf` · test: `cd ingest && python -m unittest discover -s tests -t .`
 - ingest data sources plan + backlog: `ingest/TODO.md`
-- api: `cd api && python3 -m venv .venv && .venv/bin/pip install -e .` · run: `.venv/bin/uvicorn app.main:app --reload` → http://localhost:8000/docs · test: `.venv/bin/python -m unittest discover -s tests -t .`
+- api: `cd api && python3 -m venv .venv && .venv/bin/pip install -e .[test]` · run: `.venv/bin/uvicorn app.main:app --reload` → http://localhost:8000/docs · test: `.venv/bin/python -m unittest discover -s tests -t .`
 - web: `cd web && npm install && npm run dev` → http://localhost:3000 (≤760px wide = mobile layout) · test: `npm test` · build: `npm run build`
 - ios: start web first, then `open ios/Transpeaktation.xcodeproj` and Run on a simulator. Web URL = `WEB_APP_URL` in `ios/project.yml`; after editing that file run `cd ios && xcodegen`.
