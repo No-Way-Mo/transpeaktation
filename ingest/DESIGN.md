@@ -4,7 +4,7 @@ Layer 2 of `ARCHITECTURE.md`. Takes every source in `TODO.md` plus PredictHQ and
 
 This builds on what already runs (`pull/`, `datasf/`) and on the reference worker in `~/Downloads/transpeaktation-ingest`. §11 lists where it deliberately differs from that reference.
 
-**Status: proposal.** Neither database is set up yet. The collections in `AGENTS.md` and the tables in `contracts/tiger_schema.sql` are drafts. §4–§6 propose the schema from what each source actually returns (§3b). Once the team agrees, it replaces those drafts in one `contracts/` PR. Traffic rows follow the rules already in `AGENTS.md` → "Traffic data normalization": 10-min buckets, `speed_mph` / `free_flow_speed_mph` / `congestion_ratio`, sources `tomtom`, `mapbox_route`, `mapbox_tiles`, `muni`.
+**Status:** step 1 (road segments) and step 2 (traffic loaders) are built in `worker/` (see `TODO.md`); the rest is proposal. Neither database is set up yet. The collections in `AGENTS.md` and the tables in `contracts/tiger_schema.sql` are drafts. §4–§6 propose the schema from what each source actually returns (§3b). Once the team agrees, it replaces those drafts in one `contracts/` PR. Traffic rows follow the rules already in `AGENTS.md` → "Traffic data normalization": 10-min buckets, `speed_mph` / `free_flow_speed_mph` / `congestion_ratio`, sources `tomtom`, `mapbox_route`, `mapbox_tiles`, `muni`.
 
 ## 1. Pipeline shape
 
@@ -17,7 +17,8 @@ fetch            reuse pull/ fetchers (stdlib HTTP, retries, 511 BOM, CHP partia
   -> link        snap to road_segments (segment_id), attach venue_id / event_id
   -> upsert      Mongo: deterministic _id + content_hash (skip unchanged)
                  Tiger: INSERT ... ON CONFLICT DO NOTHING on a unique index
-  -> log         Mongo ingest_runs (counts, errors, duration) + ingest_state (watermark)
+  -> log         per-source watermark in data/worker/state.json (next to the data it tracks);
+                 Mongo ingest_runs (counts, errors, duration) once the transparency page needs it
 ```
 
 Live traffic is already fetched by `python -m pull.poll`, which appends JSONL to `data/timeseries/<feed>/`. Those files are the archive, so the traffic jobs read them rather than calling the APIs a second time. Every other source is fetched by the worker and archived the same way.
@@ -266,25 +267,21 @@ Today `pull.poll` probes all 17 Mapbox legs every 10 min. Hot/cold is a later ch
 
 ```
 ingest/
-  pull/  datasf/          unchanged: raw fetchers + `python -m pull` snapshots keep working
-  worker/
-    __main__.py           python -m worker bootstrap | run <job> [--full] | schedule | replay | sumo
-    config.py             env, SF bbox + tz, budgets, hot thresholds
-    db.py                 Mongo + Tiger clients, ensure_indexes, idempotent bulk writers
-    runlog.py             ingest_runs, ingest_state, disk archive
-    geo.py  match.py      GeoJSON helpers, polyline decode, SegmentMatcher, cnn lookup
-    events.py             canonical events + venue resolution + dedupe
-    jobs/                 osm_segments, datasf_rules, traffic_tomtom, traffic_mapbox_route,
-                          traffic_mapbox_tiles, traffic_muni, google, incidents_datasf,
-                          incidents_511, incidents_state, incidents_live, predicthq, sumo
-    seeds/venues.json
-  tests/                  offline: payload fixtures -> normalized docs/rows (no network, no DB)
+  pull/  datasf/          unchanged: raw fetchers, `python -m pull` snapshots, `python -m pull.poll` JSONL
+  worker/                 built (steps 1-2)
+    __main__.py           python -m worker bootstrap | run segments|traffic [--source S] [--dry-run] | schedule
+    network.py            GraphML -> edges, DataSF cnn + posted-limit link, direction-aware snapping
+    traffic.py            tomtom / mapbox_route / mapbox_tiles / muni readers -> 10-min rows, route ETAs, route plans
+    db.py  schema.sql     Tiger + Mongo sinks (idempotent upserts), dry-run sink; schema additions to contracts/
+    state.py  geo.py      watermarks + line->segment cache on disk; stdlib geometry + grid index
+  tests/                  offline: synthetic graph + JSONL fixtures -> rows (no network, no DB)
 ```
+Still to add (steps 3-5): `incidents.py`, `events.py`, `google.py`, `sumo.py`, following the same reader -> sink shape.
 
-- Dependencies: a new `[db]` extra (`pymongo`, `psycopg[binary]`). The matcher also needs the existing `[osm]` extra.
+- Dependencies: a new `[db]` extra (`pymongo`, `psycopg[binary]`). The worker reads the GraphML with the standard library; `[osm]` is only needed to pull the graph.
 - Env names: `MONGODB_URI`, `TIGER_DATABASE_URL`, `MAPBOX_TOKEN`, `SF511_API_KEY`, `DATASF_APP_TOKEN`, `TOMTOM_API_KEY`, plus new `PREDICTHQ_TOKEN`, `GOOGLE_MAPS_API_KEY`, `GOOGLE_ROUTES_ENABLED`.
 - Scheduler: a stdlib loop over a job table (`next_run_at`, `every`). Jobs run one after another, which is fine because a full cycle takes seconds. OSM and the nightly jobs use the same loop with daily or weekly periods.
-- Deploy: one small DigitalOcean **droplet** running `python -m worker schedule` under systemd. Use a droplet rather than App Platform because the matcher needs `sf_drive.graphml` and the raw archive needs a persistent disk.
+- Deploy: one small DigitalOcean **droplet** running `python -m worker schedule` under systemd. Use a droplet rather than App Platform because the worker needs `data/raw/osm_drive_graph.graphml`, the `pull.poll` JSONL and its own state on a persistent disk.
 
 ## 11. Differences from the reference worker
 

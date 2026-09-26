@@ -3,11 +3,15 @@ name = "transpeaktation-ingest"
 version = "0.1.0"
 description = "Ingest workers: pull city/road/event feeds and normalize them for Transpeaktation."
 requires-python = ">=3.10"
-dependencies = []  # pullers are stdlib-only; add DB drivers here when writers land.
+dependencies = []  # pullers and the worker are stdlib-only; DB drivers are the [db] extra.
 
 [project.optional-dependencies]
 osm = ["osmnx>=2,<3"]  # SF road graph (pull source: osm_drive_graph)
 live = ["mapbox-vector-tile>=2"]  # decode TomTom traffic tiles (pull.poll)
+db = ["pymongo>=4,<5", "psycopg[binary]>=3,<4"]  # worker writers: MongoDB Atlas, Tiger Data
 
 [tool.setuptools]
-packages = ["datasf", "pull"]
+packages = ["datasf", "pull", "worker"]
+
+[tool.setuptools.package-data]
+worker = ["schema.sql"]
