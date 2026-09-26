@@ -68,6 +68,7 @@
   --sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
   /* Mobile overlay offsets: notch-aware on iPhone, plain 12px in a narrow browser. */
   --safe-top: max(calc(env(safe-area-inset-top) + 4px), 12px);
+  --bar-bottom: calc(env(safe-area-inset-top) + 52px); /* phone menu bar: overlays start 8px under it */
   --safe-bottom: max(env(safe-area-inset-bottom), 16px);
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   color-scheme: light; /* native controls (time picker, scrollbars) follow the chosen theme, not the OS */
@@ -274,10 +275,10 @@ input::placeholder { color: var(--muted); }
 }
 
 /* ---------- desktop ---------- */
-.desk { position: relative; height: 100dvh; display: flex; overflow: hidden; }
+.desk { position: relative; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+.desk-main { flex: 1; min-height: 0; display: flex; }
 .desk-panel { position: relative; z-index: 10; flex: none; width: 400px; height: 100%; display: flex; flex-direction: column; background: var(--panel); border-right: 1px solid var(--line); box-shadow: var(--shadow); }
-.brand { display: flex; align-items: center; gap: 10px; padding: 20px 24px 16px; font-size: 20px; font-weight: 700; letter-spacing: -0.025em; }
-.desk-search { position: relative; padding: 0 16px; }
+.desk-search { position: relative; padding: 16px 16px 0; }
 .desk-search .suggest { position: absolute; top: calc(100% + 6px); left: 16px; right: 16px; z-index: 20; }
 .desk-body { flex: 1; min-height: 0; overflow: auto; padding: 16px 16px 20px; display: flex; flex-direction: column; gap: 10px; }
 .desk-body.roomy { padding-top: 18px; gap: 22px; }
@@ -308,7 +309,7 @@ input::placeholder { color: var(--muted); }
 
 /* ---------- mobile ---------- */
 .mob { position: relative; height: 100dvh; overflow: hidden; }
-.mob-top { position: absolute; top: var(--safe-top); left: 12px; right: 12px; z-index: 30; display: flex; flex-direction: column; gap: 8px; }
+.mob-top { position: absolute; top: calc(var(--bar-bottom) + 8px); left: 12px; right: 12px; z-index: 30; display: flex; flex-direction: column; gap: 8px; }
 .mob .endpoints { background: var(--sheet-bg); backdrop-filter: blur(20px) saturate(1.6); -webkit-backdrop-filter: blur(20px) saturate(1.6); box-shadow: var(--shadow); border-radius: 18px; padding: 6px 8px 6px 14px; }
 .mob .suggest { border-radius: 16px; }
 .mob .suggest button { min-height: 56px; padding: 8px 14px; }
@@ -318,8 +319,8 @@ input::placeholder { color: var(--muted); }
 .mob .rail .line { height: 22px; }
 .mob .inputs input { height: 44px; font-size: 17px; } /* ≥16px stops iOS zooming on focus */
 .mob .swap { width: 44px; height: 44px; border-radius: 12px; background: var(--fill); }
-.mob .compass { position: absolute; right: 12px; top: calc(var(--safe-top) + 150px); z-index: 28; }
-.mob .compass.high { top: calc(var(--safe-top) + 4px); }
+.mob .compass { position: absolute; right: 12px; top: calc(var(--bar-bottom) + 146px); z-index: 28; }
+.mob .compass.high { top: calc(var(--bar-bottom) + 8px); }
 
 /* Draggable sheet: height comes from --sheet-h (set on .mob by the sheet hook).
    ponytail: animates height, not transform, so the footer (Start) stays pinned to the visible bottom at every detent.
@@ -357,7 +358,7 @@ input::placeholder { color: var(--muted); }
 .close-btn { flex: none; width: 30px; height: 30px; border-radius: 50%; background: var(--fill); color: var(--muted); display: flex; align-items: center; justify-content: center; }
 .start { width: 100%; height: 52px; border-radius: 14px; background: var(--action); color: var(--on-action); font-size: 17px; font-weight: 650; }
 
-.turn { position: absolute; top: var(--safe-top); left: 12px; right: 12px; z-index: 30; display: flex; align-items: center; gap: 14px; padding: 16px 18px; border-radius: 20px; background: var(--action); color: var(--on-action); box-shadow: var(--shadow); text-align: left; }
+.turn { position: absolute; top: calc(var(--bar-bottom) + 8px); left: 12px; right: 12px; z-index: 30; display: flex; align-items: center; gap: 14px; padding: 16px 18px; border-radius: 20px; background: var(--action); color: var(--on-action); box-shadow: var(--shadow); text-align: left; }
 .turn-arrow { flex: none; width: 52px; height: 52px; border-radius: 14px; background: rgba(255, 255, 255, 0.2); display: flex; align-items: center; justify-content: center; }
 .turn .stack { gap: 3px; }
 .turn .sub { font-size: 15px; color: rgba(255, 255, 255, 0.85); }
@@ -503,11 +504,17 @@ input::placeholder { color: var(--muted); }
 
 /* ---------- ☰ menu, map layers, settings ---------- */
 .nav-wrap { position: relative; flex: none; }
-.menu-btn { display: flex; align-items: center; justify-content: center; color: var(--action-text); }
-.where-row .menu-btn { width: 48px; height: 48px; border-radius: 12px; background: var(--fill); }
-.menu-btn[aria-expanded='true'], .layers-btn[aria-expanded='true'] { background: var(--action-tint); color: var(--action-text); }
+/* Menu bar: full width on top of the page; the app icon opens the menu. */
+.app-bar { position: relative; z-index: 20; flex: none; display: flex; align-items: center; gap: 8px; height: 56px; padding: 0 16px 0 12px; background: var(--panel); border-bottom: 1px solid var(--line); }
+.logo-btn { width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center; }
+.logo-btn[aria-expanded='true'], .layers-btn[aria-expanded='true'] { background: var(--action-tint); color: var(--action-text); }
+.wordmark { font-size: 19px; font-weight: 700; letter-spacing: -0.025em; }
+.mob-bar { position: absolute; top: 0; left: 0; right: 0; z-index: 35; height: var(--bar-bottom); padding-top: env(safe-area-inset-top); background: var(--sheet-bg); backdrop-filter: blur(20px) saturate(1.6); -webkit-backdrop-filter: blur(20px) saturate(1.6); box-shadow: var(--shadow-sm); border-bottom: none; }
+.mob-bar .logo-btn { width: 44px; height: 44px; }
+.mob-bar .wordmark { font-size: 18px; }
+.mob-bar .menu-item { min-height: 48px; font-size: 17px; }
 .pop { position: absolute; top: calc(100% + 8px); z-index: 60; padding: 8px; border-radius: 16px; background: var(--pop); border: 1px solid var(--line); box-shadow: var(--shadow); }
-.menu-pop { left: 0; width: 264px; font-size: 15px; font-weight: 500; letter-spacing: normal; }
+.menu-pop { top: calc(100% + 6px); left: 0; width: 264px; font-size: 15px; font-weight: 500; letter-spacing: normal; }
 .menu-list { display: flex; flex-direction: column; }
 .menu-brand { display: flex; align-items: center; gap: 8px; padding: 8px 10px 10px; font-size: 14px; font-weight: 700; letter-spacing: -0.01em; }
 .menu-item { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 40px; padding: 8px 10px; border-radius: 10px; text-align: left; }
@@ -519,8 +526,8 @@ input::placeholder { color: var(--muted); }
 .layers-btn::before { content: ''; position: absolute; inset: -6px; border-radius: 50%; } /* 48px tap target around the small circle */
 .desk-layers { position: absolute; top: 16px; right: 20px; z-index: 6; } /* centred over the 44px zoom column below */
 .layers-pop { right: 0; width: 320px; max-height: calc(100dvh - 100px); overflow: auto; padding: 14px; }
-.mob-layers { position: absolute; right: 18px; top: calc(var(--safe-top) + 206px); z-index: 28; } /* centred under the 48px compass */
-.mob-layers.high { top: calc(var(--safe-top) + 60px); }
+.mob-layers { position: absolute; right: 18px; top: calc(var(--bar-bottom) + 204px); z-index: 28; } /* centred under the 48px compass */
+.mob-layers.high { top: calc(var(--bar-bottom) + 66px); }
 .layers { display: flex; flex-direction: column; gap: 16px; }
 .pop-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .pop-title { font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
@@ -589,7 +596,7 @@ input::placeholder { color: var(--muted); }
 .empty p { margin: 0; max-width: 38ch; color: var(--muted); }
 @media (hover: hover) {
   .menu-item:hover, .settings-tab:not([aria-current='page']):hover, .choice-row:hover { background: var(--fill); }
-  .where-row .menu-btn:hover { background: var(--fill-2); }
+  .logo-btn:hover { background: var(--fill); }
   .layers-btn:hover { background: var(--raised); }
 }
 

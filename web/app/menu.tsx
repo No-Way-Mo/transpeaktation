@@ -88,20 +88,22 @@ function BottomSheet({ label, onClose, children }: { label: string; onClose(): v
 
 // ---------- ☰ main menu ----------
 
-/** ☰ button + the menu. Desktop: a popover under the button. Phone: a bottom sheet. */
-export function MainMenu({ n, sheet, className = '' }: { n: NavApi; sheet?: boolean; className?: string }) {
+/** The menu bar across the top of the page: the app icon is the menu button, the menu drops down under it. */
+export function AppBar({ n, className = '' }: { n: NavApi; className?: string }) {
   const wrap = useRef<HTMLDivElement>(null);
   const on = n.nav.panel === 'menu';
-  useOutside(wrap, n.close, on && !sheet);
-  const list = <MenuList n={n} />;
+  useOutside(wrap, n.close, on);
   return (
-    <div className="nav-wrap" ref={wrap}>
-      <button className={`menu-btn ${className}`} data-nav-home aria-label="Main menu" title="Menu" aria-expanded={on} aria-haspopup="dialog"
-        onClick={() => n.toggle('menu')}>
-        <Icon name="menu" size={20} />
-      </button>
-      {on && (sheet ? <BottomSheet label="Main menu" onClose={n.close}>{list}</BottomSheet> : <Popover label="Main menu" className="menu-pop">{list}</Popover>)}
-    </div>
+    <header className={`app-bar ${className}`}>
+      <div className="nav-wrap" ref={wrap}>
+        <button className="logo-btn" data-nav-home aria-label="Main menu" title="Menu" aria-expanded={on} aria-haspopup="dialog"
+          onClick={() => n.toggle('menu')}>
+          <Logo size={26} />
+        </button>
+        {on && <Popover label="Main menu" className="menu-pop"><MenuList n={n} /></Popover>}
+      </div>
+      <span className="wordmark">transPEAKtation</span>
+    </header>
   );
 }
 
