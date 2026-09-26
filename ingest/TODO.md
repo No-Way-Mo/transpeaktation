@@ -75,9 +75,15 @@ Check: `.venv/Scripts/python -m pull.check`
 - Mapbox residential lines were ~all "low" at 2 AM; confirm in daytime that they vary (real signal, not a default).
 - Measured by sampling every ~25 m along each OSM road and checking for a source's line within ~15–45 m, so parallel roads can be slightly overcounted.
 
-## Integration work (ingestion worker step, not started)
-- Link DataSF segments (`cnn`) to OSM roads by location (OSMnx nearest-edge match); redo on each refresh.
-- Normalize, dedupe, geocode, write to MongoDB / Tiger Data.
+## Ingestion worker (`python -m worker`, design: `DESIGN.md`)
+- ✅ OSM edges → Mongo `road_segments` (`segment_id` = `u-v-key`), linked to DataSF `cnn` (edge midpoint within 15 m) with that cnn's posted limit. Real SF graph: 27,632 edges, 99% get a cnn, 6,685 a posted limit.
+- ✅ `pull.poll` JSONL → Tiger `traffic_metrics` (matches that break a connected path are pruned) per AGENTS.md "Traffic data normalization" (10-min buckets; `tomtom`, `mapbox_route`, `mapbox_tiles`, `muni`), incremental per-source watermark in `data/worker/state.json`, only closed buckets written.
+- ✅ Mapbox corridor ETAs → Tiger `route_eta_metrics` (new table, `worker/schema.sql`); probe geometry → Mongo `route_plans`.
+- ⬜ Mapbox tile ratios calibrated per road class (uses the uncalibrated 0.1 / 0.4 / 0.65 / 0.85 until then).
+- ✅ Closures/incidents → Mongo `road_incidents` (`python -m worker run incidents`): DataSF street closures, street-use + excavation permits, Caltrans lane closures, CHP, police dispatch (traffic calls only). `is_closure` = closed to traffic. Validation → `data/quarantine/<source>.jsonl`; cross-source dedupe; optional geocoding (`GEOCODER=mapbox`). Ported from `ingestion-workers-v1` with fixes (Caltrans keyed per closure window, non-traffic police calls dropped, parking signs not stored). Real run: 17.6k docs, 0 rejected.
+- ⬜ 511 traffic events + WZDx → `road_incidents` (events already collected by `pull.poll`).
+- ⬜ Events + venues (blocked on PredictHQ vs Ticketmaster).
+- ⬜ Google forecasts, SUMO loader.
 
 ## Open decisions
 - PredictHQ vs Ticketmaster, depending on PredictHQ pricing.
