@@ -1,4 +1,4 @@
-// Place search + driving routes (via api/: Mapbox with traffic, OSRM/Nominatim fallback) + display formatting.
+// Place search + the trip plan (via api/: routes, stored events/closures/traffic, model) + display formatting.
 // Shared by the desktop and mobile layouts. Plain TS (no enums etc.) so `node --test` can run it directly.
 
 export type Place = { label: string; sub: string; lat: number; lon: number };
@@ -43,10 +43,40 @@ export async function searchPlaces(q: string, signal?: AbortSignal): Promise<Pla
   return (await api<{ places: Place[] }>(`/places?q=${encodeURIComponent(q)}`, signal)).places;
 }
 
-export async function fetchRoutes(from: Place, to: Place, when: When = { mode: 'now', at: 0 }, signal?: AbortSignal): Promise<Route[]> {
+/** One route's event-aware estimate from api/ /plan (seconds). */
+export type Prediction = {
+  dur: number; delay: number; events: string[];
+  breakdown: { events_sec: number; incidents_sec: number; traffic_sec: number };
+  incidents: { label: string; is_closure: boolean; source: string; at: string; until: string | null }[];
+  traffic: { delay_sec: number; slow_segments: number; coverage: number; as_of: string | null; sources: string[] };
+  model: string; blocked: boolean;
+};
+/** transPEAKtation's pick across the candidate routes, with the explanation and a better departure time if any. */
+export type TransPeak = {
+  best: number; preds: Prediction[]; tag: string; note: string;
+  advice: { depart_at: string; saves_sec: number; text: string } | null;
+};
+/** An event as the search suggestions show it (api/ /events): SF-local clock times [h, m]. */
+export type EventInfo = {
+  id: string; venue: string; keys: string[]; title: string; time: string; start: [number, number] | null;
+  lat: number; lon: number; crowd: { from: [number, number]; to: [number, number]; delay: number };
+  drop?: { label: string; lat: number; lon: number; why: string; badge: string }; source: 'mongo' | 'demo';
+};
+export type Plan = {
+  routes: Route[]; source: string; plan: TransPeak; events: EventInfo[];
+  data: { events: string; incidents: string; traffic: string; predictions: string }; // where each input came from
+};
+
+/** GET /plan: candidate routes + what ingest/ stored for their road segments + the model's pick. */
+export async function fetchPlan(from: Place, to: Place, when: When = { mode: 'now', at: 0 }, signal?: AbortSignal): Promise<Plan> {
   // Clamp to now: the api/ rejects past times, and a picker left open for a while drifts into the past.
   const t = when.mode === 'now' ? '' : `&${when.mode === 'depart' ? 'depart_at' : 'arrive_by'}=${encodeURIComponent(new Date(Math.max(when.at, Date.now())).toISOString())}`;
-  return (await api<{ routes: Route[] }>(`/routes?from=${from.lon},${from.lat}&to=${to.lon},${to.lat}${t}`, signal)).routes;
+  return api<Plan>(`/plan?from=${from.lon},${from.lat}&to=${to.lon},${to.lat}${t}`, signal);
+}
+
+/** GET /events: today's events for the search suggestions (demo events until ingest fills Mongo). */
+export async function fetchEvents(signal?: AbortSignal): Promise<EventInfo[]> {
+  return (await api<{ events: EventInfo[] }>('/events', signal)).events;
 }
 
 /** POST /voice: what the user said, parsed into a trip. Places are already resolved (place = null if not found). */

@@ -84,7 +84,9 @@ python3 -m venv .venv
 .venv/bin/uvicorn app.main:app --reload               # http://localhost:8000/docs
 ```
 
-- `GET /places?q=...` place search, `GET /routes?from=lon,lat&to=lon,lat` driving routes, `GET /health`.
+- `GET /plan?from=lon,lat&to=lon,lat[&depart_at|arrive_by=ISO]` is what the web app calls: candidate routes + the events, closures, live traffic and forecasts that `ingest/` / `ml/` stored for their road segments (Mongo / Tiger) + the event-aware model → pick, explanation, better departure time. Each request is logged to Mongo `trips` (area-level, no user identity). Without databases it still works, with demo events and no closures/traffic (`data` in the response says which inputs were live).
+- `GET /events` today's events for search suggestions, `GET /places?q=...` place search, `GET /routes?...` raw candidate routes, `GET /health` (includes Mongo / Tiger status).
+- Databases: `MONGODB_URI` / `TIGER_DATABASE_URL` in `api/.env`; locally, values in `ingest/.env` are used when `api/.env` still has the `<password>` placeholder.
 - Put `MAPBOX_TOKEN` in `api/.env` for live-traffic ETAs (`dur_typical`, `congestion`); locally the API also picks it up from `ingest/.env` if `api/.env` doesn't set it. Without it the API uses the free OSRM + Nominatim services and says `"source": "osrm"`.
 - Each route also carries `road_segment_ids`: the OSM road edges it drives, same IDs as our databases. The first start downloads the SF road graph (~15 s) into `api/data/`; `/health` shows `road_graph: loading` until then.
 

@@ -35,6 +35,19 @@ class Segments:
     def use(self, g) -> None:
         self.graph = ox.project_graph(g)
 
+    def lengths(self, segment_ids: list[str]) -> dict[str, float]:
+        """segment_id -> edge length in metres (unknown IDs are left out)."""
+        g, out = self.graph, {}
+        if g is None:
+            return out
+        for sid in segment_ids:
+            try:
+                u, v, k = (int(x) for x in sid.split("-"))
+                out[sid] = float(g.edges[u, v, k]["length"])
+            except (ValueError, KeyError):
+                continue
+        return out
+
     def match(self, coords: list[list[float]]) -> list[str] | None:
         """coords: [[lat, lon], ...] along the route. Returns edge IDs in driving order, or None if no graph."""
         g = self.graph

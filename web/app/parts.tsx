@@ -115,7 +115,7 @@ export function SearchResults({ p }: { p: Planner }) {
       </div>
     );
   }
-  const smart = smartSuggestions(q, results);
+  const smart = smartSuggestions(q, results, p.events);
   return (
     <>
       <div className="list">
@@ -225,7 +225,7 @@ export function PlaceRow({ place, onPick, plain }: { place: Place; onPick(): voi
  *  Directions button) goes inside the selected card. */
 export function RouteList({ p, action }: { p: Planner; action?: ReactNode }) {
   if (!p.tp || !p.routes.length) return null;
-  const { best, tag, note } = p.tp, as = action ? 'div' : 'button';
+  const { best, tag, note, advice } = p.tp, as = action ? 'div' : 'button';
   const fastest = p.routes[0].dur;
   return (
     <>
@@ -235,6 +235,7 @@ export function RouteList({ p, action }: { p: Planner; action?: ReactNode }) {
           note={note} selected={p.choice.tp} onPick={() => p.setChoice({ i: best, tp: true })} as={as}>
           {p.choice.tp && action}
         </RouteCard>
+        {advice && <button className="pill-btn advice" onClick={p.applyAdvice}>{`Leave at ${fmtWhen(Date.parse(advice.depart_at))}`}</button>}
       </section>
       <section className="route-sec" aria-label="Normal routes">
         <div className="label">Normal</div>

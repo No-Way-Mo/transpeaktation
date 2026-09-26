@@ -1,4 +1,5 @@
-"""transPEAKtation API: place search + traffic-aware routes with OSM road-segment IDs; voice → trip intent.
+"""transPEAKtation API: place search, traffic-aware routes with OSM road-segment IDs, the event-aware trip plan
+(routes + what ingest/ stored + the model), voice → trip intent.
 
     cd api && .venv/bin/uvicorn app.main:app --reload    # http://localhost:8000/docs
 """
@@ -15,7 +16,7 @@ from typing import Any
 
 import httpx
 from dotenv import load_dotenv
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 _API_DIR = Path(__file__).resolve().parent.parent
@@ -23,12 +24,14 @@ load_dotenv(_API_DIR / ".env")  # api/.env; real env vars win
 # Local dev: reuse keys already in ingest/.env (e.g. its MAPBOX_TOKEN) instead of copying them. Never overrides.
 load_dotenv(_API_DIR.parent / "ingest" / ".env")
 
-from . import providers, voice
+from . import model, providers, voice
 from .segments import Segments
+from .store import Store
 
 # Accept a little beyond the SF search box so Treasure Island / Daly City edges still route.
 SERVICE_AREA = (-122.62, 37.60, -122.28, 37.93)  # lon_min, lat_min, lon_max, lat_max
 segments = Segments()
+store = Store()
 state: dict[str, Any] = {}
 
 
@@ -133,6 +136,81 @@ async def routes(
     return _store(key, 60, {"routes": found, "source": source})
 
 
+def _utc(iso_z: str | None) -> datetime | None:
+    return datetime.strptime(iso_z, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc) if iso_z else None
+
+
+def _near_any(ev: dict, found: list[dict], radius_m: float = 700) -> bool:
+    return any(model.meters(c, (ev["lat"], ev["lon"])) <= radius_m for r in found for c in r["coords"][::3])
+
+
+@app.get("/plan")
+async def plan_trip(
+    background: BackgroundTasks,
+    from_: str = Query(alias="from", description="Start as 'lon,lat'"),
+    to: str = Query(description="Destination as 'lon,lat'"),
+    depart_at: str | None = Query(None, description="Leave at (ISO 8601 with offset); omit to leave now"),
+    arrive_by: str | None = Query(None, description="Arrive by (ISO 8601 with offset)"),
+):
+    """The trip planner: candidate routes (Mapbox/OSRM) -> events, closures, live traffic and forecasts for their
+    road segments (Mongo / Tiger, written by ingest/ and ml/) -> event-aware model -> pick, explanation and a
+    better departure time. Logs the request to Mongo `trips` (no user identity)."""
+    got = await routes(from_, to, depart_at, arrive_by)
+    found, now = got["routes"], datetime.now(timezone.utc)
+    dep, arr = _utc(when(depart_at)), _utc(when(arrive_by))
+    mode = "arrive" if arr else "depart" if dep else "now"
+    departs = [arr - timedelta(seconds=r["dur"]) if arr else max(dep or now, now) for r in found]
+    t0 = min(departs)
+    t1 = max(d + timedelta(seconds=r["dur"]) for d, r in zip(departs, found)) + timedelta(minutes=90)  # + advice range
+    sids = sorted({s for r in found for s in (r.get("road_segment_ids") or [])})
+
+    events, incidents, traffic, predictions, lengths = await asyncio.gather(
+        asyncio.to_thread(store.events_between, t0 - timedelta(hours=1), t1),
+        asyncio.to_thread(store.incidents_on, sids, t0, t1),
+        asyncio.to_thread(store.traffic_latest, sids),
+        asyncio.to_thread(store.predictions, sids, t0, t1),
+        asyncio.to_thread(segments.lengths, sids))
+    evs = [e for e in (model.from_mongo(x) for x in events or []) if e] if events is not None else \
+        model.demo_events(t0)
+    ctx = {"events": evs, "incidents": incidents or [], "traffic": traffic or [], "predictions": predictions or [],
+           "lengths": lengths}
+    result = model.plan(found, departs, mode, ctx, now=now)
+    best = result["preds"][result["best"]]
+
+    a, b = lonlat(from_), lonlat(to)
+    background.add_task(store.save_trip, {
+        "requested_at": now, "source": "web", "mode": mode, "depart_at": departs[result["best"]],
+        # ~100 m: enough for demand by area, without storing exact addresses
+        "origin": {"lon": round(a[0], 3), "lat": round(a[1], 3)}, "destination": {"lon": round(b[0], 3), "lat": round(b[1], 3)},
+        "provider": got["source"], "route_count": len(found), "picked": result["best"],
+        "predicted_sec": [round(p["dur"]) for p in result["preds"]], "baseline_sec": [round(r["dur"]) for r in found],
+        "event_ids": [h["id"] for h in best["event_hits"]], "blocked": best["blocked"], "model": best["model"]})
+    return {
+        "routes": found, "source": got["source"], "plan": result,
+        "events": [model.event_view(e) for e in evs if _near_any(e, found)],
+        "data": {"events": "mongo" if events is not None else "demo",
+                 "incidents": "mongo" if incidents is not None else "unavailable",
+                 "traffic": "tiger" if traffic is not None else "unavailable",
+                 "predictions": "tiger" if predictions else "none (event-impact heuristic)"},
+    }
+
+
+@app.get("/events")
+async def events_today(date: str | None = Query(None, description="YYYY-MM-DD, San Francisco local; default today")):
+    """Events for the search suggestions (drop-offs, "leave at"). Demo events until ingest fills Mongo `events`."""
+    try:
+        day = datetime.fromisoformat(date).replace(tzinfo=model.SF_TZ) if date else datetime.now(model.SF_TZ)
+    except ValueError:
+        raise HTTPException(400, "expected YYYY-MM-DD")
+    start = day.replace(hour=0, minute=0, second=0, microsecond=0)
+    key = ("events", start.date().isoformat())
+    if (hit := _cached(key)) is not None:
+        return hit
+    found = await asyncio.to_thread(store.events_between, start, start + timedelta(days=1))
+    evs = [e for e in (model.from_mongo(x) for x in found or []) if e] if found is not None else model.demo_events(start)
+    return _store(key, 300, {"events": [model.event_view(e) for e in evs], "source": "mongo" if found is not None else "demo"})
+
+
 async def _resolve(query: str | None) -> dict | None:
     """Spoken place name -> {query, place}. place is the top search hit, or None if nothing matched."""
     if not query:
@@ -169,5 +247,5 @@ def health():
         mapbox = "no token (using OSRM/Nominatim)"
     else:
         mapbox = "ready" if providers.mapbox_available() else "backing off after an error"
-    return {"ok": True, "mapbox": mapbox, "road_graph": segments.status,
+    return {"ok": True, "mapbox": mapbox, "road_graph": segments.status, **store.status(),
             "voice": "ready" if voice.available() else "no ELEVENLABS_API_KEY"}
