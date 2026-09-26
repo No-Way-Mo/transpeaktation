@@ -1,9 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { smartSuggestions } from './suggest.ts';
-import type { EventInfo } from './route.ts';
+import { ptTime, type EventInfo } from './route.ts';
 
-const at = (h: number, m = 0) => { const d = new Date(2026, 8, 26); d.setHours(h, m, 0, 0); return d; };
+process.env.TZ = 'America/New_York'; // event clock times are SF's, whatever the device's zone
+
+const at = (h: number, m = 0) => new Date(ptTime(2026, 9, 26, h, m));
 const place = { label: 'Moscone Center', sub: 'SoMa', lat: 37.784, lon: -122.401 };
 // Shaped like api/ /events (its demo events).
 const EVENTS: EventInfo[] = [

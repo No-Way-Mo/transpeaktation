@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { fetchEvents, fetchPlan, fmtWhen, mins, ORIGIN, searchPlaces, spokenTime, voiceNote,
+import { fetchEvents, fetchPlan, fmtWhen, mins, ORIGIN, REPLAY, searchPlaces, spokenTime, voiceNote,
   type EventInfo, type Plan, type Place, type Route, type TransPeak, type VoiceIntent, type When } from './route.ts';
 
 type Field = 'from' | 'to';
@@ -138,7 +138,7 @@ export function useRoutePlanner() {
 
   // Departure per estimate: now, the chosen time, or (arrive-by) the chosen time minus that estimate.
   const now = Date.now();
-  const leaveFor = (dur: number) => when.mode === 'arrive' ? when.at - dur * 1000 : when.mode === 'depart' ? Math.max(when.at, now) : now;
+  const leaveFor = (dur: number) => when.mode === 'arrive' ? when.at - dur * 1000 : when.mode === 'depart' ? (REPLAY ? when.at : Math.max(when.at, now)) : now;
   const card = (i: number, isTp: boolean): Card => {
     const dur = isTp && tp ? tp.preds[i].dur : routes[i].dur, leave = leaveFor(dur);
     return { i, tp: isTp, dur, leave, arrive: leave + dur * 1000 };

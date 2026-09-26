@@ -10,17 +10,32 @@ from __future__ import annotations
 import os
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from dotenv import dotenv_values
+
+from .model import LIVE_WINDOW, SF_TZ
 
 _INGEST_ENV = Path(__file__).resolve().parent.parent.parent / "ingest" / ".env"
 PLACEHOLDERS = ("<password>", "<db_password>")
 BACKOFF_S = 60          # after a failure, skip that database for a minute instead of stalling every request
 TRAFFIC_MAX_AGE = timedelta(minutes=40)
 TRAFFIC_SOURCES = ("tomtom", "mapbox_route", "mapbox_tiles")  # best first; muni runs low (bus stops), not used
+BUCKET = timedelta(minutes=10)       # ingest's traffic_metrics time step (AGENTS.md)
+TYPICAL_WEEKS = 4
+
+
+def typical_buckets(t: datetime) -> list[datetime]:
+    """t's 10-min bucket start on the same SF weekday and wall-clock time, 1..TYPICAL_WEEKS weeks earlier.
+    Stepped in SF local time so a DST change in between doesn't shift the hour."""
+    local = t.astimezone(SF_TZ)
+    out = []
+    for k in range(1, TYPICAL_WEEKS + 1):
+        u = (local - timedelta(weeks=k)).astimezone(timezone.utc)
+        out.append(u - timedelta(minutes=u.minute % 10, seconds=u.second, microseconds=u.microsecond))
+    return out
 
 
 def _url(name: str) -> str | None:
@@ -148,6 +163,34 @@ class Store:
             (segment_ids, list(TRAFFIC_SOURCES), TRAFFIC_MAX_AGE))
         cols = ("road_segment_id", "source", "time", "speed_mph", "free_flow_speed_mph", "congestion_ratio")
         return None if rows is None else [dict(zip(cols, r)) for r in rows]
+
+    def traffic_at(self, segment_ids: list[str], t: datetime, now: datetime) -> tuple[list[dict] | None, str]:
+        """Traffic for a trip at `t`, and what kind it is:
+        live      t within LIVE_WINDOW of now: the newest readings (traffic_latest)
+        observed  t in the past: the newest readings at or before t (TRAFFIC_MAX_AGE), i.e. what we saw then
+        typical   t in the future: the same SF weekday + 10-min bucket averaged over the last TYPICAL_WEEKS
+                  weeks; stand-in until ml/ writes prediction_metrics
+        """
+        if abs(t - now) <= LIVE_WINDOW:
+            return self.traffic_latest(segment_ids), "live"
+        if not segment_ids:
+            return [], "observed" if t < now else "typical"
+        cols = ("road_segment_id", "source", "time", "speed_mph", "free_flow_speed_mph", "congestion_ratio")
+        if t < now:
+            rows = self._tiger_call(
+                "SELECT DISTINCT ON (road_segment_id, source) road_segment_id, source, time, speed_mph, "
+                "free_flow_speed_mph, congestion_ratio FROM traffic_metrics "
+                "WHERE road_segment_id = ANY(%s) AND source = ANY(%s) AND time > %s AND time <= %s "
+                "ORDER BY road_segment_id, source, time DESC",
+                (segment_ids, list(TRAFFIC_SOURCES), t - TRAFFIC_MAX_AGE, t))
+            return (None if rows is None else [dict(zip(cols, r)) for r in rows]), "observed"
+        rows = self._tiger_call(
+            "SELECT road_segment_id, source, max(time), avg(speed_mph), avg(free_flow_speed_mph), "
+            "avg(congestion_ratio) FROM traffic_metrics "
+            "WHERE road_segment_id = ANY(%s) AND source = ANY(%s) AND time = ANY(%s) "
+            "GROUP BY road_segment_id, source",
+            (segment_ids, list(TRAFFIC_SOURCES), typical_buckets(t)))
+        return (None if rows is None else [dict(zip(cols, r)) for r in rows]), "typical"
 
     def predictions(self, segment_ids: list[str], t0: datetime, t1: datetime) -> list[dict] | None:
         """ml/'s forecasts (Tiger prediction_metrics; `time` = the moment predicted for) around the trip."""

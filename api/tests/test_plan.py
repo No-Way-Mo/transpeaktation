@@ -5,7 +5,7 @@ from unittest import mock
 
 from fastapi.testclient import TestClient
 
-from app import main, model, providers
+from app import main, model, providers, store as store_mod
 
 SF = model.SF_TZ
 DAY = datetime(2026, 9, 26, tzinfo=SF)
@@ -152,6 +152,30 @@ class Events(unittest.TestCase):
         self.assertIsNone(model.from_mongo({"_id": "x", "title": "no place", "start_time": at(1)}))
 
 
+class TrafficByTime(unittest.TestCase):
+    def test_typical_buckets_step_back_whole_weeks_in_sf_time(self):
+        t = datetime(2026, 11, 5, 18, 7, tzinfo=SF)  # PST; 1 and 2 weeks back straddle the Nov 1 DST change
+        b = store_mod.typical_buckets(t)
+        self.assertEqual(len(b), store_mod.TYPICAL_WEEKS)
+        self.assertEqual([x.astimezone(SF).strftime("%m-%d %a %H:%M") for x in b[:2]],
+                         ["10-29 Thu 18:00", "10-22 Thu 18:00"])
+        self.assertTrue(all(x.tzinfo == timezone.utc for x in b))
+
+    def test_live_observed_or_typical_by_trip_time(self):
+        s, calls = store_mod.Store(), []
+        s._tiger_call = lambda sql, params: calls.append((sql, params)) or []
+        now = datetime(2026, 9, 26, 20, tzinfo=timezone.utc)
+        self.assertEqual(s.traffic_at(["1-2-0"], now + timedelta(minutes=20), now)[1], "live")
+        self.assertIn("now() -", calls[-1][0])
+        then = now - timedelta(days=2)
+        self.assertEqual(s.traffic_at(["1-2-0"], then, now), ([], "observed"))
+        self.assertEqual(calls[-1][1][2:], (then - store_mod.TRAFFIC_MAX_AGE, then))  # what we saw up to then
+        self.assertEqual(s.traffic_at(["1-2-0"], now + timedelta(days=3), now), ([], "typical"))
+        self.assertIn("avg(", calls[-1][0])
+        s._tiger_call = lambda sql, params: None  # Tiger down: None, the planner reports "unavailable"
+        self.assertEqual(s.traffic_at(["1-2-0"], then, now), (None, "observed"))
+
+
 class FakeStore:
     def __init__(self, events=None, incidents=None, traffic=None):
         self._events, self._incidents, self._traffic = events, incidents, traffic
@@ -163,8 +187,9 @@ class FakeStore:
     def incidents_on(self, sids, t0, t1):
         return self._incidents
 
-    def traffic_latest(self, sids):
-        return self._traffic
+    def traffic_at(self, sids, t, now):
+        self.traffic_asked = (t, now)
+        return self._traffic, "observed" if t < now - model.LIVE_WINDOW else "live"
 
     def predictions(self, sids, t0, t1):
         return None
@@ -189,12 +214,25 @@ class PlanEndpoint(unittest.TestCase):
         self.client.__exit__(None, None, None)
         self.load.stop()
 
-    def plan(self, store, depart):
-        fake = mock.AsyncMock(return_value=([dict(PAST), dict(AROUND)], "mapbox"))
-        with mock.patch.object(providers, "find_routes", fake), mock.patch.object(main, "store", store), \
+    def plan(self, store, depart, **extra):
+        self.find = mock.AsyncMock(return_value=([dict(PAST), dict(AROUND)], "mapbox"))
+        with mock.patch.object(providers, "find_routes", self.find), mock.patch.object(main, "store", store), \
                 mock.patch.object(main.segments, "match", return_value=PAST["road_segment_ids"]):
             return self.client.get("/plan", params={"from": "-122.4075,37.788", "to": "-122.3893,37.7786",
-                                                    "depart_at": depart.isoformat()})
+                                                    "depart_at": depart.isoformat(), **extra})
+
+    def test_replay_plans_a_past_trip_with_that_days_data(self):
+        depart = (datetime.now(SF) - timedelta(days=3)).replace(hour=18, minute=30, second=0, microsecond=0)
+        self.assertEqual(self.plan(FakeStore(), depart).status_code, 400)  # the past needs replay
+        store = FakeStore(traffic=[])
+        body = self.plan(store, depart, replay="true").json()
+        self.assertEqual((body["data"]["traffic"], body["data"]["replay"]), ("tiger:observed", True))
+        self.assertEqual(datetime.fromisoformat(body["data"]["at"]), depart)
+        self.assertEqual(store.traffic_asked[0], depart)  # Tiger is asked about that day, not now
+        self.assertEqual(store.trips, [])                 # a simulation isn't logged as demand
+        mapbox_at = datetime.strptime(self.find.call_args.args[3], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+        self.assertEqual(mapbox_at.astimezone(SF).strftime("%a %H:%M"), depart.strftime("%a %H:%M"))  # same slot,
+        self.assertGreater(mapbox_at, datetime.now(timezone.utc))                                     # next week
 
     def test_demo_events_without_a_database_and_trip_is_logged(self):
         store = FakeStore()

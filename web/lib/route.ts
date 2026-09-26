@@ -19,6 +19,30 @@ export type Units = 'mi' | 'km';
 /** When to travel: now (live traffic), leave at `at`, or arrive by `at` (epoch ms). */
 export type When = { mode: 'now' | 'depart' | 'arrive'; at: number };
 
+/** The app is SF-only, so every clock time shown or entered is Pacific time, whatever zone the device is in. */
+export const TZ = 'America/Los_Angeles';
+const PT = new Intl.DateTimeFormat('en-US', { timeZone: TZ, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric' });
+/** SF wall clock at `ms`: [year, month 1-12, day, hour, minute]. */
+export function ptClock(ms: number): number[] {
+  const f = Object.fromEntries(PT.formatToParts(ms).map(p => [p.type, +p.value]));
+  return [f.year, f.month, f.day, f.hour, f.minute];
+}
+/** Epoch ms of an SF wall-clock time. Days past the month end roll over (Date.UTC does); DST-correct. */
+export function ptTime(y: number, mo: number, d: number, h: number, mi: number): number {
+  const wall = Date.UTC(y, mo - 1, d, h, mi);
+  const offset = (ms: number) => { const [Y, M, D, H, Mi] = ptClock(ms); return Date.UTC(Y, M - 1, D, H, Mi) - Math.floor(ms / 60000) * 60000; };
+  return wall - offset(wall - offset(wall)); // 2nd pass: the offset at the answer, not at the guess
+}
+/** datetime-local value ("2026-09-26T18:30") <-> epoch ms, both in SF time. */
+export const ptInput = (ms: number) => {
+  const [y, mo, d, h, mi] = ptClock(ms), p = (n: number) => String(n).padStart(2, '0');
+  return `${y}-${p(mo)}-${p(d)}T${p(h)}:${p(mi)}`;
+};
+export const fromPtInput = (v: string): number | null => {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(v);
+  return m ? ptTime(+m[1], +m[2], +m[3], +m[4], +m[5]) : null;
+};
+
 // ponytail: "Current location" is fixed to Union Square; swap in navigator.geolocation when we need real GPS.
 export const ORIGIN: Place = { label: 'Current location', sub: 'Union Square', lat: 37.788, lon: -122.4075 };
 export const RECENT: Place[] = [
@@ -64,14 +88,24 @@ export type EventInfo = {
 };
 export type Plan = {
   routes: Route[]; source: string; plan: TransPeak; events: EventInfo[];
-  data: { events: string; incidents: string; traffic: string; predictions: string }; // where each input came from
+  // Where each input came from, for the moment `at` (traffic: tiger:live | tiger:observed | tiger:typical | unavailable)
+  data: { at: string; replay: boolean; events: string; incidents: string; traffic: string; predictions: string };
 };
 
-/** GET /plan: candidate routes + what ingest/ stored for their road segments + the model's pick. */
+/** Demo mode (NEXT_PUBLIC_REPLAY=1): past times are allowed and replay the data stored for then. */
+export const REPLAY = process.env.NEXT_PUBLIC_REPLAY === '1';
+
+/** /plan's query. Past times are clamped to now (the api rejects them, and a picker left open drifts into the
+ *  past), except in replay mode, where a past time asks the api to simulate that moment. */
+export function planPath(from: Place, to: Place, when: When, now = Date.now(), replay = REPLAY): string {
+  const past = when.mode !== 'now' && when.at < now && replay;
+  const t = when.mode === 'now' ? '' : `&${when.mode === 'depart' ? 'depart_at' : 'arrive_by'}=${encodeURIComponent(new Date(past ? when.at : Math.max(when.at, now)).toISOString())}`;
+  return `/plan?from=${from.lon},${from.lat}&to=${to.lon},${to.lat}${t}${past ? '&replay=true' : ''}`;
+}
+
+/** GET /plan: candidate routes + what ingest/ stored for their road segments at that time + the model's pick. */
 export async function fetchPlan(from: Place, to: Place, when: When = { mode: 'now', at: 0 }, signal?: AbortSignal): Promise<Plan> {
-  // Clamp to now: the api/ rejects past times, and a picker left open for a while drifts into the past.
-  const t = when.mode === 'now' ? '' : `&${when.mode === 'depart' ? 'depart_at' : 'arrive_by'}=${encodeURIComponent(new Date(Math.max(when.at, Date.now())).toISOString())}`;
-  return api<Plan>(`/plan?from=${from.lon},${from.lat}&to=${to.lon},${to.lat}${t}`, signal);
+  return api<Plan>(planPath(from, to, when), signal);
 }
 
 /** GET /events: today's events for the search suggestions (demo events until ingest fills Mongo). */
@@ -97,16 +131,16 @@ export async function sendVoice(audio: Blob, signal?: AbortSignal): Promise<Voic
   return res.json();
 }
 
-/** Spoken time -> the next time it happens (epoch ms). No am/pm: whichever of the two comes next. */
+/** Spoken time (SF clock) -> the next time it happens (epoch ms). No am/pm: whichever of the two comes next. */
 export function spokenTime(t: string, now = Date.now()): number | null {
   const m = /^(\d{1,2})(?::(\d{2}))?\s*(?:([ap])\.?\s?m\.?)?$/i.exec(t.trim());
   if (!m) return null;
   if (+m[1] > 12 || +(m[2] ?? 0) > 59) return null;
   const h = +m[1] % 12, min = +(m[2] ?? 0), ap = m[3]?.toLowerCase();
+  const [y, mo, d] = ptClock(now);
   const at = (hour: number) => {
-    const d = new Date(now); d.setHours(hour, min, 0, 0);
-    if (d.getTime() <= now) d.setDate(d.getDate() + 1);
-    return d.getTime();
+    const t = ptTime(y, mo, d, hour, min);
+    return t > now ? t : ptTime(y, mo, d + 1, hour, min);
   };
   return ap ? at(h + (ap === 'p' ? 12 : 0)) : Math.min(at(h), at(h + 12));
 }
@@ -125,13 +159,13 @@ export function fmtDist(m: number, units: Units = 'mi'): string {
 }
 
 export const fmtTime = (sec: number, now = Date.now()) =>
-  new Date(now + sec * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  new Date(now + sec * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', timeZone: TZ });
 
-/** "7:15 PM" today, "Tomorrow 7:15 PM", otherwise "Tue 7:15 PM". */
+/** "7:15 PM" today, "Tomorrow 7:15 PM", otherwise "Tue 7:15 PM" (SF time). */
 export function fmtWhen(ms: number, now = Date.now()): string {
-  const d = new Date(ms), t = fmtTime(0, ms);
-  const days = Math.round((new Date(d).setHours(0, 0, 0, 0) - new Date(now).setHours(0, 0, 0, 0)) / 864e5);
-  return days === 0 ? t : days === 1 ? `Tomorrow ${t}` : `${d.toLocaleDateString([], { weekday: 'short' })} ${t}`;
+  const t = fmtTime(0, ms), day = (x: number) => { const [y, mo, d] = ptClock(x); return Date.UTC(y, mo - 1, d); };
+  const days = Math.round((day(ms) - day(now)) / 864e5);
+  return days === 0 ? t : days === 1 ? `Tomorrow ${t}` : `${new Date(ms).toLocaleDateString([], { weekday: 'short', timeZone: TZ })} ${t}`;
 }
 
 /** Equirectangular distance in metres; plenty for city-scale "is this near that". */

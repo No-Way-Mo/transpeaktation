@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { fmtDist, fmtWhen, labelPoint, mins, routeTag, spokenTime, stepIcon, stepText, trafficRuns, voiceNote, type LatLng, type Route, type Step, type VoiceIntent } from './route.ts';
+
+process.env.TZ = 'America/New_York'; // a device outside SF: every clock time must still be Pacific
+import { fmtDist, fmtWhen, fromPtInput, labelPoint, mins, planPath, ptInput, ptTime, routeTag, spokenTime, stepIcon, stepText, trafficRuns, voiceNote, type LatLng, type Route, type Step, type VoiceIntent } from './route.ts';
 
 const step = (type: string, modifier?: string, name = 'Market St'): Step =>
   ({ distance: 0, duration: 0, name, maneuver: { type, modifier, location: [0, 0] } });
@@ -33,10 +35,20 @@ test('turn-by-turn text', () => {
 });
 
 test('departure times', () => {
-  const now = new Date(2026, 8, 26, 15, 0).getTime();
-  assert.match(fmtWhen(new Date(2026, 8, 26, 19, 15).getTime(), now), /^7:15\sPM$/);
-  assert.match(fmtWhen(new Date(2026, 8, 27, 8, 0).getTime(), now), /^Tomorrow 8:00\sAM$/);
-  assert.match(fmtWhen(new Date(2026, 8, 29, 8, 0).getTime(), now), /^Tue 8:00\sAM$/);
+  const now = ptTime(2026, 9, 26, 15, 0);
+  assert.match(fmtWhen(ptTime(2026, 9, 26, 19, 15), now), /^7:15\sPM$/);
+  assert.match(fmtWhen(ptTime(2026, 9, 26, 22, 30), now), /^10:30\sPM$/);        // 1:30 AM in New York: still "today"
+  assert.match(fmtWhen(ptTime(2026, 9, 27, 8, 0), now), /^Tomorrow 8:00\sAM$/);
+  assert.match(fmtWhen(ptTime(2026, 9, 29, 8, 0), now), /^Tue 8:00\sAM$/);
+});
+
+test('picker times are San Francisco time, across DST', () => {
+  assert.equal(fromPtInput('2026-09-19T18:30'), Date.parse('2026-09-20T01:30:00Z')); // PDT, UTC-7
+  assert.equal(fromPtInput('2026-12-01T08:00'), Date.parse('2026-12-01T16:00:00Z')); // PST, UTC-8
+  assert.equal(fromPtInput('2026-11-01T12:00'), Date.parse('2026-11-01T20:00:00Z')); // DST ended that morning
+  assert.equal(ptInput(Date.parse('2026-09-20T01:30:00Z')), '2026-09-19T18:30');
+  assert.equal(ptInput(fromPtInput('2027-03-14T09:05')!), '2027-03-14T09:05');       // DST starts that morning
+  assert.equal(fromPtInput(''), null);
 });
 
 test('map labels sit where routes split, not on the shared stretch', () => {
@@ -64,7 +76,7 @@ test('traffic: slow stretches merge per level; free-flowing and unknown ones are
 });
 
 test('spoken times pick the next occurrence', () => {
-  const now = new Date(2026, 8, 26, 15, 0).getTime(), at = (d: number, h: number, m = 0) => new Date(2026, 8, d, h, m).getTime();
+  const now = ptTime(2026, 9, 26, 15, 0), at = (d: number, h: number, m = 0) => ptTime(2026, 9, d, h, m);
   assert.equal(spokenTime('6:30', now), at(26, 18, 30));      // no am/pm at 3 PM -> this evening
   assert.equal(spokenTime('7:00 PM', now), at(26, 19));
   assert.equal(spokenTime('9 a.m.', now), at(27, 9));          // already past today -> tomorrow
@@ -81,4 +93,13 @@ test('voice note never implies voice booked anything', () => {
     'You said "Book my ride to Chase Center". Pick a route, then confirm to book.');
   assert.equal(voiceNote(v({ destination: { query: 'Narnia', place: null } })), 'Couldn\'t find "Narnia". Try another name.');
   assert.match(voiceNote(v({ action: 'unknown' })), /Try "Take me to/);
+});
+
+test('plan query: past times clamp to now unless replaying', () => {
+  const a = { label: 'A', sub: '', lat: 37.788, lon: -122.4075 }, b = { label: 'B', sub: '', lat: 37.7786, lon: -122.3893 };
+  const now = Date.parse('2026-09-26T20:00:00Z'), past = Date.parse('2026-09-20T01:30:00Z');
+  assert.equal(planPath(a, b, { mode: 'now', at: 0 }, now), '/plan?from=-122.4075,37.788&to=-122.3893,37.7786');
+  assert.match(planPath(a, b, { mode: 'depart', at: past }, now, false), /depart_at=2026-09-26T20%3A00%3A00.000Z$/);
+  assert.match(planPath(a, b, { mode: 'arrive', at: past }, now, true), /arrive_by=2026-09-20T01%3A30%3A00.000Z&replay=true$/);
+  assert.doesNotMatch(planPath(a, b, { mode: 'depart', at: now + 864e5 }, now, true), /replay/); // future: plain plan
 });

@@ -1,14 +1,14 @@
 // "transPEAKtation suggestions": event-aware drop-off points and departure times shown while searching.
 // Events come from api/ /events (Mongo `events` written by ingest/, demo events until then); the route
 // estimates themselves come from api/ /plan, which runs the model server-side.
-import type { EventInfo, Place } from './route.ts';
+import { ptClock, ptTime, TZ, type EventInfo, type Place } from './route.ts';
 
 export type Suggestion = {
   glyph: 'pin' | 'clock' | 'arrow'; title: string; sub: string; badge: string;
   dest: Place; note: string; leaveMin?: number; clear?: boolean;
 };
 
-const clock = (d: Date) => d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+const clock = (d: Date) => d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', timeZone: TZ });
 
 /** Suggestions for the search text: event venues get a better drop-off (+ a "leave at" time when the event
  *  is later today); anything else gets a plain "leave now" for the top place result. */
@@ -36,8 +36,8 @@ export function smartSuggestions(q: string, results: Place[], events: EventInfo[
     });
   }
   if (ev.start) {
-    const start = new Date(now); start.setHours(ev.start[0], ev.start[1], 0, 0);
-    const leave = new Date(start.getTime() - 60 * 60000); // ~20 min drive, arrive ~40 min early
+    const [y, mo, d] = ptClock(now.getTime()), start = ptTime(y, mo, d, ev.start[0], ev.start[1]); // SF clock, like the api's
+    const leave = new Date(start - 60 * 60000); // ~20 min drive, arrive ~40 min early
     const leaveMin = Math.round((leave.getTime() - now.getTime()) / 60000);
     if (leaveMin >= 0 && leaveMin <= 6 * 60) {
       out.push({ glyph: 'clock', title: `Leave for ${ev.venue} at ${clock(leave)}`, sub: `Arrive before traffic peaks for ${ev.title} (${ev.time}).`,

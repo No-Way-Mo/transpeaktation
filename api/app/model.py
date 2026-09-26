@@ -270,7 +270,8 @@ def plan(routes: list[dict], departs: list[datetime], mode: str, ctx: dict, *, n
     if advice:
         note += f" {advice['text']}"
     if p["traffic"]["coverage"] and p["traffic"]["slow_segments"]:
-        note += f" Live traffic: {p['traffic']['slow_segments']} slow stretch{'es' if p['traffic']['slow_segments'] > 1 else ''} on this route."
+        label = {"observed": "Traffic then", "typical": "Usual traffic then"}.get(ctx.get("traffic_kind"), "Live traffic")
+        note += f" {label}: {p['traffic']['slow_segments']} slow stretch{'es' if p['traffic']['slow_segments'] > 1 else ''} on this route."
     return {"best": best, "preds": preds, "tag": tag, "note": note, "advice": advice}
 
 

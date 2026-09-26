@@ -78,8 +78,12 @@ def lonlat(raw: str) -> tuple[float, float]:
     return lon, lat
 
 
-def when(raw: str | None) -> str | None:
-    """ISO time with offset → Mapbox's UTC form. Must be from now to 7 days out (a few minutes of slack)."""
+REPLAY_MAX = timedelta(days=365)
+
+
+def when(raw: str | None, replay: bool = False) -> datetime | None:
+    """ISO time with offset -> UTC. Now to 7 days out (a few minutes of slack; earlier = now).
+    replay (a simulated past trip) also allows up to a year back, and keeps the past time."""
     if raw is None:
         return None
     try:
@@ -89,9 +93,21 @@ def when(raw: str | None) -> str | None:
     if t.tzinfo is None:
         raise HTTPException(400, "time needs a UTC offset")
     now = datetime.now(timezone.utc)
-    if not now - timedelta(minutes=5) <= t <= now + timedelta(days=7):
-        raise HTTPException(400, "time must be between now and 7 days from now")
-    return max(t, now).astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    if not now - (REPLAY_MAX if replay else timedelta(minutes=5)) <= t <= now + timedelta(days=7):
+        raise HTTPException(400, "time must be between now and 7 days from now"
+                                 + (" (or up to a year back)" if replay else ", or pass replay=true for a past trip"))
+    t = t.astimezone(timezone.utc)
+    return t if replay else max(t, now)
+
+
+def mapbox_time(t: datetime | None, now: datetime) -> str | None:
+    """Mapbox's UTC form. Mapbox only predicts ahead, so a past time asks for the same SF weekday and clock time
+    in the coming week: its typical traffic repeats weekly. (The observed traffic of that day comes from Tiger.)"""
+    if t is None:
+        return None
+    while t < now:
+        t = (t.astimezone(model.SF_TZ) + timedelta(weeks=1)).astimezone(timezone.utc)
+    return t.strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 @app.get("/places")
@@ -119,7 +135,11 @@ async def routes(
     a, b = lonlat(from_), lonlat(to)
     if depart_at and arrive_by:
         raise HTTPException(400, "pass depart_at or arrive_by, not both")
-    dep, arr = when(depart_at), when(arrive_by)
+    now = datetime.now(timezone.utc)
+    return await _routes(a, b, mapbox_time(when(depart_at), now), mapbox_time(when(arrive_by), now))
+
+
+async def _routes(a: tuple[float, float], b: tuple[float, float], dep: str | None, arr: str | None) -> dict:
     # ~10 m, to the minute: nearby taps / re-renders share a cached answer
     key = ("routes", *(round(x, 4) for x in (*a, *b)), dep and dep[:16], arr and arr[:16])
     if (hit := _cached(key)) is not None:
@@ -136,10 +156,6 @@ async def routes(
     return _store(key, 60, {"routes": found, "source": source})
 
 
-def _utc(iso_z: str | None) -> datetime | None:
-    return datetime.strptime(iso_z, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc) if iso_z else None
-
-
 def _near_any(ev: dict, found: list[dict], radius_m: float = 700) -> bool:
     return any(model.meters(c, (ev["lat"], ev["lon"])) <= radius_m for r in found for c in r["coords"][::3])
 
@@ -151,46 +167,56 @@ async def plan_trip(
     to: str = Query(description="Destination as 'lon,lat'"),
     depart_at: str | None = Query(None, description="Leave at (ISO 8601 with offset); omit to leave now"),
     arrive_by: str | None = Query(None, description="Arrive by (ISO 8601 with offset)"),
+    replay: bool = Query(False, description="Simulate a trip at a past time with the data stored for then (demo); "
+                                            "not logged as a trip"),
 ):
-    """The trip planner: candidate routes (Mapbox/OSRM) -> events, closures, live traffic and forecasts for their
-    road segments (Mongo / Tiger, written by ingest/ and ml/) -> event-aware model -> pick, explanation and a
-    better departure time. Logs the request to Mongo `trips` (no user identity)."""
-    got = await routes(from_, to, depart_at, arrive_by)
-    found, now = got["routes"], datetime.now(timezone.utc)
-    dep, arr = _utc(when(depart_at)), _utc(when(arrive_by))
+    """The trip planner: candidate routes (Mapbox/OSRM) -> events, closures, traffic and forecasts for their road
+    segments at the trip's time (Mongo / Tiger, written by ingest/ and ml/) -> event-aware model -> pick,
+    explanation and a better departure time. Logs the request to Mongo `trips` (no user identity).
+    Traffic by trip time: live (now), observed (past, replay), typical (future); see Store.traffic_at."""
+    a, b = lonlat(from_), lonlat(to)
+    if depart_at and arrive_by:
+        raise HTTPException(400, "pass depart_at or arrive_by, not both")
+    real_now = datetime.now(timezone.utc)
+    dep, arr = when(depart_at, replay), when(arrive_by, replay)
+    got = await _routes(a, b, mapbox_time(dep, real_now), mapbox_time(arr, real_now))
+    found = got["routes"]
     mode = "arrive" if arr else "depart" if dep else "now"
-    departs = [arr - timedelta(seconds=r["dur"]) if arr else max(dep or now, now) for r in found]
+    departs = [arr - timedelta(seconds=r["dur"]) if arr else dep or real_now for r in found]
     t0 = min(departs)
+    # A replayed trip runs as if it were then: the model treats that day's observed traffic as live.
+    now = min(t0, real_now) if replay else real_now
     t1 = max(d + timedelta(seconds=r["dur"]) for d, r in zip(departs, found)) + timedelta(minutes=90)  # + advice range
     sids = sorted({s for r in found for s in (r.get("road_segment_ids") or [])})
 
-    events, incidents, traffic, predictions, lengths = await asyncio.gather(
+    events, incidents, (traffic, traffic_kind), predictions, lengths = await asyncio.gather(
         asyncio.to_thread(store.events_between, t0 - timedelta(hours=1), t1),
         asyncio.to_thread(store.incidents_on, sids, t0, t1),
-        asyncio.to_thread(store.traffic_latest, sids),
+        asyncio.to_thread(store.traffic_at, sids, t0, real_now),
         asyncio.to_thread(store.predictions, sids, t0, t1),
         asyncio.to_thread(segments.lengths, sids))
     evs = [e for e in (model.from_mongo(x) for x in events or []) if e] if events is not None else \
         model.demo_events(t0)
-    ctx = {"events": evs, "incidents": incidents or [], "traffic": traffic or [], "predictions": predictions or [],
-           "lengths": lengths}
+    ctx = {"events": evs, "incidents": incidents or [], "traffic": traffic or [], "traffic_kind": traffic_kind,
+           "predictions": predictions or [], "lengths": lengths}
     result = model.plan(found, departs, mode, ctx, now=now)
     best = result["preds"][result["best"]]
 
-    a, b = lonlat(from_), lonlat(to)
-    background.add_task(store.save_trip, {
-        "requested_at": now, "source": "web", "mode": mode, "depart_at": departs[result["best"]],
-        # ~100 m: enough for demand by area, without storing exact addresses
-        "origin": {"lon": round(a[0], 3), "lat": round(a[1], 3)}, "destination": {"lon": round(b[0], 3), "lat": round(b[1], 3)},
-        "provider": got["source"], "route_count": len(found), "picked": result["best"],
-        "predicted_sec": [round(p["dur"]) for p in result["preds"]], "baseline_sec": [round(r["dur"]) for r in found],
-        "event_ids": [h["id"] for h in best["event_hits"]], "blocked": best["blocked"], "model": best["model"]})
+    if not replay:  # a simulation isn't demand
+        background.add_task(store.save_trip, {
+            "requested_at": now, "source": "web", "mode": mode, "depart_at": departs[result["best"]],
+            # ~100 m: enough for demand by area, without storing exact addresses
+            "origin": {"lon": round(a[0], 3), "lat": round(a[1], 3)}, "destination": {"lon": round(b[0], 3), "lat": round(b[1], 3)},
+            "provider": got["source"], "route_count": len(found), "picked": result["best"],
+            "predicted_sec": [round(p["dur"]) for p in result["preds"]], "baseline_sec": [round(r["dur"]) for r in found],
+            "event_ids": [h["id"] for h in best["event_hits"]], "blocked": best["blocked"], "model": best["model"]})
     return {
         "routes": found, "source": got["source"], "plan": result,
         "events": [model.event_view(e) for e in evs if _near_any(e, found)],
-        "data": {"events": "mongo" if events is not None else "demo",
+        "data": {"at": t0.isoformat(), "replay": replay,  # the moment the inputs describe
+                 "events": "mongo" if events is not None else "demo",
                  "incidents": "mongo" if incidents is not None else "unavailable",
-                 "traffic": "tiger" if traffic is not None else "unavailable",
+                 "traffic": f"tiger:{traffic_kind}" if traffic is not None else "unavailable",
                  "predictions": "tiger" if predictions else "none (event-impact heuristic)"},
     }
 
