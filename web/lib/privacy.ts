@@ -57,7 +57,7 @@ export function dataPath(d: PlanData, source: string): Stop[] {
         : { who: 'Built-in sentence', off: d.note.includes('ai text off'),
             did: d.note.includes('ai text off') ? 'You turned AI text off, so nothing went to Google.' : 'Gemini wasn’t used this time, so nothing went to Google.' },
     d.stored === 'trips'
-      ? { who: 'Trip log', did: 'Saved an area-level record (to ~100 m) to forecast crowds. No name, account or device ID.' }
+      ? { who: 'Trip log', did: 'Saved an area-level record to forecast crowds: start and end to ~100 m, and the roads used minus a few blocks at each end. No name, account or device ID.' }
       : { who: 'Trip log', off: true, did: d.stored === 'replay' ? 'Not saved: a replay isn’t a real trip.' : 'Not saved: you turned saving off.' },
   ];
 }

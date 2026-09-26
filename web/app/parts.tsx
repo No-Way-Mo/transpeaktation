@@ -368,7 +368,7 @@ export function AiButton({ p, className = '' }: { p: Planner; className?: string
 
 const SWITCHES: { key: keyof Privacy; label: string; detail: string }[] = [
   { key: 'saveTrips', label: 'Save my trips',
-    detail: 'Keeps an area-level record of each trip (to ~100 m, no name or device ID) so we can forecast crowds. Off: nothing is written.' },
+    detail: 'Keeps an area-level record of each trip (no exact start or end, no name or device ID) so we can forecast crowds. Off: nothing is written.' },
   { key: 'aiText', label: 'AI-written explanations',
     detail: 'Google Gemini words the route card from trip facts, never addresses. Off: a built-in sentence, and nothing is sent to Google.' },
   { key: 'voice', label: 'Voice requests',
@@ -454,7 +454,7 @@ export function AiPrivacy({ p }: { p: Planner }) {
       <section className="aip-sec" aria-labelledby="aip-keep">
         <h3 id="aip-keep" className="aip-h">What we keep</h3>
         <ul className="aip-keep">
-          <li><Icon name="check" size={16} className="yes" />Trips, if saving is on: start and end rounded to ~100 m, the time, and which route won.</li>
+          <li><Icon name="check" size={16} className="yes" />Trips, if saving is on: start and end rounded to ~100 m, the roads used minus a few blocks at each end, the time, and which route won.</li>
           <li><Icon name="check" size={16} className="yes" />These switches and your light / dark choice, in this browser.</li>
           <li><Icon name="close" size={16} className="no" />Your name, email, account or device ID.</li>
           <li><Icon name="close" size={16} className="no" />Exact addresses or a location history.</li>

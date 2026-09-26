@@ -25,7 +25,7 @@ from typing import Any, Iterable
 
 from dotenv import dotenv_values
 
-from .model import LIVE_WINDOW, OPEN_ENDED, SF_TZ
+from .model import LIVE_WINDOW, NOT_A_DELAY, OPEN_ENDED, SF_TZ
 
 _INGEST_ENV = Path(__file__).resolve().parent.parent.parent / "ingest" / ".env"
 PLACEHOLDERS = ("<password>", "<db_password>")
@@ -158,17 +158,19 @@ class Store:
 
     def incidents_on(self, segment_ids: list[str], t0: datetime, t1: datetime) -> list[dict] | None:
         """road_incidents touching these segments whose time span overlaps [t0, t1]. One with no end time counts
-        for OPEN_ENDED after it started, so today's crash doesn't block a trip next week."""
+        for OPEN_ENDED after it started, so today's crash doesn't block a trip next week. Closures and incidents
+        first, then permits (NOT_A_DELAY: ~11k active at a time), each up to 500, so permits can't crowd them out."""
         if not segment_ids:
             return []
-        return self._mongo_call(lambda db: list(db.road_incidents.find(
-            {"road_segment_ids": {"$in": segment_ids},
+        return self._mongo_call(lambda db: [d for cat in ({"$nin": sorted(NOT_A_DELAY)}, {"$in": sorted(NOT_A_DELAY)})
+                                            for d in db.road_incidents.find(
+            {"road_segment_ids": {"$in": segment_ids}, "category": cat,
              "$and": [{"$or": [{"start_time": {"$lte": t1}}, {"start_time": None}]},
                       # no published end (crashes, dispatch calls): active OPEN_ENDED from its start, never indefinitely
                       {"$or": [{"end_time": {"$gte": t0}}, {"end_time": None, "start_time": {"$gte": t0 - OPEN_ENDED}}]}]},
             {"source": 1, "source_id": 1, "incident_type": 1, "category": 1, "is_closure": 1, "start_time": 1,
              "end_time": 1, "road_segment_ids": 1, "details.name": 1, "details.street": 1,
-             "details.location_text": 1, "details.call_type": 1, "details.route": 1}).limit(500)))
+             "details.location_text": 1, "details.call_type": 1, "details.route": 1}).limit(500)])
 
     def traffic_latest(self, segment_ids: list[str]) -> list[dict] | None:
         """Newest observation per segment and source within TRAFFIC_MAX_AGE (Tiger traffic_metrics)."""
