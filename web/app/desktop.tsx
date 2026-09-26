@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { fmtDist, fmtWhen, mins, stepText, type LatLng } from '@/lib/route.ts';
 import { useRoutePlanner } from '@/lib/use-route-planner.ts';
 import MapView, { type MapHandle } from './map-view.tsx';
-import { Compass, Endpoints, Icon, Logo, RouteList, SearchResults, TripNote, TurnIcon, WhenPicker, WhereTo } from './parts.tsx';
+import { Compass, Endpoints, Icon, Logo, RouteList, SearchResults, ThemeToggle, TripNote, TurnIcon, WhenPicker, WhereTo } from './parts.tsx';
 
 export default function Desktop() {
   const p = useRoutePlanner();
@@ -24,7 +24,7 @@ export default function Desktop() {
   return (
     <div className="desk">
       <aside className="desk-panel">
-        <header className="brand"><Logo /><span>transPEAKtation</span></header>
+        <header className="brand"><Logo /><span>transPEAKtation</span><ThemeToggle className="round-btn" /></header>
 
         {p.screen !== 'route' ? (
           <>
