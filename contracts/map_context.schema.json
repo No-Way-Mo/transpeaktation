@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "transpeaktation/map_context.schema.json",
+  "title": "Map context: events + road conditions + segment traffic served by api/ to web/",
+  "description": "Read-only views of what ingest/ wrote to Mongo (events, road_incidents) and Tiger (traffic_metrics). Times are ISO 8601 UTC; coordinates are WGS84. api/ builds these in app/store.py; web/ mirrors them in lib/context.ts.",
+  "$defs": {
+    "MapEvent": {
+      "type": "object",
+      "required": ["id", "name", "lat", "lon", "start_time", "source", "road_closure_ids"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "description": "Mongo events._id (evt_...), or '<source>:<case>@<start>' for an event derived from DataSF special-event closures" },
+        "name": { "type": "string" },
+        "category": { "type": ["string", "null"], "description": "concert | sports | festival | ... (events), or special_event (DataSF)" },
+        "venue": { "type": ["string", "null"], "description": "venue name, or the closed street stretch for DataSF events" },
+        "lat": { "type": "number" },
+        "lon": { "type": "number" },
+        "start_time": { "type": "string", "format": "date-time" },
+        "end_time": { "type": ["string", "null"], "format": "date-time", "description": "null = no end published. Point-event rule (api store.DEFAULT_EVENT_DURATION, web DEFAULT_EVENT_MIN): active start → start + 3 h, never indefinitely" },
+        "source": { "type": "string", "description": "predicthq | ticketmaster | street_closures | ..." },
+        "status": { "type": ["string", "null"] },
+        "road_closure_ids": { "type": "array", "items": { "type": "string" }, "description": "road_incidents ids '<source>:<source_id>' tied to this event" }
+      }
+    },
+    "RoadCondition": {
+      "type": "object",
+      "required": ["id", "kind", "is_closure", "lat", "lon", "geometry", "source", "road_segment_ids"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "description": "'<source>:<source_id>' (road_incidents upsert key)" },
+        "kind": { "enum": ["closure", "incident"] },
+        "category": { "type": ["string", "null"], "description": "street_closure | street_use_permit | excavation | lane_closure | collision | hazard | closure" },
+        "is_closure": { "type": "boolean", "description": "road closed to traffic" },
+        "description": { "type": ["string", "null"] },
+        "street": { "type": ["string", "null"] },
+        "status": { "type": ["string", "null"] },
+        "lat": { "type": "number", "description": "representative point of geometry" },
+        "lon": { "type": "number" },
+        "geometry": { "type": "object", "description": "GeoJSON Point | LineString | MultiLineString, [lon, lat]" },
+        "start_time": { "type": ["string", "null"], "format": "date-time" },
+        "end_time": { "type": ["string", "null"], "format": "date-time" },
+        "updated_at": { "type": ["string", "null"], "format": "date-time", "description": "last_ingested_at" },
+        "source": { "type": "string" },
+        "road_segment_ids": { "type": "array", "items": { "type": "string" }, "description": "OSM edges u-v-key, same IDs as /routes road_segment_ids" }
+      }
+    },
+    "SegmentTraffic": {
+      "type": "object",
+      "required": ["road_segment_id", "time", "source"],
+      "additionalProperties": false,
+      "properties": {
+        "road_segment_id": { "type": "string" },
+        "time": { "type": "string", "format": "date-time", "description": "10-min bucket start" },
+        "source": { "type": "string" },
+        "speed_mph": { "type": ["number", "null"] },
+        "free_flow_speed_mph": { "type": ["number", "null"] },
+        "congestion_ratio": { "type": ["number", "null"], "description": "0 = free flow, 1 = stopped" }
+      }
+    }
+  }
+}
