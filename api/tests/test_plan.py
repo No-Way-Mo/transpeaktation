@@ -337,6 +337,20 @@ class PlanEndpoint(unittest.TestCase):
             self.assertEqual(body["data"]["note"], "template (gemini reply rejected)")
             self.assertNotEqual(body["plan"]["note"], made_up)
 
+    def test_rider_can_turn_off_saving_and_ai_text(self):
+        depart = (datetime.now(SF) + timedelta(hours=1)).replace(second=0, microsecond=0)
+        store = FakeStore()
+        data = self.plan(store, depart).json()["data"]
+        self.assertEqual(data["stored"], "trips")
+        self.assertEqual(data["trip_record"]["origin"], store.trips[0]["origin"])  # the response shows what was logged
+        sent = []
+        with mock.patch.dict("os.environ", {"GEMINI_API_KEY": "k"}), \
+                mock.patch.dict(main.state, {"http": httpx.AsyncClient(transport=httpx.MockTransport(sent.append))}):
+            store = FakeStore()
+            data = self.plan(store, depart, save="false", ai_text="false").json()["data"]
+        self.assertEqual((store.trips, sent), ([], []))  # nothing logged, nothing sent to Google
+        self.assertEqual((data["stored"], data["trip_record"], data["note"]), ("off", None, "template (ai text off)"))
+
     def ml_plan(self, answer, status=200):
         """/plan with ML_URL set and ml/ answering `answer`; returns (body, what ml/ was sent)."""
         sent = []

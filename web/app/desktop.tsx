@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { fmtDist, fmtWhen, mins, stepText, type LatLng } from '@/lib/route.ts';
 import { useRoutePlanner } from '@/lib/use-route-planner.ts';
 import MapView, { type MapHandle } from './map-view.tsx';
-import { Compass, Endpoints, EventLegend, Icon, Logo, RouteList, SearchResults, ThemeToggle, TripNote, TurnIcon, WhenPicker, WhereTo } from './parts.tsx';
+import { AiButton, AiPrivacy, Compass, Endpoints, EventLegend, Icon, Logo, RouteList, SearchResults, ThemeToggle, TripNote, TurnIcon, WhenPicker, WhereTo } from './parts.tsx';
 
 export default function Desktop() {
   const p = useRoutePlanner();
@@ -24,9 +24,17 @@ export default function Desktop() {
   return (
     <div className="desk">
       <aside className="desk-panel">
-        <header className="brand"><Logo /><span>transPEAKtation</span><ThemeToggle className="round-btn" /></header>
+        <header className="brand"><Logo /><span>transPEAKtation</span><AiButton p={p} className="round-btn" /><ThemeToggle className="round-btn" /></header>
 
-        {p.screen !== 'route' ? (
+        {p.aiOpen ? (
+          <div className="desk-body">
+            <div className="steps-head">
+              <button className="round-btn" title="Back" aria-label="Back" onClick={() => p.setAiOpen(false)}><Icon name="back" size={18} /></button>
+              <span className="title">AI & privacy</span>
+            </div>
+            <AiPrivacy p={p} />
+          </div>
+        ) : p.screen !== 'route' ? (
           <>
             <div className="desk-search">
               <WhereTo p={p} onFocus={() => p.setScreen('search')}>

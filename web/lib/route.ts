@@ -93,7 +93,10 @@ export type Plan = {
   routes: Route[]; source: string; plan: TransPeak; events: EventInfo[];
   // Where each input came from, for the moment `at` (traffic: tiger:live | tiger:observed | tiger:typical | unavailable)
   // decision: ml:<model> when ml/ picked, else heuristic (with why ml/ wasn't used)
-  data: { at: string; replay: boolean; events: string; incidents: string; traffic: string; predictions: string; decision: string };
+  // note: who wrote the card (gemini:<model> | ml | template (why)); stored: trips | off (rider's switch) | replay
+  // trip_record: exactly what was logged to Mongo trips, or null
+  data: { at: string; replay: boolean; events: string; incidents: string; traffic: string; predictions: string; decision: string;
+    note: string; stored: 'trips' | 'off' | 'replay'; trip_record: Record<string, unknown> | null };
 };
 
 /** Demo mode (NEXT_PUBLIC_REPLAY=1): past times are allowed and replay the data stored for then. */
@@ -107,9 +110,10 @@ export function planPath(from: Place, to: Place, when: When, now = Date.now(), r
   return `/plan?from=${from.lon},${from.lat}&to=${to.lon},${to.lat}${t}${past ? '&replay=true' : ''}`;
 }
 
-/** GET /plan: candidate routes + what ingest/ stored for their road segments at that time + the model's pick. */
-export async function fetchPlan(from: Place, to: Place, when: When = { mode: 'now', at: 0 }, signal?: AbortSignal): Promise<Plan> {
-  return api<Plan>(planPath(from, to, when), signal);
+/** GET /plan: candidate routes + what ingest/ stored for their road segments at that time + the model's pick.
+ *  `extra` = the rider's privacy switches as query params (lib/privacy.ts privacyQuery). */
+export async function fetchPlan(from: Place, to: Place, when: When = { mode: 'now', at: 0 }, signal?: AbortSignal, extra = ''): Promise<Plan> {
+  return api<Plan>(planPath(from, to, when) + extra, signal);
 }
 
 /** GET /events: today's events for the search suggestions (demo events until ingest fills Mongo). */

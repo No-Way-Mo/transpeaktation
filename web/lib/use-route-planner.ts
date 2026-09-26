@@ -5,6 +5,8 @@ import { fetchEvents, fetchPlan, fmtWhen, mins, ORIGIN, REPLAY, searchPlaces, sp
 // Ingested events (windowed /events) + /road-conditions: map pins and the route card's context line.
 import { conditionWindow, eventWindow, fetchEvents as fetchWindowEvents, fetchRoadConditions, routeContext,
   type ContextData, type Span } from './context.ts';
+import { privacyQuery, type Privacy } from './privacy.ts';
+import { getPrivacy } from './use-privacy.ts';
 
 type Field = 'from' | 'to';
 export type Screen = 'start' | 'search' | 'route';
@@ -67,7 +69,9 @@ export function useRoutePlanner() {
   const [when, setWhenState] = useState<When>(NOW);
   const [routes, setRoutes] = useState<Route[]>([]);
   const [tp, setTp] = useState<TransPeak | null>(null);    // api/ /plan: the model's pick + why
-  const [data, setData] = useState<Plan['data'] | null>(null); // where the plan's inputs came from (transparency)
+  // What touched the trip on screen (AI & privacy panel): /plan's data + routing source + the switches it was planned with.
+  const [trace, setTrace] = useState<{ data: Plan['data']; source: string; used: Privacy } | null>(null);
+  const [aiOpen, setAiOpen] = useState(false); // the AI & privacy panel
   const [events, setEvents] = useState<EventInfo[]>([]);  // today's events, for the search suggestions
   const [choice, setChoice] = useState({ i: 0, tp: true }); // selected card; transPEAKtation's by default
   const [loading, setLoading] = useState(false);
@@ -83,13 +87,14 @@ export function useRoutePlanner() {
   // Abort the previous request so a slow response can't overwrite a newer trip.
   const route = async (a = from, b = to, w = when) => {
     inflight.current?.abort();
-    setRoutes([]); setTp(null); setError('');
+    setRoutes([]); setTp(null); setTrace(null); setError('');
     if (!a || !b) return setLoading(false);
     const ctl = (inflight.current = new AbortController());
     setLoading(true);
     try {
-      const res = await fetchPlan(a, b, w, ctl.signal);
-      setRoutes(res.routes); setTp(res.plan); setData(res.data); setChoice({ i: 0, tp: true });
+      const used = getPrivacy();
+      const res = await fetchPlan(a, b, w, ctl.signal, privacyQuery(used));
+      setRoutes(res.routes); setTp(res.plan); setTrace({ data: res.data, source: res.source, used }); setChoice({ i: 0, tp: true });
     } catch {
       if (!ctl.signal.aborted) setError("Couldn't load routes.");
     } finally {
@@ -130,7 +135,7 @@ export function useRoutePlanner() {
     inflight.current?.abort();
     search.run(''); fieldSearch.run('');
     setTo(null); setQuery(q => ({ ...q, to: '' }));
-    setRoutes([]); setTp(null); setError(''); setLoading(false); setActive(null);
+    setRoutes([]); setTp(null); setTrace(null); setError(''); setLoading(false); setActive(null);
     setTrip({ note: '' }); setWhenState(NOW);
     setScreen('start');
   };
@@ -192,7 +197,7 @@ export function useRoutePlanner() {
     suggestions, searching: fieldSearch.searching,
     showSuggest: !!active && (suggestions.length > 0 || fieldSearch.searching),
     routes, sel, setSel, choice, setChoice, tp, card, loading, error, retry: () => route(),
-    events, data, applyAdvice,
+    events, trace, aiOpen, setAiOpen, applyAdvice,
     selected: routes[sel] as Route | undefined,
     selectedCard: routes.length ? card(sel, choice.tp) : undefined,
     when, setWhen,
