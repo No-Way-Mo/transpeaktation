@@ -2,11 +2,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { fmtDist, fmtWhen, mins, stepText, type LatLng } from '@/lib/route.ts';
 import { useRoutePlanner } from '@/lib/use-route-planner.ts';
+import { useMapPrefs } from '@/lib/use-map-prefs.ts';
 import MapView, { type MapHandle } from './map-view.tsx';
-import { AiButton, AiPrivacy, Compass, Endpoints, EventLegend, Icon, Logo, RouteList, SearchResults, ThemeToggle, TripNote, TurnIcon, WhenPicker, WhereTo } from './parts.tsx';
+import { MainMenu, MapLayers, NavDialogs, useNav } from './menu.tsx';
+import { Compass, Endpoints, EventLegend, Icon, Logo, RouteList, SearchResults, TripNote, TurnIcon, WhenPicker, WhereTo } from './parts.tsx';
 
 export default function Desktop() {
   const p = useRoutePlanner();
+  const n = useNav(true);
+  const { prefs } = useMapPrefs();
   const map = useRef<MapHandle>(null);
   const [steps, setSteps] = useState(false);
   const [step, setStep] = useState(-1);
@@ -24,17 +28,9 @@ export default function Desktop() {
   return (
     <div className="desk">
       <aside className="desk-panel">
-        <header className="brand"><Logo /><span>transPEAKtation</span><AiButton p={p} className="round-btn" /><ThemeToggle className="round-btn" /></header>
+        <header className="brand"><MainMenu n={n} className="round-btn" /><Logo /><span>transPEAKtation</span></header>
 
-        {p.aiOpen ? (
-          <div className="desk-body">
-            <div className="steps-head">
-              <button className="round-btn" title="Back" aria-label="Back" onClick={() => p.setAiOpen(false)}><Icon name="back" size={18} /></button>
-              <span className="title">AI & privacy</span>
-            </div>
-            <AiPrivacy p={p} />
-          </div>
-        ) : p.screen !== 'route' ? (
+        {p.screen !== 'route' ? (
           <>
             <div className="desk-search">
               <WhereTo p={p} onFocus={() => p.setScreen('search')}>
@@ -71,7 +67,7 @@ export default function Desktop() {
                     <span className="title">Routes to {p.to?.label}</span>
                   </div>
                   <TripNote note={p.trip.note} />
-                  <RouteList p={p} action={
+                  <RouteList p={p} onTrace={() => n.open('settings', 'privacy')} action={
                     <button className="pill-btn" onClick={e => { e.stopPropagation(); setSteps(true); setStep(-1); }}>Directions</button>
                   } />
                 </>
@@ -115,7 +111,8 @@ export default function Desktop() {
       <main className="desk-map">
         <MapView ref={map} routes={p.routes} sel={p.sel} tp={p.choice.tp} labels={p.mapLabels} from={p.from} to={p.to} events={p.mapEvents} marker={marker}
           onSelect={p.setSel} pad={{ topLeft: [60, 60], bottomRight: [60, 60] }} />
-        <EventLegend events={p.mapEvents} />
+        {prefs.eventPins && <EventLegend events={p.mapEvents} />}
+        <MapLayers n={n} className="desk-layers" />
         <div className="map-ctrls">
           <Compass onPress={() => map.current?.fit()} />
           <div className="zoom">
@@ -124,6 +121,7 @@ export default function Desktop() {
           </div>
         </div>
       </main>
+      <NavDialogs n={n} p={p} wide />
     </div>
   );
 }

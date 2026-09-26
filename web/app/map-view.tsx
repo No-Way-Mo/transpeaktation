@@ -3,7 +3,9 @@ import { useEffect, useImperativeHandle, useRef, type Ref } from 'react';
 import type * as Leaflet from 'leaflet';
 import { EVENT_KINDS, eventImpact, eventKind, fmtCrowd, fmtEventTime, type EventKind, type MapEvent } from '@/lib/context.ts';
 import { fmtDist, labelPoint, trafficRuns, type LatLng, type Place, type Route } from '@/lib/route.ts';
+import type { MapStyle } from '@/lib/map-prefs.ts';
 import type { Theme } from '@/lib/theme.ts';
+import { useMapPrefs } from '@/lib/use-map-prefs.ts';
 import { useTheme } from '@/lib/use-theme.ts';
 
 export type MapHandle = { fit(): void; focus(p: LatLng, zoom?: number): void; zoomIn(): void; zoomOut(): void };
@@ -22,8 +24,12 @@ type Props = {
   pad: { topLeft: [number, number]; bottomRight: [number, number] }; // room left for overlays when fitting
 };
 
-// Esri's own light / dark grey basemaps, tinted toward the palette by --map-tint (globals.css).
-const tiles = (t: Theme) => `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_${t === 'dark' ? 'Dark' : 'Light'}_Gray_Base/MapServer/tile/{z}/{y}/{x}`;
+// Esri's own light / dark grey basemaps, tinted toward the palette by --map-tint (globals.css); satellite is Esri's
+// World Imagery from the same keyless tile server, left untinted.
+const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services';
+const baseLayer = (l: typeof Leaflet, t: Theme, s: MapStyle) => s === 'satellite'
+  ? l.tileLayer(`${ESRI}/World_Imagery/MapServer/tile/{z}/{y}/{x}`, { attribution: 'Tiles © Esri, Maxar, Earthstar Geographics', maxNativeZoom: 18, maxZoom: 18 })
+  : l.tileLayer(`${ESRI}/Canvas/World_${t === 'dark' ? 'Dark' : 'Light'}_Gray_Base/MapServer/tile/{z}/{y}/{x}`, { attribution: 'Tiles © Esri', maxNativeZoom: 16, maxZoom: 18 });
 
 export default function MapView({ ref, routes, sel, tp, labels, from, to, marker, events, onSelect, pad }: Props) {
   const el = useRef<HTMLDivElement>(null);
@@ -32,8 +38,9 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
   const layer = useRef<Leaflet.LayerGroup>(null);
   const base = useRef<Leaflet.TileLayer>(null);
   const { theme } = useTheme();
-  const themeNow = useRef(theme); // Leaflet loads async: the tile layer must use the theme at that moment
-  themeNow.current = theme;
+  const { prefs } = useMapPrefs(); // map style + layers (Map layers button / Settings → Map & Routing)
+  const look = useRef({ theme, prefs }); // Leaflet loads async: the tile layer must use the theme and style at that moment
+  look.current = { theme, prefs };
   const latest = useRef({ routes, sel, tp, labels, from, to, marker, events, pad, onSelect });
   latest.current = { routes, sel, tp, labels, from, to, marker, events, pad, onSelect };
 
@@ -59,7 +66,9 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
   const draw = () => {
     const l = L.current, g = layer.current;
     if (!l || !g || !el.current) return;
-    const { routes, sel, tp, labels, from, to, marker, events } = latest.current;
+    const { routes, sel, tp, labels, from, to, marker } = latest.current;
+    const { eventPins, traffic } = look.current.prefs;
+    const events = eventPins ? latest.current.events : undefined; // Event Pins off: no pins, no impact areas
     // Colours come from the CSS theme tokens, so light/dark and brand changes stay in globals.css.
     const cs = getComputedStyle(el.current), c = (n: string) => cs.getPropertyValue(n).trim();
     const casing = c('--route-casing'), line = c(tp ? '--brand-line' : '--route');
@@ -83,7 +92,7 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
       l.polyline(r.coords, { color: c('--route-casing-sel'), weight: 11, interactive: false }).addTo(g);
       l.polyline(r.coords, { color: line, weight: 7, interactive: false }).addTo(g);
       // Live slowdowns painted over the route, like Apple/Google: amber, orange-red, deep red.
-      for (const run of trafficRuns(r)) l.polyline(run.coords, { color: c(`--traffic-${run.level}`), weight: 7, interactive: false }).addTo(g);
+      if (traffic) for (const run of trafficRuns(r)) l.polyline(run.coords, { color: c(`--traffic-${run.level}`), weight: 7, interactive: false }).addTo(g);
     }
     // Labels sit above the lines; each one selects its route, like tapping the line.
     labels?.forEach((text, i) => {
@@ -115,7 +124,7 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
       const l = (L.current = mod.default ?? mod);
       const m = (map.current = l.map(el.current, { zoomControl: false }).setView([37.788, -122.4075], 14));
       m.attributionControl.setPrefix(false);
-      base.current = l.tileLayer(tiles(themeNow.current), { attribution: 'Tiles © Esri', maxNativeZoom: 16, maxZoom: 18 }).addTo(m);
+      base.current = baseLayer(l, look.current.theme, look.current.prefs.style).addTo(m);
       layer.current = l.layerGroup().addTo(m);
       draw();
       fit();
@@ -125,15 +134,21 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
     return () => { cancelled = true; ro.disconnect(); map.current?.remove(); map.current = null; };
   }, []);
 
-  // Light/dark switch (toggle, or the OS when nothing is saved): swap the basemap and repaint the lines and markers
-  // in the new theme's colours. The first run just repeats what the map was created with.
-  useEffect(() => { base.current?.setUrl(tiles(theme)); draw(); }, [theme]);
+  // Theme (Settings, or the OS on System) or map style changed: swap the basemap (its attribution too) and repaint the
+  // lines and markers in the new theme's colours. The first run just repeats what the map was created with.
+  useEffect(() => {
+    const l = L.current, m = map.current;
+    if (l && m && base.current) { base.current.remove(); base.current = baseLayer(l, theme, prefs.style).addTo(m); }
+    draw();
+  }, [theme, prefs.style]);
+  // Event Pins / Traffic switched: redraw with or without them.
+  useEffect(draw, [prefs.eventPins, prefs.traffic]);
 
   useEffect(draw, [routes, sel, tp, labels?.join(), from, to, marker, events]);
   // New routes or endpoints: frame them.
   useEffect(fit, [routes, from, to]);
 
-  return <div ref={el} className="map" />;
+  return <div ref={el} className="map" data-style={prefs.style} />;
 }
 
 const DEST_PIN = '<svg viewBox="0 0 28 36" aria-hidden="true"><path class="body" d="M14 34.5C14 34.5 26.5 21.8 26.5 13.5a12.5 12.5 0 0 0-25 0C1.5 21.8 14 34.5 14 34.5Z"/><circle class="hole" cx="14" cy="13.5" r="4.75"/></svg>';

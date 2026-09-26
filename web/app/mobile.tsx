@@ -3,7 +3,8 @@ import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } fr
 import { fmtDist, fmtTime, iosArrival, mins, RECENT, stepText } from '@/lib/route.ts';
 import { useRoutePlanner } from '@/lib/use-route-planner.ts';
 import MapView, { type MapHandle } from './map-view.tsx';
-import { AiButton, AiPrivacy, Compass, Endpoints, Icon, MicButton, PlaceRow, RouteList, SearchResults, ThemeToggle, TripNote, TurnIcon, WhenPicker, WhereTo } from './parts.tsx';
+import { MainMenu, MapLayers, NavDialogs, useNav } from './menu.tsx';
+import { Compass, Endpoints, Icon, MicButton, PlaceRow, RouteList, SearchResults, TripNote, TurnIcon, WhenPicker, WhereTo } from './parts.tsx';
 
 // Sheet heights as a share of the screen: peek, half, full (Apple Maps' three detents).
 const DETENTS = [0.22, 0.5, 0.9];
@@ -62,6 +63,7 @@ function useSheet(ceiling: { current: HTMLElement | null }, initial = 1) {
 
 export default function Mobile() {
   const p = useRoutePlanner();
+  const n = useNav(false);
   const map = useRef<MapHandle>(null);
   const [nav, setNav] = useState(false);
   const [step, setStep] = useState(0);
@@ -101,7 +103,10 @@ export default function Mobile() {
         pad={{ topLeft: [24, 190], bottomRight: [24, 420] }} />
 
       {p.screen !== 'search' && !nav && (
-        <Compass movable onPress={() => map.current?.fit()} className={p.screen === 'start' ? 'high' : ''} />
+        <>
+          <Compass movable onPress={() => map.current?.fit()} className={p.screen === 'start' ? 'high' : ''} />
+          <MapLayers n={n} sheet className={`mob-layers${p.screen === 'start' ? ' high' : ''}`} />
+        </>
       )}
 
       {p.screen === 'start' && (
@@ -113,8 +118,7 @@ export default function Mobile() {
                 <Icon name="search" size={18} className="lead" /><span>Where to?</span>
               </button>
               <MicButton p={p} />
-              <AiButton p={p} />
-              <ThemeToggle />
+              <MainMenu n={n} sheet />
             </div>
           </div>
           <div className="sheet-body">
@@ -166,7 +170,7 @@ export default function Mobile() {
               {p.routes.length > 0 && !p.loading && (
                 <>
                   <TripNote note={p.trip.note} />
-                  <RouteList p={p} />
+                  <RouteList p={p} onTrace={() => n.open('settings', 'privacy')} />
                 </>
               )}
             </div>
@@ -179,16 +183,7 @@ export default function Mobile() {
         </>
       )}
 
-      {p.aiOpen && (
-        <div className="search-sheet ai-sheet" role="dialog" aria-label="AI and privacy">
-          <div className="grabber static" />
-          <div className="search-bar">
-            <span className="title grow">AI & privacy</span>
-            <button className="link-btn" onClick={() => p.setAiOpen(false)}>Done</button>
-          </div>
-          <div className="search-body"><AiPrivacy p={p} /></div>
-        </div>
-      )}
+      <NavDialogs n={n} p={p} wide={false} />
 
       {p.screen === 'route' && nav && r && (
         <>
