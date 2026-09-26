@@ -1,11 +1,14 @@
 """Offline checks for the event-aware trip plan: the model (pure) and GET /plan / /events with a fake store."""
+import json
 import unittest
 from datetime import datetime, timedelta, timezone
 from unittest import mock
 
 from fastapi.testclient import TestClient
 
-from app import main, model, providers, store as store_mod
+import httpx
+
+from app import main, ml, model, providers, store as store_mod
 
 SF = model.SF_TZ
 DAY = datetime(2026, 9, 26, tzinfo=SF)
@@ -200,6 +203,20 @@ class TrafficByTime(unittest.TestCase):
         self.assertEqual(s.traffic_at(["1-2-0"], then, now), (None, "observed"))
 
 
+class MLAnswer(unittest.TestCase):
+    def test_parse_rejects_off_contract_answers(self):
+        area = main.in_area
+        ok = {"model": "m", "predicted_sec": 600, "choice": {"candidate": 0}}
+        self.assertEqual(ml.parse(ok, 2, area)["best"], 0)
+        self.assertEqual(ml.parse({**ok, "choice": {"waypoints": [[-122.4, 37.78]]}}, 2, area)["waypoints"], [(-122.4, 37.78)])
+        for bad in [{**ok, "model": ""}, {**ok, "predicted_sec": -1}, {**ok, "predicted_sec": True},
+                    {**ok, "predicted_sec": float("nan")}, {**ok, "choice": {"candidate": 2}}, {**ok, "choice": {}},
+                    {**ok, "choice": {"waypoints": [[-73.9, 40.7]]}},   # New York: outside the service area
+                    {**ok, "choice": {"waypoints": [[-122.4, 37.78]] * 30}}, {**ok, "reasons": "text"}, []]:
+            with self.assertRaises(ValueError, msg=bad):
+                ml.parse(bad, 2, area)
+
+
 class FakeStore:
     def __init__(self, events=None, incidents=None, traffic=None):
         self._events, self._incidents, self._traffic = events, incidents, traffic
@@ -217,6 +234,9 @@ class FakeStore:
 
     def predictions(self, sids, t0, t1):
         return None
+
+    def trips_to(self, lon, lat, t0, t1):
+        return 3
 
     def save_trip(self, doc):
         self.trips.append(doc)
@@ -293,6 +313,54 @@ class PlanEndpoint(unittest.TestCase):
         self.assertLessEqual(mapbox_at, datetime.now(timezone.utc) + main.MAPBOX_AHEAD)
         self.assertEqual(store.traffic_asked[0], depart)
         self.assertEqual(self.plan(FakeStore(), depart + timedelta(days=7)).status_code, 400)  # 31 days: too far
+
+    def ml_plan(self, answer, status=200):
+        """/plan with ML_URL set and ml/ answering `answer`; returns (body, what ml/ was sent)."""
+        sent = []
+
+        def handler(req: httpx.Request):
+            sent.append(req)
+            return httpx.Response(status, json=answer)
+
+        depart = (datetime.now(SF) + timedelta(hours=1)).replace(second=0, microsecond=0)
+        with mock.patch.dict("os.environ", {"ML_URL": "http://ml.test/"}), \
+                mock.patch.dict(main.state, {"http": httpx.AsyncClient(transport=httpx.MockTransport(handler))}):
+            r = self.plan(FakeStore(), depart)
+        self.assertEqual(r.status_code, 200, r.text)
+        return r.json(), sent
+
+    def test_ml_picks_a_candidate_and_explains(self):
+        body, sent = self.ml_plan({"model": "congestion-v0", "choice": {"candidate": 1}, "predicted_sec": 700,
+                                   "reasons": ["Fewer riders heading there on this street."]})
+        self.assertEqual(str(sent[0].url), "http://ml.test/decide")
+        req = json.loads(sent[0].content)
+        self.assertEqual((req["version"], req["mode"], len(req["candidates"]), req["demand"]["trips_to_destination"]),
+                         (1, "depart", 2, 3))
+        self.assertEqual(set(req["context"]), {"events", "incidents", "traffic", "predictions", "segment_lengths_m"})
+        self.assertIn("heuristic", req["candidates"][0])
+        plan = body["plan"]
+        self.assertEqual((plan["best"], plan["preds"][1]["dur"], plan["preds"][1]["model"]), (1, 700, "ml:congestion-v0"))
+        self.assertTrue(plan["note"].startswith("Fewer riders heading there"))
+        self.assertEqual(body["data"]["decision"], "ml:congestion-v0")
+
+    def test_ml_own_route_becomes_the_transpeaktation_route(self):
+        body, _ = self.ml_plan({"model": "m", "choice": {"waypoints": [[-122.40, 37.785], [-122.395, 37.78]]},
+                                "predicted_sec": 640})
+        self.assertEqual(len(body["routes"]), 3)
+        self.assertEqual((body["routes"][2]["by"], body["plan"]["best"]), ("ml", 2))
+        self.assertEqual(self.find.call_args.args[5], ((-122.40, 37.785), (-122.395, 37.78)))  # routed through them
+
+    def test_ml_down_or_off_contract_keeps_the_heuristic(self):
+        body, _ = self.ml_plan({"detail": "boom"}, status=500)
+        self.assertTrue(body["data"]["decision"].startswith("heuristic (ml unavailable"))
+        self.assertEqual(len(body["plan"]["preds"]), 2)
+        body, _ = self.ml_plan({"model": "m", "choice": {"candidate": 7}, "predicted_sec": 600})
+        self.assertIn("choice.candidate", body["data"]["decision"])
+
+    def test_without_ml_url_nothing_is_sent(self):
+        depart = (datetime.now(SF) + timedelta(hours=1)).replace(second=0, microsecond=0)
+        with mock.patch.dict("os.environ", {"ML_URL": ""}):
+            self.assertEqual(self.plan(FakeStore(), depart).json()["data"]["decision"], "heuristic")
 
     def test_events_endpoint_falls_back_to_demo(self):
         with mock.patch.object(main, "store", FakeStore()):

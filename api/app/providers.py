@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import os
 import time
-from typing import Any
+from typing import Any, Sequence
 
 import httpx
 
@@ -15,6 +15,7 @@ UA = {"User-Agent": "transPEAKtation/0.1 (ShellHacks 2026 demo)"}  # Nominatim's
 Place = dict[str, Any]
 Route = dict[str, Any]
 LonLat = tuple[float, float]
+MAX_VIA = 23  # Mapbox driving: 25 coordinates including start and end
 
 
 class ProviderError(Exception):
@@ -112,28 +113,33 @@ def normalize_routes(data: dict) -> list[Route]:
         raise ProviderError(data.get("message") or data.get("code") or "bad response")
     out = []
     for r in data["routes"]:
-        leg = r["legs"][0]
+        legs, last = r["legs"], len(r["legs"]) - 1  # several legs only for a route through via points
+        congestion = [c for leg in legs for c in leg.get("annotation", {}).get("congestion") or []]
         out.append({
             "dur": r["duration"],
             "dur_typical": r.get("duration_typical"),          # Mapbox driving-traffic only
             "dist": r["distance"],
-            "summary": leg.get("summary", ""),
+            "summary": legs[0].get("summary", ""),
             "coords": [[lat, lon] for lon, lat in r["geometry"]["coordinates"]],
-            "congestion": leg.get("annotation", {}).get("congestion"),  # one level per coords pair, Mapbox only
-            "steps": [_step(s) for s in leg["steps"]],
+            "congestion": congestion or None,  # one level per coords pair, Mapbox driving-traffic only
+            # one trip: no "arrive"/"depart" at the via points in between
+            "steps": [_step(s) for i, leg in enumerate(legs) for s in leg["steps"]
+                      if not (s["maneuver"]["type"] == "arrive" and i < last or s["maneuver"]["type"] == "depart" and i > 0)],
         })
     return out
 
 
-async def find_routes(client: httpx.AsyncClient, a: LonLat, b: LonLat,
-                      depart_at: str | None = None, arrive_by: str | None = None) -> tuple[list[Route], str]:
+async def find_routes(client: httpx.AsyncClient, a: LonLat, b: LonLat, depart_at: str | None = None,
+                      arrive_by: str | None = None, via: Sequence[LonLat] = ()) -> tuple[list[Route], str]:
     """No time = live traffic. depart_at / arrive_by (UTC 'YYYY-MM-DDThh:mm:ssZ') = Mapbox's historic-traffic
-    prediction for that time. Mapbox only takes arrive_by on the plain driving profile. OSRM ignores time."""
-    coords = f"{a[0]},{a[1]};{b[0]},{b[1]}"
-    common = {"alternatives": "true", "geometries": "geojson", "overview": "full", "steps": "true"}
+    prediction for that time. Mapbox only takes arrive_by on the plain driving profile. OSRM ignores time.
+    via: points to pass through in order (ml/'s own route, up to MAX_VIA); one route back, no alternatives."""
+    coords = ";".join(f"{x},{y}" for x, y in (a, *via, b))
+    common = {"alternatives": "false" if via else "true", "geometries": "geojson", "overview": "full", "steps": "true"}
     if mapbox_available():
-        if arrive_by:
-            profile, extra = "driving", {"arrive_by": arrive_by}
+        # driving-traffic takes at most 3 coordinates, so a route through ml/'s waypoints uses plain driving.
+        if arrive_by or len(via) > 1:
+            profile, extra = "driving", {k: v for k, v in (("arrive_by", arrive_by), ("depart_at", depart_at)) if v}
         else:
             profile, extra = "driving-traffic", {"annotations": "congestion", **({"depart_at": depart_at} if depart_at else {})}
         try:
@@ -144,5 +150,5 @@ async def find_routes(client: httpx.AsyncClient, a: LonLat, b: LonLat,
         else:
             return normalize_routes(data), "mapbox"
     data = await _get(client, f"https://router.project-osrm.org/route/v1/driving/{coords}",
-                      {**common, "alternatives": "3"}, headers=UA)
+                      {**common, "alternatives": "false" if via else "3"}, headers=UA)
     return normalize_routes(data), "osrm"

@@ -240,6 +240,7 @@ export function RouteList({ p, action }: { p: Planner; action?: ReactNode }) {
       <section className="route-sec" aria-label="Normal routes">
         <div className="label">Normal</div>
         {p.routes.map((rt, i) => {
+          if (rt.by === 'ml') return null; // ml/'s own route only appears as the transPEAKtation pick
           const t = routeTag(i, rt.dur, fastest), on = !p.choice.tp && p.choice.i === i;
           return (
             <RouteCard key={i} route={rt} card={p.card(i, false)} when={p.when} tag={t} tone={i === 0 ? 'fast' : ''}
