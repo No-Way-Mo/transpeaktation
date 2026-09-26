@@ -1,7 +1,7 @@
 [project]
 name = "transpeaktation-api"
 version = "0.1.0"
-description = "Places, traffic-aware routes matched to OSM road segments, the event-aware trip plan (Mongo + Tiger + model); voice → intent."
+description = "Places, traffic-aware routes matched to OSM road segments, the event-aware trip plan (Mongo + Tiger + model); voice → intent; read-only views of ingested Mongo / Tiger data."
 requires-python = ">=3.10"
 dependencies = [
   "fastapi>=0.115",
@@ -10,9 +10,12 @@ dependencies = [
   "python-dotenv>=1",
   "python-multipart>=0.0.9",  # /voice audio upload
   "osmnx>=2,<3",
-  "pymongo>=4,<5",           # reads ingest/'s events + road_incidents, writes trips
-  "psycopg[binary]>=3,<4",   # reads Tiger traffic_metrics + prediction_metrics
+  "pymongo>=4.6,<5",         # reads ingest/'s events + road_incidents, writes trips
+  "psycopg[binary]>=3.1,<4", # reads Tiger traffic_metrics + prediction_metrics
 ]
+
+[project.optional-dependencies]
+test = ["mongomock>=4.1"]
 
 [tool.setuptools]
 packages = ["app"]

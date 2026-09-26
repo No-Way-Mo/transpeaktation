@@ -3,7 +3,7 @@ import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } fr
 import { fmtDist, fmtTime, mins, RECENT, stepText } from '@/lib/route.ts';
 import { useRoutePlanner } from '@/lib/use-route-planner.ts';
 import MapView, { type MapHandle } from './map-view.tsx';
-import { Compass, Endpoints, Icon, MicButton, PlaceRow, RouteList, SearchResults, TripNote, TurnIcon, WhenPicker, WhereTo } from './parts.tsx';
+import { Compass, Endpoints, Icon, MicButton, PlaceRow, RouteList, SearchResults, ThemeToggle, TripNote, TurnIcon, WhenPicker, WhereTo } from './parts.tsx';
 
 // Sheet heights as a share of the screen: peek, half, full (Apple Maps' three detents).
 const DETENTS = [0.22, 0.5, 0.9];
@@ -86,7 +86,7 @@ export default function Mobile() {
 
   return (
     <div className="mob" style={sheet.style}>
-      <MapView ref={map} routes={p.routes} sel={p.sel} tp={p.choice.tp} labels={p.mapLabels} from={p.from} to={p.to} onSelect={p.setSel}
+      <MapView ref={map} routes={p.routes} sel={p.sel} tp={p.choice.tp} labels={p.mapLabels} from={p.from} to={p.to} events={p.mapEvents} onSelect={p.setSel}
         pad={{ topLeft: [24, 190], bottomRight: [24, 420] }} />
 
       {p.screen !== 'search' && !nav && (
@@ -102,6 +102,7 @@ export default function Mobile() {
                 <Icon name="search" size={18} className="lead" /><span>Where to?</span>
               </button>
               <MicButton p={p} />
+              <ThemeToggle />
             </div>
           </div>
           <div className="sheet-body">

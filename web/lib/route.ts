@@ -58,7 +58,7 @@ const ANGLES: Record<string, number> = {
 
 const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
-async function api<T>(path: string, signal?: AbortSignal): Promise<T> {
+export async function api<T>(path: string, signal?: AbortSignal): Promise<T> {
   const res = await fetch(`${API}${path}`, { signal });
   if (!res.ok) throw new Error((await res.json().catch(() => null))?.detail ?? `HTTP ${res.status}`);
   return res.json();
@@ -160,13 +160,18 @@ export function fmtDist(m: number, units: Units = 'mi'): string {
   return mi < 0.1 ? `${Math.max(50, Math.round((m * 3.281) / 50) * 50)} ft` : `${mi.toFixed(1)} mi`;
 }
 
+/** Whole SF calendar days from `now` to `ms` (0 = same SF day). */
+export function sfDays(ms: number, now: number): number {
+  const day = (x: number) => { const [y, mo, d] = ptClock(x); return Date.UTC(y, mo - 1, d); };
+  return Math.round((day(ms) - day(now)) / 864e5);
+}
+
 export const fmtTime = (sec: number, now = Date.now()) =>
   new Date(now + sec * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', timeZone: TZ });
 
 /** "7:15 PM" today, "Tomorrow 7:15 PM", otherwise "Tue 7:15 PM" (SF time). */
 export function fmtWhen(ms: number, now = Date.now()): string {
-  const t = fmtTime(0, ms), day = (x: number) => { const [y, mo, d] = ptClock(x); return Date.UTC(y, mo - 1, d); };
-  const days = Math.round((day(ms) - day(now)) / 864e5);
+  const t = fmtTime(0, ms), days = sfDays(ms, now);
   return days === 0 ? t : days === 1 ? `Tomorrow ${t}` : `${new Date(ms).toLocaleDateString([], { weekday: 'short', timeZone: TZ })} ${t}`;
 }
 
@@ -178,11 +183,19 @@ export function meters(a: LatLng, b: LatLng): number {
 
 /** Metres from p to segment a–b (flat-earth, fine at city scale). Mapbox lines only have vertices at bends, so
  *  distance to vertices alone would call the middle of a long straight "far" from its own neighbour. */
-function segMeters(p: LatLng, a: LatLng, b: LatLng): number {
+export function segMeters(p: LatLng, a: LatLng, b: LatLng): number {
   const k = Math.cos((p[0] * Math.PI) / 180);
   const [bx, by, px, py] = [(b[1] - a[1]) * k, b[0] - a[0], (p[1] - a[1]) * k, p[0] - a[0]];
   const t = Math.max(0, Math.min(1, (px * bx + py * by) / (bx * bx + by * by || 1)));
   return Math.hypot(px - t * bx, py - t * by) * 111_320;
+}
+
+/** Metres from p to the nearest point of a polyline. */
+export function metersToLine(p: LatLng, line: LatLng[]): number {
+  if (line.length === 1) return meters(p, line[0]);
+  let d = Infinity;
+  for (let j = 1; j < line.length; j++) d = Math.min(d, segMeters(p, line[j - 1], line[j]));
+  return d;
 }
 
 /** Where to pin route i's "12 min" label: the point of its middle stretch farthest from every other route,
