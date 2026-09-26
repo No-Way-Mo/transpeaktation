@@ -206,14 +206,16 @@ async def plan_trip(
     t1 = max(d + timedelta(seconds=r["dur"]) for d, r in zip(departs, found)) + timedelta(minutes=90)  # + advice range
     sids = sorted({s for r in found for s in (r.get("road_segment_ids") or [])})
 
-    events, incidents, (traffic, traffic_kind), predictions, lengths = await asyncio.gather(
+    events, closure_events, incidents, (traffic, traffic_kind), predictions, lengths = await asyncio.gather(
         asyncio.to_thread(store.events_between, t0 - timedelta(hours=1), t1),
+        asyncio.to_thread(store.closure_events, t0 - timedelta(hours=1), t1),
         asyncio.to_thread(store.incidents_on, sids, t0, t1),
         asyncio.to_thread(store.traffic_at, sids, t0, real_now),
         asyncio.to_thread(store.predictions, sids, t0, t1),
         asyncio.to_thread(segments.lengths, sids))
     evs = [e for e in (model.from_mongo(x) for x in events or []) if e] if events is not None else \
         model.demo_events(t0)
+    evs += [model.from_map_event(e) for e in closure_events or []]
     ctx = {"events": evs, "incidents": incidents or [], "traffic": traffic or [], "traffic_kind": traffic_kind,
            "predictions": predictions or [], "lengths": lengths}
     decision, decided_by = None, "heuristic"

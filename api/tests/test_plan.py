@@ -57,6 +57,16 @@ class EventImpact(unittest.TestCase):
         self.assertTrue(only["advice"]["saves_sec"] >= 300)
         self.assertIsNone(model.plan([PAST], [at(18, 30)], "arrive", CTX, now=now)["advice"])  # arrive-by is fixed
 
+    def test_special_event_closure_counts_like_any_event(self):
+        # shaped like store.find_closure_events (what /events shows): a multi-day event right on the route
+        amzn = model.from_map_event({"id": "street_closures:X@2026-09-23T13:00:00+00:00", "name": "AMZN Unboxed",
+                                     "category": "special_event", "venue": None, "lat": 37.779, "lon": -122.3893,
+                                     "start_time": "2026-09-23T13:00:00+00:00", "end_time": "2026-10-03T01:00:00+00:00",
+                                     "source": "street_closures"})
+        p = model.plan([PAST], [at(12)], "depart", {**CTX, "events": [amzn]}, now=at(9))
+        self.assertNotEqual(p["tag"], "Clear")
+        self.assertIn("AMZN Unboxed", p["note"])
+
     def test_advice_for_a_trip_to_the_event_arrives_before_it_starts(self):
         to_oracle = {**PAST, "coords": [[37.770 + i * 0.001, -122.3893] for i in range(9)]}  # ends at the ballpark
         now = at(9)
@@ -231,6 +241,9 @@ class FakeStore:
     def traffic_at(self, sids, t, now):
         self.traffic_asked = (t, now)
         return self._traffic, "observed" if t < now - model.LIVE_WINDOW else "live"
+
+    def closure_events(self, t0, t1):
+        return []
 
     def predictions(self, sids, t0, t1):
         return None
