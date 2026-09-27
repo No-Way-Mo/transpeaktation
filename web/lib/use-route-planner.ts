@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { fetchEvents, fetchPlan, fmtWhen, markArrived, mins, ORIGIN, REPLAY, searchPlaces, spokenTime, voiceNote,
-  type EventInfo, type Plan, type Place, type Route, type TransPeak, type VoiceIntent, type When } from './route.ts';
+import { fetchPlan, fmtWhen, markArrived, mins, ORIGIN, REPLAY, searchPlaces, spokenTime, voiceNote,
+  type Plan, type Place, type Route, type TransPeak, type VoiceIntent, type When } from './route.ts';
 // Ingested events (windowed /events) + /road-conditions: map pins and the route card's context line.
 import { conditionWindow, eventWindow, fetchEvents as fetchWindowEvents, fetchRoadConditions, routeContext,
   type ContextData, type Span } from './context.ts';
@@ -10,7 +10,7 @@ import { getPrivacy } from './use-privacy.ts';
 
 type Field = 'from' | 'to';
 export type Screen = 'start' | 'search' | 'route';
-type Trip = { note: string; leaveMin?: number }; // set when the trip came from a transPEAKtation suggestion
+type Trip = { note: string }; // why this trip: set from a voice request
 /** One route card: route `i` with the normal estimate or the transPEAKtation (event-aware) one. Times in epoch ms. */
 export type Card = { i: number; tp: boolean; dur: number; leave: number; arrive: number };
 const NOW: When = { mode: 'now', at: 0 };
@@ -71,17 +71,11 @@ export function useRoutePlanner() {
   const [tp, setTp] = useState<TransPeak | null>(null);    // api/ /plan: the model's pick + why
   // What touched the trip on screen (Settings → AI & Privacy): /plan's data + routing source + the switches it was planned with.
   const [trace, setTrace] = useState<{ data: Plan['data']; source: string; used: Privacy } | null>(null);
-  const [events, setEvents] = useState<EventInfo[]>([]);  // today's events, for the search suggestions
   const [choice, setChoice] = useState({ i: 0, tp: true }); // selected card; transPEAKtation's by default
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const inflight = useRef<AbortController>(undefined);
   useEffect(() => () => inflight.current?.abort(), []);
-  useEffect(() => {
-    const ctl = new AbortController();
-    fetchEvents(ctl.signal).then(setEvents).catch(() => {}); // suggestions just stay generic without them
-    return () => ctl.abort();
-  }, []);
 
   // Abort the previous request so a slow response can't overwrite a newer trip.
   const route = async (a = from, b = to, w = when) => {
@@ -102,13 +96,13 @@ export function useRoutePlanner() {
   };
 
   /** Start/search screen → route screen for `dest`, from the current start point. */
-  const go = (dest: Place, opts: Trip = { note: '' }) => {
+  const go = (dest: Place) => {
     const f = from ?? ORIGIN;
     setFrom(f); setTo(dest);
     setQuery({ from: f.label, to: dest.label });
     setActive(null); search.run('');
-    setTrip(opts);
-    const w: When = opts.leaveMin ? { mode: 'depart', at: Date.now() + opts.leaveMin * 60000 } : NOW;
+    setTrip({ note: '' });
+    const w: When = NOW;
     setWhenState(w);
     setScreen('route');
     route(f, dest, w);
@@ -149,7 +143,7 @@ export function useRoutePlanner() {
     setFrom(nf); setTo(nt);
     setQuery(q => ({ ...q, [field]: p.label }));
     setActive(null); fieldSearch.run('');
-    setTrip({ note: '' }); // hand-picked endpoint: the suggestion's advice no longer applies
+    setTrip({ note: '' }); // hand-picked endpoint: the voice request's note no longer applies
     route(nf, nt);
   };
   const swap = () => {
@@ -205,12 +199,14 @@ export function useRoutePlanner() {
     suggestions, searching: fieldSearch.searching,
     showSuggest: !!active && (suggestions.length > 0 || fieldSearch.searching),
     routes, sel, setSel, choice, setChoice, tp, card, loading, error, retry: () => route(),
-    events, trace, applyAdvice, tripId, arrived, hasArrived: !!tripId && arrivedId === tripId,
+    trace, applyAdvice, tripId, arrived, hasArrived: !!tripId && arrivedId === tripId,
     selected: routes[sel] as Route | undefined,
     selectedCard: routes.length ? card(sel, choice.tp) : undefined,
     when, setWhen,
     /** Ingested events in the trip's time window, for the map. Empty while loading or if the feed failed. */
     mapEvents: context.events ?? [],
+    /** The trip span mapEvents were fetched for (leave → arrive, or just the departure before routes load). */
+    mapSpan: fetchSpan,
     /** Events near / conditions on the selected route (null = no route yet). */
     selectedContext: ctxFor(routes[sel]),
     whenText: when.mode === 'now' ? 'Leave now' : `${when.mode === 'depart' ? 'Leave' : 'Arrive by'} ${fmtWhen(when.at)}`,
