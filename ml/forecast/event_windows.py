@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 
 from .config import Config, read_json
-from .data import RunArrays, target_mask
+from .data import RunArrays, _fut, target_mask
 
 PRE_S = 3600          # the "pre" windows: the hour before a schedule boundary
 CLEAR_MAX = 0.3       # issue-time congestion below this = clear (same value as eval.buildup_prior_max)
@@ -99,8 +99,10 @@ def build_index(cfg: Config, data, counts: bool = True, pre_s: float = PRE_S,
                 lead_bands_min: list[int] | None = None) -> tuple[pd.DataFrame, dict]:
     """Every frozen window + run metadata, phase flags, matched pair and (optionally) support counts.
     `data` is a forecast.train.Data. Returns (index, audit)."""
-    man = read_json(cfg.dataset_dir / "manifest.json")
-    meta = {r["run_id"]: r for r in man["selected_runs"]}
+    if getattr(cfg.data, "extra_datasets", None):   # merged manifests of all datasets (Data.run_meta)
+        meta = data.run_meta
+    else:
+        meta = {r["run_id"]: r for r in read_json(cfg.dataset_dir / "manifest.json")["selected_runs"]}
     missing_seed = [r for r, m in meta.items() if "seed" not in m]
     if missing_seed:
         raise SystemExit(f"manifest runs without a seed: {missing_seed[:3]}")
@@ -174,7 +176,7 @@ def _support(cfg: Config, data, w: pd.DataFrame) -> None:
         c1 = clear_roads(a, o) & near
         c2 = clear_roads(a, o, strict=True) & near
         m = target_mask(a, o, H)
-        cong = np.asarray(a.cong[o:o + H])
+        cong = np.nan_to_num(_fut(a.cong, o, H, np.nan), nan=0.0)
         cols["near_roads"][i] = int(near.sum())
         cols["clear_near"][i] = int(c1.sum())
         cols["clear_near_strict"][i] = int(c2.sum())

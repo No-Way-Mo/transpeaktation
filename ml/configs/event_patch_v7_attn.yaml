@@ -1,0 +1,5 @@
+# Improvement plan round 2 (section 3.8): "route" variant + learned attention pooling over each road's event pairs.
+inherit: event_patch_v6_route.yaml
+name: event_patch_v7_attn
+model:
+  event_attn_pool: true

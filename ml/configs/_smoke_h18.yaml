@@ -1,9 +1,0 @@
-inherit: event_patch_v4_h18.yaml
-name: _smoke_h18
-data:
-  batch: b3_main
-  dataset_id: smoke_h18
-retrain:
-  per_family: 3
-  max_epochs: 1
-  val_stride: 8

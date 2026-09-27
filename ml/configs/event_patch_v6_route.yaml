@@ -1,0 +1,5 @@
+# Round 1, variant "route": heads + network-only route-to-venue load features (section 3.4).
+inherit: event_patch_v6_heads.yaml
+name: event_patch_v6_route
+model:
+  route_features: true

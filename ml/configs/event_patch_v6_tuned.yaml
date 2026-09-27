@@ -1,0 +1,12 @@
+# Improvement plan (EVENT_ANTICIPATION_IMPROVEMENTS_PLAN.md) round 1, variant "tuned": same model/data as v5, only the
+# loss/optimisation changes of section 3.6 (anticipation weight 5, backbone lr 2e-4, cosine schedule).
+inherit: event_patch_v5_h18.yaml
+name: event_patch_v6_tuned
+retrain:
+  lr_backbone: 0.0002
+  lr_schedule: cosine
+  warmup_epochs: 0.5
+  max_epochs: 16
+  patience: 5
+  per_family: 16
+  weights: {global: 1.0, event_near: 1.0, anticipation: 5.0}

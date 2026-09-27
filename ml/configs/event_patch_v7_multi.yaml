@@ -1,0 +1,6 @@
+# Improvement plan round 2 (section 3.7): "route" variant trained on b5 (3-hour windows) + b3_main (60-min windows,
+# incl. full event days; horizons 7-18 masked). Validation / evaluation on b5 windows only, same split groups.
+inherit: event_patch_v6_route.yaml
+name: event_patch_v7_multi
+data:
+  extra_datasets: [{batch: b3_main, dataset_id: b3_main_v3net_ep2}]

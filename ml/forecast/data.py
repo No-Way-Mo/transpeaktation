@@ -165,7 +165,7 @@ def cache_run(cfg: Config, man: dict, sc: dict, runs: dict, fams: dict, seg: pd.
     """Per-run arrays + context from the run's source export (verified against the frozen manifest hash).
     `done.json` is written last, so an interrupted cache is detectable and rebuilt. Returns True if built."""
     from . import events as ev_mod
-    from .audit import scheduled_closed
+    from .audit import represented_map, scheduled_closed
     rdir = cfg.dataset_dir / "runs" / rid
     src = cfg.batch_dir / "export" / f"sim_{rid}.parquet"
     if sha256_file(src) != man["input_sha256"][f"export/sim_{rid}.parquet"]:
@@ -195,7 +195,7 @@ def cache_run(cfg: Config, man: dict, sc: dict, runs: dict, fams: dict, seg: pd.
     ctx = ev_mod.run_context(sc, runs[rid])
     save_json(rdir / "context.json", ctx)
     sched = scheduled_closed(runs[rid], fams[runs[rid]["family_id"]], pd.to_datetime(times, unit="s", utc=True),
-                             pd.Index(g.model_ids), cfg.data.bucket_min * 60)
+                             pd.Index(g.model_ids), cfg.data.bucket_min * 60, represented_map(sc))
     np.save(rdir / "scheduled_closed.npy", sched.astype(np.float16))
     save_json(rdir / "done.json", {"source_sha256": man["input_sha256"][f"export/sim_{rid}.parquet"],
                                    "buckets": int(T), "roads": int(len(mcols))})
@@ -296,11 +296,22 @@ class Window:
     cong: np.ndarray
 
 
+def _fut(arr, o: int, H: int, fill) -> np.ndarray:
+    """arr[o:o+H] padded with `fill` past the run's last bucket (only windows of a shorter-horizon dataset reach it)."""
+    x = np.asarray(arr[o:o + H])
+    if len(x) == H:
+        return x
+    pad = np.full((H - len(x),) + x.shape[1:], fill, dtype=x.dtype)
+    return np.concatenate([x, pad], 0)
+
+
 def target_mask(a: RunArrays, o: int, H: int) -> np.ndarray:
     """Valid label: measured, not closed in that bucket, modelled road (model roads have passenger access and a
-    represented SUMO edge by construction), finite."""
-    z = np.asarray(a.z[o:o + H])
-    return np.asarray(a.obs[o:o + H]) & ~np.asarray(a.closed[o:o + H]) & np.isfinite(z)
+    represented SUMO edge by construction), finite, and inside the run's demand phase (drain / past-the-end buckets of
+    a shorter-horizon dataset are never labels)."""
+    z = _fut(a.z, o, H, np.nan)
+    ph = _fut(a.phase, o, H, -1)
+    return _fut(a.obs, o, H, False) & ~_fut(a.closed, o, H, True) & np.isfinite(z) & (ph == PHASES["demand"])[:, None]
 
 
 def make_window(cfg: Config, a: RunArrays, o: int, norm: dict) -> Window:
@@ -311,9 +322,9 @@ def make_window(cfg: Config, a: RunArrays, o: int, norm: dict) -> Window:
     fut = a.time[o] + B * np.arange(H)
     return Window(run_id=a.dir.name, origin=o, issued_at=int(a.time[o]), hist=normalize_hist(f, norm), zf_last=zf[-1],
                   time_hist=time_features(a.time[o - Th:o]), time_fut=time_features(fut),
-                  fut_base=np.asarray(a.sched[o:o + H], np.float32)[..., None], fut_start=fut.astype(np.int64),
-                  target_z=np.where(m, np.asarray(a.z[o:o + H]), np.nan).astype(np.float32), target_mask=m,
-                  tt=np.asarray(a.tt[o:o + H]), speed=np.asarray(a.speed[o:o + H]), cong=np.asarray(a.cong[o:o + H]))
+                  fut_base=_fut(a.sched, o, H, 0).astype(np.float32)[..., None], fut_start=fut.astype(np.int64),
+                  target_z=np.where(m, _fut(a.z, o, H, np.nan), np.nan).astype(np.float32), target_mask=m,
+                  tt=_fut(a.tt, o, H, np.nan), speed=_fut(a.speed, o, H, np.nan), cong=_fut(a.cong, o, H, np.nan))
 
 
 def static_normalized(g: RoadGraph, norm: dict) -> np.ndarray:

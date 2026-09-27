@@ -36,6 +36,8 @@ class DataCfg:
     split_salt: str = "event_patch_v1"
     n_val_groups: int = 1
     n_test_groups: int = 1
+    fixed_split: dict | None = None           # {"val": [...], "test": [...]} event groups; overrides the hash order
+    extra_datasets: list | None = None        # [{batch, dataset_id}]: more frozen datasets (same network / roads)
 
 
 @dataclass
@@ -60,6 +62,16 @@ class ModelCfg:
     dropout: float = 0.1
     use_events: bool = True
     event_hops: int = 2                      # sparse up/downstream propagation steps of the context
+    # optional extensions (EVENT_ANTICIPATION_IMPROVEMENTS_PLAN.md); None = absent, keeps old config hashes
+    jam_head: bool | None = None             # P(jam) logit per road x horizon from the decoder state
+    quantiles: list | None = None            # e.g. [0.1, 0.9]: z quantile heads (offsets around the point forecast)
+    onset_features: bool | None = None       # per-case recent traffic near the footprint (history, causal)
+    route_features: bool | None = None       # per-(case, road) shortest-path load toward / away from the footprint
+    event_attn_pool: bool | None = None      # learned attention pooling over each road's event pairs (+ mean/max)
+    oracle_features: bool | None = None      # DIAGNOSTIC ONLY: hidden per-run event parameters (not deployable)
+
+
+MODEL_EXTENSIONS = ("jam_head", "quantiles", "onset_features", "route_features", "event_attn_pool", "oracle_features")
 
 
 @dataclass
@@ -123,6 +135,12 @@ class Config:
     def to_dict(self) -> dict:
         d = asdict(self)
         d.pop("source_path")
+        for k in ("fixed_split", "extra_datasets"):   # absent = old behaviour; keeps earlier config hashes
+            if d["data"].get(k) is None:
+                d["data"].pop(k, None)
+        for k in MODEL_EXTENSIONS:
+            if d["model"].get(k) is None:
+                d["model"].pop(k, None)
         return d
 
     def hash(self) -> str:
@@ -154,7 +172,7 @@ def from_dict(d: dict) -> Config:
 
 def _load_raw(path: Path, depth: int = 0) -> dict:
     """YAML with `inherit:` resolved recursively (base first, child overrides)."""
-    if depth > 8:
+    if depth > 16:
         raise ValueError(f"inherit chain too deep at {path}")
     raw = yaml.safe_load(path.read_text()) or {}
     if "inherit" in raw:

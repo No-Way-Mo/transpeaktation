@@ -41,7 +41,10 @@ from .model import build_model
 from .train import (Data, checkpoint_payload, forward, load_checkpoint, pick_device, seed_all, set_rng_state,
                     to_batch)
 
-FAST = ("events.", "hor.")      # parameter prefixes trained at lr_event
+FAST = ("events.", "hor.", "jam_head.", "q_head.")   # parameter prefixes trained at lr_event
+NEW_HEADS = ("jam_head.", "q_head.", "events.attn.")
+EVENT_IN = "events.pair.0.weight"
+GROW_COLS = (EVENT_IN, "events.agg.0.weight")   # inputs extended at the end (event features / attention pooling)
 
 
 @dataclass
@@ -64,6 +67,16 @@ class RetrainCfg:
     guardrails: dict = field(default_factory=lambda: {"first_hour_citywide_max_rel": 0.02,
                                                       "first_hour_control_max_rel": 0.02,
                                                       "first_hour_severe_max_rel": 0.02})
+    # improvement-plan options (defaults = the v4/v5 objective)
+    jam_weight: float = 0.0          # BCE on the jam head (model.jam_head), per stratum like the z loss
+    jam_pos_weight: float = 1.0      # positive-class weight of that BCE
+    jam_tolerance: int = 0           # label = jam anywhere within +-k target buckets (timing-tolerant)
+    quantile_weight: float = 0.0     # pinball loss on the quantile heads (model.quantiles)
+    attendance_weight: bool = False  # event-run windows weighted by exp(0.5 (log att - mean log att)), clipped 0.5-2
+    lr_schedule: str = "constant"    # constant | cosine (per step, linear warm-up)
+    warmup_epochs: float = 0.5
+    init: str = "parent"             # parent (migrate the parent's weights) | scratch (random init; parent = norm only)
+    select_on: str = "total"         # total | anticipation (validation Huber + jam BCE on the anticipation stratum)
 
     def digest(self) -> str:
         import hashlib
@@ -89,13 +102,18 @@ def migrate(model: torch.nn.Module, parent_sd: dict, noise: float, seed: int) ->
     neither identical in shape nor the horizon embedding is an error (no strict=False shortcuts)."""
     sd = model.state_dict()
     copied, grown = [], {}
-    missing = [k for k in sd if k not in parent_sd]
+    new_heads = [k for k in sd if k not in parent_sd and k.startswith(NEW_HEADS)]
+    missing = [k for k in sd if k not in parent_sd and k not in new_heads]
     unexpected = [k for k in parent_sd if k not in sd]
     if missing or unexpected:
         raise SystemExit(f"parent/new model key mismatch: missing {missing[:5]}, unexpected {unexpected[:5]}")
     gen = torch.Generator().manual_seed(seed)
     new = {}
     for k, v in sd.items():
+        if k in new_heads:              # absent in the parent: keep this model's (deliberate) initialisation
+            new[k] = v.clone()
+            grown[k] = {"init": "new head (model init)"}
+            continue
         p = parent_sd[k].to(device=v.device, dtype=v.dtype)
         if p.shape == v.shape:
             new[k] = p.clone()
@@ -105,6 +123,10 @@ def migrate(model: torch.nn.Module, parent_sd: dict, noise: float, seed: int) ->
             extra = p[-1:].expand(v.shape[0] - h0, -1) + noise * torch.randn(v.shape[0] - h0, v.shape[1], generator=gen).to(v.device)
             new[k] = torch.cat([p, extra.to(v.dtype)], 0)
             grown[k] = {"parent_rows": h0, "new_rows": v.shape[0] - h0, "init": f"parent last row + N(0, {noise}) seed {seed}"}
+        elif k in GROW_COLS and p.shape[0] == v.shape[0] and p.shape[1] < v.shape[1]:
+            # extra event features are appended after the parent's (by name, verified in preflight): zero columns
+            new[k] = torch.cat([p, torch.zeros(v.shape[0], v.shape[1] - p.shape[1], device=v.device, dtype=v.dtype)], 1)
+            grown[k] = {"parent_cols": p.shape[1], "new_cols": v.shape[1] - p.shape[1], "init": "zero"}
         else:
             raise SystemExit(f"cannot migrate {k}: parent {tuple(p.shape)} -> new {tuple(v.shape)}")
     for k in sd:   # graph buffers (patches, arcs, static) must be the parent's exactly
@@ -141,10 +163,83 @@ def hgroup_huber(pred, target, mask, groups, delta: float = 1.0) -> torch.Tensor
     return tot / wsum if wsum else tot
 
 
-def objective(pred, b, mk, rc: RetrainCfg, delta: float) -> tuple[torch.Tensor, dict]:
-    comps = {k: hgroup_huber(pred, b["target"], mk[k], rc.horizon_groups, delta) for k in rc.weights}
+def hgroup_mean(l: torch.Tensor, mask: torch.Tensor, groups) -> torch.Tensor:
+    """Per-cell loss l [B,H,N] -> masked mean per horizon, equal horizons inside a group, weighted groups."""
+    l = l.float() * mask
+    n = mask.sum(dim=(0, 2)).float()
+    per_h = l.sum(dim=(0, 2)) / n.clamp(min=1)
+    tot, wsum = l.sum() * 0.0, 0.0
+    for a, b_, w in groups:
+        has = n[a:b_] > 0
+        if has.any():
+            tot = tot + w * per_h[a:b_][has].mean()
+            wsum += w
+    return tot / wsum if wsum else tot
+
+
+def jam_labels(b: dict, thr: float, tol: int) -> torch.Tensor:
+    """[B,H,N] float jam label from the target z (congestion = 1 - exp(-z) >= thr) on valid cells; with tol > 0,
+    a jam anywhere within +-tol valid target buckets."""
+    y = ((b["target"] >= float(np.log(1.0 / (1.0 - thr)))) & b["mask"]).float()
+    if tol > 0:
+        y = F.max_pool1d(y.permute(0, 2, 1).reshape(-1, 1, y.shape[1]), 2 * tol + 1, 1, tol) \
+            .reshape(y.shape[0], y.shape[2], y.shape[1]).permute(0, 2, 1)
+    return y
+
+
+def objective(pred, b, mk, rc: RetrainCfg, delta: float, thr: float = 0.5, w_window: float = 1.0
+              ) -> tuple[torch.Tensor, dict]:
+    """pred: z [B,H,N] or the model's aux dict. Per stratum k: w_k (Huber_z + jam_weight BCE + quantile_weight
+    pinball); all horizon-grouped; multiplied by the window weight (attendance)."""
+    out = pred if isinstance(pred, dict) else {"z": pred}
+    z = out["z"]
+    comps = {k: hgroup_huber(z, b["target"], mk[k], rc.horizon_groups, delta) for k in rc.weights}
+    info = {k: float(v) for k, v in comps.items()}
     total = sum(rc.weights[k] * v for k, v in comps.items())
-    return total, {k: float(v) for k, v in comps.items()}
+    if rc.jam_weight and "jam_logit" in out:
+        y = jam_labels(b, thr, rc.jam_tolerance)
+        pw = torch.tensor(rc.jam_pos_weight, device=z.device)
+        bce = F.binary_cross_entropy_with_logits(out["jam_logit"].float(), y, pos_weight=pw, reduction="none")
+        for k in rc.weights:
+            v = hgroup_mean(bce, mk[k], rc.horizon_groups)
+            info[f"jam_{k}"] = float(v)
+            total = total + rc.weights[k] * rc.jam_weight * v
+    if rc.quantile_weight and "z_q" in out:
+        qs = torch.tensor(rc_quantiles(out), device=z.device)
+        e = b["target"][..., None] - out["z_q"].float()                       # [B,H,N,Q]
+        pin = torch.maximum(qs * e, (qs - 1) * e).mean(-1)
+        for k in rc.weights:
+            v = hgroup_mean(pin, mk[k], rc.horizon_groups)
+            info[f"q_{k}"] = float(v)
+            total = total + rc.weights[k] * rc.quantile_weight * v
+    return total * w_window, info
+
+
+def rc_quantiles(out: dict) -> list[float]:
+    return out.get("_quantiles", [0.1, 0.9])
+
+
+def forward_aux(model, b: dict, amp: bool) -> dict:
+    dev = b["hist"].device.type
+    with torch.autocast(device_type=dev, dtype=torch.bfloat16, enabled=amp and dev == "cuda"):
+        out = model(b["hist"], b["time_hist"], b["time_fut"], b["fut_base"], b.get("event_feats"),
+                    b.get("pair_road"), aux=True)
+    out = {k: v.float() for k, v in out.items()}
+    out["_quantiles"] = model.quantiles
+    return out
+
+
+def attendance_weights(cfg, index: pd.DataFrame) -> np.ndarray:
+    """Per window: event runs exp(0.5 (log att - mean log att over event families)) clipped to [0.5, 2]; controls
+    1. Attendance = the family's event attendance from scenarios.json (loss weight only, never a model input)."""
+    sc = read_json(cfg.batch_dir / "scenarios.json")
+    att = {f["family_id"]: float(f["event"].get("attendance") or f["event"].get("attendance_assumed") or np.nan)
+           for f in sc["families"]}
+    la = np.log(np.array([att.get(f, np.nan) for f in index.family_id]))
+    ev = index.with_event.to_numpy()
+    mu = np.nanmean(la[ev])
+    w = np.where(ev, np.clip(np.exp(0.5 * (la - mu)), 0.5, 2.0), 1.0)
+    return np.nan_to_num(w, nan=1.0)
 
 
 def sampling_targets(rc: RetrainCfg) -> tuple:
@@ -189,15 +284,16 @@ class Prefetch:
 @torch.no_grad()
 def validate(cfg, data, index, model, obj: Objective, rc: RetrainCfg) -> dict:
     model.eval()
-    rows = index[index.partition == "val"]
+    rows = index[(index.partition == "val") & (index.get("ds", 0) == 0)]
     if rc.val_stride > 1:
         rows = rows.groupby("run_id", group_keys=False).apply(lambda g: g.sort_values("origin").iloc[::rc.val_stride])
     sums: dict = {}
     for r, w in Prefetch(data, rows, list(rows.index), rc.prefetch):
         b = to_batch(w, data.device, data.event_tensors(r.run_id), cfg)
         mk = obj.masks(r, b)
-        p = forward(model, b, cfg.train.amp)
-        tot, info = objective(p, b, mk, rc, cfg.train.huber_delta)
+        out = forward_aux(model, b, cfg.train.amp)
+        p = out["z"]
+        tot, info = objective(out, b, mk, rc, cfg.train.huber_delta, cfg.eval.buildup_congestion)
         info["total"] = float(tot)
         m = b["mask"][:, :6]
         info["first_hour_z_mae"] = float(((p[:, :6] - b["target"][:, :6]).abs() * m).sum() / m.sum().clamp(min=1))
@@ -212,23 +308,26 @@ def validate(cfg, data, index, model, obj: Objective, rc: RetrainCfg) -> dict:
 
 # ---------------------------------------------------------------- training
 
-def preflight(cfg, pck: dict, data) -> list[str]:
+def preflight(cfg, pck: dict, data, scratch: bool = False) -> list[str]:
     problems = []
     pcfg = cfg_mod.from_dict(pck["config"])
     if not pcfg.model.use_events or not cfg.model.use_events:
         problems.append("parent and new model must both use events")
-    if dataclasses.asdict(pcfg.model) != dataclasses.asdict(cfg.model):
+    base = lambda m: {k: v for k, v in dataclasses.asdict(m).items() if k not in cfg_mod.MODEL_EXTENSIONS}
+    if base(pcfg.model) != base(cfg.model) and not scratch:
         problems.append("model section differs from the parent's")
     for k in ("history_steps", "bucket_min", "max_ffill", "network", "split_salt"):
         if getattr(pcfg.data, k) != getattr(cfg.data, k):
             problems.append(f"data.{k} differs from the parent's")
     if cfg.data.horizon_steps <= pcfg.data.horizon_steps:
         problems.append("new horizon must be longer than the parent's")
-    schema = {"history": HIST_FEATURES, "time": TIME_FEATURES, "future_base": FUTURE_BASE_FEATURES,
-              "event_pair": ev_mod.EVENT_PAIR_FEATURES}
+    schema = {"history": HIST_FEATURES, "time": TIME_FEATURES, "future_base": FUTURE_BASE_FEATURES}
     for k, v in schema.items():
         if pck["feature_schema"].get(k) != v:
             problems.append(f"feature schema '{k}' differs from the parent")
+    pe, ne = pck["feature_schema"].get("event_pair"), ev_mod.event_feature_names(cfg)
+    if pe != ne[:len(pe or [])] and not scratch:
+        problems.append("parent event features are not a prefix of the new model's (migration copies by position)")
     g = data.graph
     if list(map(str, g.model_ids)) != pck["model_ids"]:
         problems.append("ordered road ids differ from the parent")
@@ -262,15 +361,24 @@ def retrain(cfg, parent: str, resume: bool = False, max_epochs: int | None = Non
     pck = load_checkpoint(ppath)
     psha = sha256_file(ppath)
     data = Data(cfg, dev)
-    problems = preflight(cfg, pck, data)
+    problems = preflight(cfg, pck, data, scratch=rc.init == "scratch")
     if problems:
         raise SystemExit("retrain preflight failed:\n- " + "\n- ".join(problems))
     data.norm = pck["norm"]                                   # parent normalisation (provenance recorded)
     model = build_model(cfg, data.graph, pck["norm"], len(ev_mod.EVENT_PAIR_FEATURES)).to(dev)
-    mig = migrate(model, pck["model"], rc.new_row_noise, rc.seed)
+    mig = migrate(model, pck["model"], rc.new_row_noise, rc.seed) if rc.init == "parent" else \
+        {"copied": 0, "grown": {}, "init": "scratch (random, seed %d); parent used for input normalisation only" % rc.seed}
     groups = param_groups(model, rc)
     opt = torch.optim.AdamW(groups, weight_decay=rc.weight_decay)
     index, audit = _index(cfg, data, rc, counts=True)
+    index["w_window"] = attendance_weights(cfg, index) if rc.attendance_weight else 1.0
+    n_train_fam = index[index.partition == "train"].family_id.nunique()
+    steps_per_epoch = max(1, n_train_fam * rc.per_family)
+    sched = None
+    if rc.lr_schedule == "cosine":
+        total, warm = rc.max_epochs * steps_per_epoch, max(1, int(rc.warmup_epochs * steps_per_epoch))
+        sched = torch.optim.lr_scheduler.LambdaLR(
+            opt, lambda t: min(1.0, (t + 1) / warm) * 0.5 * (1 + np.cos(np.pi * min(t, total) / total)))
     out = cfg.exp_dir
     out.mkdir(parents=True, exist_ok=True)
     index.to_parquet(out / "event_windows.parquet", index=False)
@@ -281,6 +389,7 @@ def retrain(cfg, parent: str, resume: bool = False, max_epochs: int | None = Non
             "migration": mig, "normalisation": "parent checkpoint norm (dataset norm.json not used)",
             "dataset_manifest_sha256": data.manifest_sha, "splits_sha256": data.splits_sha,
             "windows_sha256": sha256_file(cfg.dataset_dir / "windows.parquet"), "git": _git(),
+            "config_path": f"configs/{Path(cfg.source_path).name}" if getattr(cfg, "source_path", "") else None,
             "trainable_params": sum(p.numel() for g_ in groups for p in g_["params"]),
             "total_params": sum(p.numel() for p in model.parameters())}
     state = {"epoch": 0, "best_val": float("inf"), "best_epoch": -1, "bad_epochs": 0, "curves": [],
@@ -292,6 +401,8 @@ def retrain(cfg, parent: str, resume: bool = False, max_epochs: int | None = Non
             raise SystemExit("resume refused: parent, config or retrain settings changed")
         model.load_state_dict(last["model"])
         opt.load_state_dict(last["optimizer"])
+        if sched is not None and last.get("scheduler"):
+            sched.load_state_dict(last["scheduler"])
         state = last["state"]
         set_rng_state(last["rng"], rng)
         log(f"resumed at epoch {state['epoch']}")
@@ -315,11 +426,14 @@ def retrain(cfg, parent: str, resume: bool = False, max_epochs: int | None = Non
         for r, w in Prefetch(data, index, plan, rc.prefetch):
             b = to_batch(w, dev, data.event_tensors(r.run_id), cfg)
             mk = obj.masks(r, b)
-            loss, info = objective(forward(model, b, cfg.train.amp), b, mk, rc, cfg.train.huber_delta)
+            loss, info = objective(forward_aux(model, b, cfg.train.amp), b, mk, rc, cfg.train.huber_delta,
+                                   cfg.eval.buildup_congestion, float(r.w_window))
             opt.zero_grad(set_to_none=True)
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), rc.grad_clip)
             opt.step()
+            if sched is not None:
+                sched.step()
             info["total"] = float(loss)
             for k, v in info.items():
                 s = sums.setdefault(k, [0.0, 0])
@@ -332,9 +446,10 @@ def retrain(cfg, parent: str, resume: bool = False, max_epochs: int | None = Non
         dt = time.time() - t0
         state["train_seconds"] += dt
         peak = torch.cuda.max_memory_allocated() / 2**20 if dev.type == "cuda" else float("nan")
-        improved = v["total"] < state["best_val"] - 1e-6
+        score = v["total"] if rc.select_on == "total" else v["anticipation"] + v.get("jam_anticipation", 0.0)
+        improved = score < state["best_val"] - 1e-6
         if improved:
-            state.update(best_val=v["total"], best_epoch=state["epoch"], bad_epochs=0)
+            state.update(best_val=score, best_epoch=state["epoch"], bad_epochs=0)
         else:
             state["bad_epochs"] += 1
         state["done"] = state["bad_epochs"] >= rc.patience
@@ -345,6 +460,8 @@ def retrain(cfg, parent: str, resume: bool = False, max_epochs: int | None = Non
         state["curves"].append(row)
         payload = checkpoint_payload(cfg, data, model, opt, state, rng)
         payload["retrain"] = meta | {"epoch": state["epoch"], "validation": v}
+        if sched is not None:
+            payload["scheduler"] = sched.state_dict()
         payload["model_version"] = f"{cfg.name}-{cfg.hash()}-rt{rc.digest()[:8]}"
         torch.save(payload, out / "last.pt")
         if improved:
@@ -378,21 +495,29 @@ HORIZON_GROUPS_MIN = ((0, 60, "0-60"), (60, 120, "60-120"), (120, 180, "120-180"
                       (240, 300, "240-300"))
 
 
-def evaluate(checkpoint: str, partition: str = "val", log=None) -> dict:
+def evaluate(checkpoint: str, partition: str = "val", log=None, dataset_config: str | None = None,
+             tag: str | None = None) -> dict:
     """Candidate vs persistence (repeated to H) vs the parent on its own first-hour horizons, identical windows and
     masks. Cells are keyed by (system, stratum, horizon_min, family|lead category); the report cross-tabulates
     event lead at issue time and target horizon."""
     log = log or (lambda m: print(m, flush=True))
-    ck = load_checkpoint(cfg_mod.ML_DIR / checkpoint if not Path(checkpoint).is_absolute() else checkpoint)
+    paths = [cfg_mod.ML_DIR / c if not Path(c).is_absolute() else Path(c) for c in str(checkpoint).split(",")]
+    ck = load_checkpoint(paths[0])
     cfg = cfg_mod.from_dict(ck["config"])
+    if dataset_config:   # score this checkpoint on another dataset's windows (same network / horizon / model)
+        other = cfg_mod.load(dataset_config)
+        if other.data.horizon_steps != cfg.data.horizon_steps or other.data.network != cfg.data.network:
+            raise SystemExit("dataset config differs in horizon or network")
+        cfg.data, cfg.name = other.data, other.name
     rc = RetrainCfg(**ck["retrain"]["retrain"])
     dev = pick_device(cfg)
     data = Data(cfg, dev)
+    if list(map(str, data.graph.model_ids)) != ck["model_ids"]:
+        raise SystemExit("dataset road order differs from the checkpoint")
     data.norm = ck["norm"]
+    data.windows = data.windows[(data.windows.ds == 0) & (data.windows.partition == partition)].reset_index(drop=True)
     index, _ = _index(cfg, data, rc, counts=False)
-    model = build_model(cfg, data.graph, ck["norm"], len(ev_mod.EVENT_PAIR_FEATURES)).to(dev)
-    model.load_state_dict(ck["model"])
-    model.eval()
+    model = load_models(paths, data.graph, dev)
     pck = load_checkpoint(ck["retrain"]["parent"])
     pcfg = cfg_mod.from_dict(pck["config"])
     parent = build_model(pcfg, data.graph, pck["norm"], len(ev_mod.EVENT_PAIR_FEATURES)).to(dev)
@@ -400,7 +525,7 @@ def evaluate(checkpoint: str, partition: str = "val", log=None) -> dict:
     parent.eval()
     Hp = pcfg.data.horizon_steps
     acc = ee.StratAcc(cfg.eval.buildup_congestion)
-    rows = index[index.partition == partition]
+    rows = index[(index.partition == partition) & (index.get("ds", 0) == 0)]   # main dataset windows only
     nbs: dict = {}
     t0 = time.time()
     g = data.graph
@@ -413,8 +538,8 @@ def evaluate(checkpoint: str, partition: str = "val", log=None) -> dict:
         b = to_batch(w, dev, data.event_tensors(r.run_id), cfg)
         with torch.no_grad():
             zc = forward(model, b, cfg.train.amp)[0].float().cpu().numpy()
-            bp = dict(b, time_fut=b["time_fut"][:, :Hp], fut_base=b["fut_base"][:, :Hp],
-                      event_feats=b["event_feats"][:, :1 + Hp])
+            bp = dict(b, time_fut=b["time_fut"][:, :Hp], fut_base=b["fut_base"][:, :Hp],   # parent: its base features
+                      event_feats=b["event_feats"][:, :1 + Hp, :, :len(ev_mod.event_feature_names(pcfg))])
             zp = forward(parent, bp, cfg.train.amp)[0].float().cpu().numpy()
         zpers = np.broadcast_to(persistence_z(w.zf_last), w.target_mask.shape)
         acc.add("candidate", key, derive(zc, g), tgt, st)
@@ -424,7 +549,7 @@ def evaluate(checkpoint: str, partition: str = "val", log=None) -> dict:
             log(f"  eval {partition}: {k}/{len(rows)} windows")
     cells = acc.frame()
     cells[["family_id", "lead_cat"]] = cells.family_id.str.split("|", n=1, expand=True)
-    od = cfg.exp_dir / f"eval_retrain_{partition}"
+    od = cfg.exp_dir / (f"eval_retrain_{partition}" + (f"_{tag}" if tag else ""))
     od.mkdir(parents=True, exist_ok=True)
     cells.to_parquet(od / "cells.parquet", index=False)
     fh = cells[cells.horizon_min <= 60]
@@ -475,6 +600,7 @@ def write_report(exp_dir, path, timings: dict | None = None) -> Path:
     idx = pd.read_parquet(exp_dir / "event_windows.parquet")
     man = read_json(cfg.dataset_dir / "manifest.json")
     H = meta["horizon"]
+    cp = meta.get("config_path") or "configs/event_patch_v4_h18.yaml"
     L = [f"# Long-horizon retraining: {H * cfg.data.bucket_min} min ({H} buckets)", "",
          "> **Synthetic.** SUMO scenarios on real SF roads/permits; demand and attendance are assumptions. Road/bucket "
          "labels overlap and are not independent trials.", "",
@@ -530,13 +656,73 @@ def write_report(exp_dir, path, timings: dict | None = None) -> Path:
           "an irreducible floor from them.",
           "- Paired event-minus-control impact metrics were not computed in this pass.", "",
           "## Reproduce", "", "```",
-          f"python -m eventsim.citywide_batch plan --batch {cfg.data.batch} --families-per-event 8 --seeds 2 --seed 41 "
-          "--events folsom portola sunday_streets_excelsior bearrison halloween_cortland chinatown_night_market "
-          "potrero_hill_festival --windows arrival departure --horizon-min 180",
-          "python -m forecast audit --config configs/event_patch_v4_h18.yaml",
-          "python -m forecast prepare --config configs/event_patch_v4_h18.yaml --workers 24",
-          f"python -m forecast retrain --config configs/event_patch_v4_h18.yaml --parent {meta['parent']}",
+          f"python -m eventsim.citywide_batch plan --batch {cfg.data.batch} ...   # exact arguments: the batch's scenarios.json",
+          f"python -m forecast audit --config {cp}",
+          f"python -m forecast prepare --config {cp} --workers 24",
+          f"python -m forecast retrain --config {cp} --parent {meta['parent']}",
           f"python -m forecast evaluate-retrain --checkpoint {exp_dir.name}/best.pt --partition test", "```", ""]
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(L), encoding="utf-8")
     return path
+
+
+def compare_report(exp_dirs: dict, path, title: str, notes: list[str] | None = None) -> Path:
+    """One table per partition across experiments scored on identical windows: first-hour guardrail vs v2, hours 2-3
+    vs persistence, and (if present) jam-wrapper / jam-head build-up metrics. exp_dirs: label -> (experiment dir,
+    eval suffix), e.g. {"v4": (v5_dir, "_v4"), "v5": (v5_dir, "")}."""
+    from .finetune import _md
+    L = [f"# {title}", "", "> **Synthetic** SUMO data. All systems scored on the same windows of the same dataset; "
+         "thresholds for jam warnings are chosen on Bearrison (val) only.", ""] + (notes or [])
+    for part, label in (("val", "Bearrison (validation)"), ("test", "Portola (held-out test, before-start side)")):
+        rows, jam_rows = [], []
+        for name, (d, suf) in exp_dirs.items():
+            f = Path(d) / f"eval_retrain_{part}{suf}" / "summary.json"
+            if not f.exists():
+                continue
+            s = read_json(f)
+            c1, c2 = s["first_hour"]["candidate"], s["hours_2_3"]["candidate"]
+            rows.append({"system": name, "1h_city_mae": c1["citywide_tt_mae"], "1h_vs_v2": s["guard"]["first_hour_citywide_rel"],
+                         "guard_ok": s["guard"]["first_hour_safe"], "2-3h_city_mae": c2["citywide_tt_mae"],
+                         "2-3h_near_mae": c2["event_near_tt_mae"], "2-3h_antic_mae": c2["antic_tt_mae"],
+                         "2-3h_antic_recall": c2["antic_recall"], "2-3h_antic_precision": c2["antic_precision"],
+                         "persist_2-3h_antic_mae": s["hours_2_3"]["persistence"]["antic_tt_mae"]})
+            jf = Path(d) / "jam_wrapper" / f"scores_{part}.csv"
+            if not suf and jf.exists():
+                js = pd.read_csv(jf)
+                a = js[(js.group == "antic") & js.hgroup.isin(["60-120", "120-180"])]
+                if len(a):
+                    wmean = lambda c: float(np.average(a[c], weights=a.positives)) if c in a and a[c].notna().all() else None
+                    jam_rows.append({"system": name, "wrapper_recall": wmean("f1thr_recall"),
+                                     "wrapper_precision": wmean("f1thr_precision"), "head_recall": wmean("head_recall"),
+                                     "head_precision": wmean("head_precision"), "ap_point": wmean("ap_point"),
+                                     "ap_head": wmean("ap_head"), "head_tol_recall": wmean("head_tol_recall"),
+                                     "head_tol_precision": wmean("head_tol_precision"), "q10_q90_coverage": wmean("q_coverage")})
+        if rows:
+            L += [f"## {label}", "", "Travel time (MAE in s per segment per bucket; antic = directly observed clear near "
+                  "roads, issued up to 3 h before start/end):", "", _md(pd.DataFrame(rows)), ""]
+        if jam_rows:
+            L += ["Build-up warnings, hours 2-3 (antic cells; `wrapper` = calibrated point forecast, `head` = jam "
+                  "head; F1-best thresholds from validation; `tol` = jam within +-20 min):", "", _md(pd.DataFrame(jam_rows)), ""]
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("\n".join(L), encoding="utf-8")
+    return path
+
+
+def load_models(paths: list, graph, dev):
+    """One checkpoint -> its model; several -> an Ensemble (same roads, horizon, event features and norm)."""
+    from .model import Ensemble
+    models, ref = [], None
+    for p in paths:
+        ck = load_checkpoint(p)
+        c = cfg_mod.from_dict(ck["config"])
+        key = (ck["model_ids"] == list(map(str, graph.model_ids)), c.data.horizon_steps, tuple(ev_mod.event_feature_names(c)),
+               json.dumps(ck["norm"], sort_keys=True))
+        if ref is None:
+            ref = key
+        elif key != ref:
+            raise SystemExit(f"{p}: ensemble members differ in roads / horizon / event features / normalisation")
+        m = build_model(c, graph, ck["norm"]).to(dev)
+        m.load_state_dict(ck["model"])
+        models.append(m.eval())
+    return models[0] if len(models) == 1 else Ensemble(models).eval()

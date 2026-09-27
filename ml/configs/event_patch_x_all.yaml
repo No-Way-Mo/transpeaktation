@@ -1,0 +1,10 @@
+# Overnight: "route" variant (heads + onset + route features, tuned loss) on every simulation we have:
+# b5 (3-hour windows) + b4 (3-hour windows, 7 events, other seeds) + b3_main (60-min windows incl. full event days).
+# Validation / evaluation on b5 windows only.
+inherit: event_patch_v6_route.yaml
+name: event_patch_x_all
+data:
+  extra_datasets: [{batch: b3_main, dataset_id: b3_main_v3net_ep2}, {batch: b4_long_event, dataset_id: b4_long_h18_v1}]
+retrain:
+  per_family: 12
+  max_epochs: 14

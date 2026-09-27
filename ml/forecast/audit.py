@@ -14,7 +14,9 @@ import numpy as np
 import pandas as pd
 import pyarrow.parquet as pq
 
-from .config import Config, SF_TZ, read_json, save_json, sha256_file
+from functools import lru_cache
+
+from .config import ML_DIR, Config, SF_TZ, read_json, save_json, sha256_file
 
 MANIFEST_VERSION = 1
 
@@ -57,8 +59,31 @@ def _expected_network(sc: dict) -> str:
     return "v3" if corr.startswith("v3") or sc.get("schema_version", 0) >= 3 else "v2"
 
 
-def scheduled_closed(run: dict, fam: dict, times: pd.DatetimeIndex, roads: pd.Index, bucket_s: int) -> np.ndarray:
-    """[T, R] fraction of each bucket covered by a scheduled full restriction (from scenarios.json only)."""
+@lru_cache(maxsize=8)
+def _represented(net_dir: str) -> dict:
+    p = ML_DIR / "data" / "sf_citywide" / net_dir / "crosswalk.csv"
+    if not p.exists():
+        return {}
+    cw = pd.read_csv(p)
+    if "merged_parallel_into" not in cw.columns:
+        return {}
+    return {r: m for r, m in zip(cw.road_segment_id, cw.merged_parallel_into) if isinstance(m, str)}
+
+
+def represented_map(sc: dict) -> dict:
+    """Network v3 merges parallel carriageways into one SUMO edge: segment id -> the id that carries it. A closure on
+    a merged carriageway is simulated (and measured) on the representing edge (citywide_batch.BatchContext)."""
+    return _represented(sc.get("network_dir") or "net")
+
+
+def with_represented(ids, rep: dict) -> list[str]:
+    return sorted(set(ids) | {rep[s] for s in ids if s in rep})
+
+
+def scheduled_closed(run: dict, fam: dict, times: pd.DatetimeIndex, roads: pd.Index, bucket_s: int,
+                     represented: dict | None = None) -> np.ndarray:
+    """[T, R] fraction of each bucket covered by a scheduled full restriction (from scenarios.json only). With
+    `represented`, a closed merged carriageway also closes the edge that represents it (as simulated)."""
     out = np.zeros((len(times), len(roads)), np.float32)
     t0 = times.asi8 // 10**9
     for r in run["restrictions"]:
@@ -67,14 +92,15 @@ def scheduled_closed(run: dict, fam: dict, times: pd.DatetimeIndex, roads: pd.In
         b = local_to_utc(fam["date"], r["begin_s"]).timestamp()
         e = local_to_utc(fam["date"], r["end_s"]).timestamp()
         cover = np.clip((np.minimum(t0 + bucket_s, e) - np.maximum(t0, b)) / bucket_s, 0, 1)
-        idx = roads.get_indexer([s for s in r["segment_ids"] if s in roads])
+        ids = with_represented(r["segment_ids"], represented) if represented else r["segment_ids"]
+        idx = roads.get_indexer([s for s in ids if s in roads])
         idx = idx[idx >= 0]
         if len(idx):
             out[:, idx] = np.maximum(out[:, idx], cover[:, None])
     return out
 
 
-def check_run(cfg: Config, run: dict, fam: dict, seg: pd.DataFrame) -> dict:
+def check_run(cfg: Config, run: dict, fam: dict, seg: pd.DataFrame, represented: dict | None = None) -> dict:
     path = cfg.batch_dir / "export" / f"sim_{run['run_id']}.parquet"
     res = {"run_id": run["run_id"], "file": path.name, "problems": []}
     if not path.exists():
@@ -121,7 +147,7 @@ def check_run(cfg: Config, run: dict, fam: dict, seg: pd.DataFrame) -> dict:
     if obs[:, ~in_sumo].any():
         res["problems"].append("observations on roads without a SUMO edge")
     closed = t.closed.to_numpy().reshape(T, R)
-    sched = scheduled_closed(run, fam, times, pd.Index(seg.road_segment_id), cfg.data.bucket_min * 60)
+    sched = scheduled_closed(run, fam, times, pd.Index(seg.road_segment_id), cfg.data.bucket_min * 60, represented)
     cmp = in_sumo[None, :]
     full = (sched >= 1.0) & cmp
     anyc = (sched > 0) & cmp
@@ -144,6 +170,15 @@ def check_run(cfg: Config, run: dict, fam: dict, seg: pd.DataFrame) -> dict:
 
 def split_groups(groups: list[str], cfg: Config) -> dict:
     """Deterministic event-group split: order groups by sha256(salt:group); first n_test -> test, next n_val -> val."""
+    fx = cfg.data.fixed_split
+    if fx:   # explicit event groups (keeps val/test stable when event groups are added)
+        missing = [g for p in ("val", "test") for g in fx[p] if g not in groups]
+        if missing:
+            raise SystemExit(f"fixed_split groups have no selected runs: {missing}")
+        held = set(fx["val"]) | set(fx["test"])
+        return {"test": list(fx["test"]), "val": list(fx["val"]), "train": sorted(g for g in groups if g not in held),
+                "kind": "primary" if len(groups) >= len(held) + 2 else "development (too few event groups)",
+                "rule": f"fixed: val {fx['val']}, test {fx['test']}, all other groups train"}
     order = sorted(groups, key=lambda g: hashlib.sha256(f"{cfg.data.split_salt}:{g}".encode()).hexdigest())
     n_t, n_v = cfg.data.n_test_groups, cfg.data.n_val_groups
     kind = "primary"
@@ -185,7 +220,7 @@ def run(cfg: Config) -> dict:
     checks, runs_by_family = {}, {}
     for r in sc["runs"]:
         print(f"checking {r['run_id']}", flush=True)
-        checks[r["run_id"]] = check_run(cfg, r, fams[r["family_id"]], seg)
+        checks[r["run_id"]] = check_run(cfg, r, fams[r["family_id"]], seg, represented_map(sc))
         runs_by_family.setdefault(r["family_id"], []).append(r)
 
     selected, excluded = [], []

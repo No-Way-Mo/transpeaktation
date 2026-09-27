@@ -1,0 +1,7 @@
+# Overnight sweep: "route" variant with higher learning rates and more windows per epoch.
+inherit: event_patch_v6_route.yaml
+name: event_patch_s_lr
+retrain:
+  lr_backbone: 0.0005
+  lr_event: 0.001
+  per_family: 24

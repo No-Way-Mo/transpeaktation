@@ -1,0 +1,8 @@
+# 3-hour model on the wider event batch b5_long_event (20 event groups: the 7 of b4 + Castro (merged-carriageway
+# closure check fixed) + 12 researched permit events). Same retrain settings as v4; val/test fixed to Bearrison/Portola.
+inherit: event_patch_v4_h18.yaml
+name: event_patch_v5_h18_full
+data:
+  batch: b5_long_event
+  dataset_id: b5_long_h18_v1
+  fixed_split: {val: [bearrison], test: [portola]}

@@ -1,0 +1,13 @@
+# Round 1, variant "heads": tuned + jam-probability head (timing-tolerant +-20 min labels, positives x3) + q10/q90
+# quantile heads + recent-onset features near the footprint (sections 3.1, 3.2, 3.3, 3.5).
+inherit: event_patch_v6_tuned.yaml
+name: event_patch_v6_heads
+model:
+  jam_head: true
+  quantiles: [0.1, 0.9]
+  onset_features: true
+retrain:
+  jam_weight: 1.0
+  jam_pos_weight: 3.0
+  jam_tolerance: 2
+  quantile_weight: 0.5
