@@ -884,7 +884,7 @@ input::placeholder { color: var(--muted); }
 .about-points b { font-size: 15px; color: var(--brand-text); }
 .about-points p { margin: 6px 0 0; font-size: 14px; line-height: 1.5; color: var(--ink); }
 .about-foot { text-align: center; padding: 32px 16px calc(var(--safe-bottom) + 16px); }
-.about-repo { display: inline-flex; align-items: center; gap: 2px; color: var(--action-text); text-decoration: none; font-weight: 600; }
+.about-repo { display: inline-flex; align-items: center; gap: 5px; color: var(--action-text); text-decoration: none; font-weight: 600; }
 .about-repo:hover { text-decoration: underline; }
 
 .framed { margin: 0; border-radius: 18px; overflow: hidden; background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); }
