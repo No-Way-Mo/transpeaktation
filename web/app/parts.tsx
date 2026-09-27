@@ -1,11 +1,12 @@
 'use client';
 import { useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { fmtDist, fmtWhen, fromPtInput, longerThanItLooks, mins, ptInput, RECENT, REPLAY, routeTag, stepIcon, type Place, type Route, type Step, type When } from '@/lib/route.ts';
+import { fmtDist, fmtWhen, fromPtInput, longerThanItLooks, mins, ptInput, REPLAY, routeTag, stepIcon, type Place, type Route, type Step, type When } from '@/lib/route.ts';
 import { EVENT_KINDS, eventGlyph, eventKind, type EventKind, type MapEvent } from '@/lib/context.ts';
 import type { Card, useRoutePlanner } from '@/lib/use-route-planner.ts';
 import { useVoice } from '@/lib/use-voice.ts';
 import { dataPath, planStale, type Privacy, type Stop } from '@/lib/privacy.ts';
 import { usePrivacy } from '@/lib/use-privacy.ts';
+import { useSearchHistory } from '@/lib/use-search-history.ts';
 import { solText } from './reward.tsx';
 
 type Planner = ReturnType<typeof useRoutePlanner>;
@@ -152,17 +153,22 @@ export function Compass({ onPress, movable, className = '' }: { onPress(): void;
   );
 }
 
+/** This browser's recent searches (lib/search-history.ts), newest first. A pick plans it like a search result. */
+export function RecentPlaces({ p }: { p: Planner }) {
+  const recent = useSearchHistory();
+  return (
+    <div className="list">
+      <div className="label">Recent</div>
+      {recent.map(pl => <PlaceRow key={`${pl.lat},${pl.lon}`} place={pl} onPick={() => p.go(pl)} />)}
+      {!recent.length && <div className="status">No recent searches</div>}
+    </div>
+  );
+}
+
 /** Recent places (empty query), or place results (typed query). */
 export function SearchResults({ p }: { p: Planner }) {
   const { q, results, searching } = p.search;
-  if (!q.trim()) {
-    return (
-      <div className="list">
-        <div className="label">Recent</div>
-        {RECENT.map(pl => <PlaceRow key={pl.label} place={pl} onPick={() => p.go(pl)} />)}
-      </div>
-    );
-  }
+  if (!q.trim()) return <RecentPlaces p={p} />;
   return (
     <div className="list">
       <div className="label">Suggestions</div>
@@ -438,7 +444,7 @@ export function AiPrivacy({ p }: { p: Planner }) {
         <ul className="aip-keep">
           <li><Icon name="check" size={16} className="yes" />Trips, if saving is on: start and end rounded to ~100 m, the roads used minus a few blocks at each end, the time, and which route won.</li>
           <li><Icon name="check" size={16} className="yes" />If you claim a route reward: your Solana wallet address, with that trip, to pay it. The payment itself is public on Solana.</li>
-          <li><Icon name="check" size={16} className="yes" />These switches, your theme and map choices, and (on a phone) where you dragged the compass, in this browser.</li>
+          <li><Icon name="check" size={16} className="yes" />These switches, your theme and map choices, your recent searches, and (on a phone) where you dragged the compass, in this browser.</li>
           <li><Icon name="close" size={16} className="no" />Your name, email, account or device ID.</li>
           <li><Icon name="close" size={16} className="no" />Exact addresses or a location history.</li>
           <li><Icon name="close" size={16} className="no" />Voice recordings.</li>

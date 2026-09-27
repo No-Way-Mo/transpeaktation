@@ -49,11 +49,6 @@ export const fromPtInput = (v: string): number | null => {
 
 /** "Current location" as the demo start (lib/location.ts). Device mode swaps in this device's position when planning. */
 export const ORIGIN: Place = { label: 'Current location', sub: DEMO_START.name, lat: DEMO_START.lat, lon: DEMO_START.lon, current: true };
-export const RECENT: Place[] = [
-  { label: 'Oracle Park', sub: '24 Willie Mays Plaza', lat: 37.7786, lon: -122.3893 },
-  { label: 'Chase Center', sub: '1 Warriors Way', lat: 37.768, lon: -122.3877 },
-  { label: 'Ferry Building', sub: '1 Ferry Building', lat: 37.7955, lon: -122.3937 },
-];
 // Turn arrow rotation (degrees clockwise from straight ahead) per maneuver modifier.
 const ANGLES: Record<string, number> = {
   straight: 0, 'slight right': 45, right: 90, 'sharp right': 135, 'slight left': -45, left: -90, 'sharp left': -135,

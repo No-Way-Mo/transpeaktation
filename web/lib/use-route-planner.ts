@@ -9,6 +9,7 @@ import { privacyQuery, type Privacy } from './privacy.ts';
 import { getMapPrefs } from './use-map-prefs.ts';
 import { deviceLocation, NO_LOCATION } from './use-position.ts';
 import { getPrivacy } from './use-privacy.ts';
+import { addSearchHistoryItem } from './use-search-history.ts';
 import { saveWallet } from './wallet.ts';
 
 type Field = 'from' | 'to';
@@ -108,6 +109,7 @@ export function useRoutePlanner() {
 
   /** Start/search screen → route screen for `dest`, from the current start point. */
   const go = (dest: Place) => {
+    addSearchHistoryItem(dest);
     const f = from ?? ORIGIN;
     setFrom(f); setTo(dest);
     setQuery({ from: f.label, to: dest.label });
@@ -123,6 +125,7 @@ export function useRoutePlanner() {
   const applyVoice = (v: VoiceIntent) => {
     const dest = v.destination?.place;
     if (!dest) return false;
+    addSearchHistoryItem(dest);
     const f = v.origin?.place ?? from ?? ORIGIN, at = v.time && spokenTime(v.time);
     const w: When = at ? { mode: v.time_mode === 'arrive' ? 'arrive' : 'depart', at } : NOW;
     setFrom(f); setTo(dest);
@@ -150,6 +153,7 @@ export function useRoutePlanner() {
     setActive(field); fieldSearch.run(v);
   };
   const pick = (field: Field, p: Place) => {
+    addSearchHistoryItem(p); // skips "Current location"
     const nf = field === 'from' ? p : from, nt = field === 'to' ? p : to;
     setFrom(nf); setTo(nt);
     setQuery(q => ({ ...q, [field]: p.label }));

@@ -1,13 +1,13 @@
 'use client';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
-import { fmtDist, fmtTime, fmtWhen, iosArrival, mins, RECENT, stepText, type LatLng } from '@/lib/route.ts';
+import { fmtDist, fmtTime, fmtWhen, iosArrival, mins, stepText, type LatLng } from '@/lib/route.ts';
 import { ARRIVED_EXIT_MS, isArrived, navFix, navProgress, type NavProgress } from '@/lib/nav-progress.ts';
 import { useMapPrefs } from '@/lib/use-map-prefs.ts';
 import { usePosition } from '@/lib/use-position.ts';
 import { useRoutePlanner } from '@/lib/use-route-planner.ts';
 import MapView, { type MapHandle } from './map-view.tsx';
 import { AppBar, MapLayers, NavDialogs, useNav } from './menu.tsx';
-import { Compass, Endpoints, Icon, MicButton, PlaceRow, RouteList, SearchResults, TripNote, TurnIcon, WhenPicker, WhereTo } from './parts.tsx';
+import { Compass, Endpoints, Icon, MicButton, RecentPlaces, RouteList, SearchResults, TripNote, TurnIcon, WhenPicker, WhereTo } from './parts.tsx';
 import { RewardPanel } from './reward.tsx';
 
 // Sheet heights as a share of the screen: peek, half, full (Apple Maps' three detents).
@@ -223,10 +223,7 @@ export default function Mobile() {
             </div>
           </div>
           <div className="sheet-body">
-            <div className="list">
-              <div className="label">Recent</div>
-              {RECENT.map(pl => <PlaceRow key={pl.label} place={pl} onPick={() => p.go(pl)} />)}
-            </div>
+            <RecentPlaces p={p} />
           </div>
         </div>
       )}
