@@ -398,20 +398,10 @@ input::placeholder { color: var(--muted); }
 .clear-btn { flex: none; width: 20px; height: 20px; border-radius: 50%; background: var(--muted); color: var(--panel); display: flex; align-items: center; justify-content: center; padding: 0; }
 .list > .status { padding: 8px; font-size: 13px; }
 
-/* transPEAKtation suggestions: the one place violet leads */
-.smart { display: flex; flex-direction: column; gap: 8px; }
 .smart-head { display: flex; align-items: center; gap: 8px; padding: 0 8px 2px; font-size: 13px; font-weight: 650; color: var(--brand-text); }
-.smart-card { display: flex; align-items: flex-start; gap: 12px; padding: 14px; border-radius: 14px; border: 1.5px solid var(--brand-edge); background: var(--brand-tint); text-align: left; }
-.smart-card .glyph { flex: none; width: 34px; height: 34px; border-radius: 10px; background: var(--brand); color: var(--on-brand); display: flex; align-items: center; justify-content: center; }
-.smart-card .stack { gap: 4px; }
-.smart-title { font-size: 15px; font-weight: 650; line-height: 1.25; text-wrap: pretty; }
-.smart-sub { font-size: 13px; line-height: 1.4; color: var(--muted); text-wrap: pretty; }
-.badge-pill { align-self: flex-start; margin-top: 2px; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; color: var(--on-brand); background: var(--brand); }
-.badge-pill.clear { color: var(--good); background: var(--good-tint); }
 .trip-note { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border-radius: 12px; background: var(--brand-tint); }
 .trip-note svg { flex: none; margin-top: 1px; }
 .trip-note span { font-size: 13px; line-height: 1.4; color: var(--brand-text); text-wrap: pretty; }
-@media (hover: hover) { .smart-card:hover { border-color: var(--brand-strong); } }
 
 /* Phone start row: one full-width search bar, the mic inside it on the right. */
 .where-row { display: flex; align-items: center; }
@@ -440,9 +430,6 @@ input::placeholder { color: var(--muted); }
 .search-body { flex: 1; min-height: 0; overflow: auto; padding: 4px 16px calc(var(--safe-bottom) + 24px); display: flex; flex-direction: column; gap: 22px; }
 .search-body .list { gap: 4px; }
 .search-body .list > .status { padding: 10px 8px; font-size: 14px; }
-.mob .smart-card { border-radius: 16px; }
-.mob .smart-card .glyph { width: 36px; height: 36px; border-radius: 12px; }
-.mob .smart-title { font-size: 16px; }
 .mob .trip-note { border-radius: 14px; }
 
 /* ---------- AI & privacy ---------- */
