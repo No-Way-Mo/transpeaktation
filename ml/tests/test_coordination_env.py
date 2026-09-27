@@ -233,6 +233,39 @@ class TestRouteChoiceEnv(unittest.TestCase):
         from coordination.rl.sumo_env import sumo_backend
         self.assertEqual(a["sumo_backend"], sumo_backend("traci"))      # TP_SUMO_BACKEND=libsumo on cloud nodes
 
+    def test_adaptive_switches_on_predicted_stress(self):
+        """Default selector: heuristic unless the fastest route is predicted congested (or over budget), then the
+        learned policy; a missing checkpoint falls back to the heuristic and is recorded, never refused."""
+        from coordination.schemas import SelectionResult
+        from coordination.selectors.adaptive import Adaptive, route_stress
+        from coordination.selectors.heuristic import Heuristic
+        env = self.env(tag="adaptive")
+        env.reset(options={"seed_offset": 0})
+        _, item = env._pending
+        ctx = env.coord.selection_context([item])
+        cg, lr = route_stress(ctx, item)
+        self.assertTrue(0.0 <= cg <= 1.0 and lr >= 0.0)
+        rid = item.request.request_id
+        pick = [j for j, ok in enumerate(item.mask) if ok][-1]
+
+        class Learned:
+            def select(self, c):
+                return SelectionResult(choices={rid: pick}, policy="rl", policy_version="fake")
+        always = Adaptive(env.cfg, stress=-1.0)                         # every request counts as stressed
+        r = always.select(ctx)
+        self.assertEqual(r.policy_version, "adaptive-v1:learned_unavailable")    # no checkpoint configured
+        self.assertEqual(r.choices, Heuristic().select(ctx).choices)
+        self.assertIn("learned_unavailable", r.diagnostics[rid]["_adaptive"])
+        always.learned = Learned()
+        r = always.select(ctx)
+        self.assertEqual((r.policy_version, r.choices[rid]), ("adaptive-v1:learned", pick))
+        never = Adaptive(env.cfg, stress=2.0, load=1e9)
+        never.learned = Learned()
+        r = never.select(ctx)
+        self.assertEqual(r.policy_version, "adaptive-v1:heuristic")
+        self.assertEqual(r.choices, Heuristic().select(ctx).choices)
+        env.close()
+
     def test_keep_outputs_with_and_without_warm_state(self):
         """Full outputs (vehicle routes, 5-min edge data) do not change a warm-loaded episode, and work after loading
         a state built with or without them. (Under libsumo a cold continuation and a warm load can differ slightly;
@@ -254,7 +287,12 @@ class TestRouteChoiceEnv(unittest.TestCase):
         plain = episode(False, "p1", "ko")                                  # warm-loaded, no outputs
         kept = episode(True, "k1", "ko")                                    # warm-loaded, with outputs
         episode(True, "k2", "ko_cold")                                      # builds a state with outputs
-        again = episode(True, "k3", "ko_cold")                              # loads a state built with outputs
+        import os
+        os.environ["TP_FCD_PERIOD_S"] = "5"
+        try:
+            again = episode(True, "k3", "ko_cold")                          # loads a state built with outputs, + FCD
+        finally:
+            os.environ.pop("TP_FCD_PERIOD_S", None)
         self.assertTrue(plain["used_warm_state"] and kept["used_warm_state"] and again["used_warm_state"])
         self.assertEqual(plain["in_scope_vehicle_hours"], kept["in_scope_vehicle_hours"])
         self.assertEqual(plain["congestion"], kept["congestion"])
@@ -264,6 +302,11 @@ class TestRouteChoiceEnv(unittest.TestCase):
                 self.assertIn("<vehicle", f.read())
             with gzip.open(d / "edgedata.xml.gz", "rt") as f:
                 self.assertIn("<interval", f.read())
+            with gzip.open(d / "sumo_summary.xml.gz", "rt") as f:
+                self.assertIn("<step", f.read())
+        with gzip.open(Path(again["episode_dir"]) / "fcd.xml.gz", "rt") as f:
+            self.assertIn("<vehicle", f.read())
+        self.assertEqual(again["outputs"]["fcd_period_s"], 5.0)
 
 if __name__ == "__main__":
     unittest.main()

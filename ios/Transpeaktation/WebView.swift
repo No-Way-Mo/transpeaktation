@@ -1,4 +1,5 @@
 import CoreLocation
+import SafariServices
 import SwiftUI
 import WebKit
 
@@ -19,7 +20,7 @@ struct WebView: UIViewRepresentable {
         let web = WKWebView(frame: .zero, configuration: config)
         context.coordinator.web = web
         web.navigationDelegate = context.coordinator
-        web.uiDelegate = context.coordinator       // mic for the page's voice button (see extension below)
+        web.uiDelegate = context.coordinator       // mic for the voice button, new-tab links → Safari sheet (extension below)
         web.isOpaque = false                       // no white flash before the page paints
         web.backgroundColor = UIColor(Color.appBackground)
         web.scrollView.bounces = false             // the map handles its own panning
@@ -101,5 +102,17 @@ extension WebView.Coordinator: WKUIDelegate {
     func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin, initiatedByFrame frame: WKFrameInfo,
                  type: WKMediaCaptureType, decisionHandler: @escaping @MainActor (WKPermissionDecision) -> Void) {
         decisionHandler(type == .microphone && origin.host == webView.url?.host ? .grant : .deny)
+    }
+
+    /// Links that open a new tab (target="_blank", e.g. the menu's "About us" → /about): a WKWebView has no tabs and
+    /// drops them unless this returns a view. Show them in the in-app Safari sheet over the app (Done to come back,
+    /// its toolbar's Safari button to open in the Safari app), the iOS default for links out of an app.
+    func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction,
+                 windowFeatures: WKWindowFeatures) -> WKWebView? {
+        guard let url = navigationAction.request.url, ["http", "https"].contains(url.scheme) else { return nil }
+        var top = webView.window?.rootViewController
+        while let shown = top?.presentedViewController { top = shown }
+        top?.present(SFSafariViewController(url: url), animated: true)
+        return nil
     }
 }

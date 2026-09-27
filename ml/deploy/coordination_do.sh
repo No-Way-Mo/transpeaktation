@@ -9,7 +9,8 @@
 #        forecaster for the newest one; the forecaster builds it from Tiger traffic_metrics + Mongo closures/events
 #        once per 10-min bucket and writes it to Tiger prediction_metrics + Mongo forecast_runs; routing reads it there.
 # replay (configs/coordinated_routing_deploy.yaml): one held-out recorded synthetic run under a replay clock.
-# Selector: heuristic by default, batch (CP-SAT) per request or via config. Port 8100, bearer token
+# Selector: adaptive by default (heuristic; PPO when the fastest route is predicted congested), heuristic / batch
+# (CP-SAT) per request or via config. Port 8100, bearer token
 # COORDINATION_API_TOKEN (ml/.env; generated on first run), reachable only from the app droplet and this machine.
 # State (ledger sqlite, replay session) lives in /var/lib/transpeaktation/coordination and survives updates.
 set -euo pipefail
@@ -79,7 +80,8 @@ fi
 tar czf /tmp/coordination_bundle.tgz --exclude=__pycache__ coordination "$CONFIG" \
   data/sf_citywide/net_v3/network.json data/sf_citywide/net_v3/crosswalk.csv data/sf_citywide/net_v3/arcs_c90.json \
   data/sf_citywide/net_v3/patch.con.xml data/sf_citywide/net_v3/net_c90.net.xml \
-  data/sf_citywide/batches/b3_verify/export/segments.parquet data/sf_citywide/prepared/patch.json "${EXTRA[@]}"
+  data/sf_citywide/batches/b3_verify/export/segments.parquet data/sf_citywide/prepared/patch.json \
+  data/coordination/rl/runs_async/appo_async_s0/latest "${EXTRA[@]}"   # + PPO checkpoint for the adaptive selector
 echo "bundle $(du -h /tmp/coordination_bundle.tgz | cut -f1)"
 scp -i "$KEY" -o StrictHostKeyChecking=accept-new /tmp/coordination_bundle.tgz root@"$IP":/tmp/coordination_bundle.tgz
 { printf 'COORDINATION_API_TOKEN=%s\nFORECAST_API_TOKEN=%s\n' "$TOKEN" "$FTOKEN"; [ "$INPUT" = live ] && printf '%s\n' "$DBENV"; } \

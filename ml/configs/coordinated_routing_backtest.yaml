@@ -29,7 +29,7 @@ rl:
   checkpoint: data/coordination/rl/runs_main/ppo_s0/best
   device: cpu
 benchmark:
-  policies: [forecast_only, heuristic, batch]
+  policies: [forecast_only, heuristic, heuristic@lam=500]   # no CP-SAT batch in tests (2026-09-27)
   checkpoints:
     rl_ppo: data/coordination/rl/runs_main/ppo_s0/best
     rl_ddqn: data/coordination/rl/runs_main/ddqn_s0/best

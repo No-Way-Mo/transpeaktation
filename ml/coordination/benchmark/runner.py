@@ -109,7 +109,7 @@ def choose_scenarios(cfg: Config, suite: str, only: list | None = None) -> list[
 
 # ---------------------------------------------------------------- policies
 
-POLICY_KEYS = ("lam", "w", "rep")
+POLICY_KEYS = ("lam", "w", "rep", "stress", "load")
 
 
 def parse_policy(spec: str) -> tuple[str, dict]:
@@ -136,7 +136,10 @@ def policy_setup(cfg: Config, spec: str) -> tuple[Config, str, float]:
 
 def chooser(cfg: Config, policy: str):
     """ctx -> SelectionResult. RL policies are strict: SelectorUnavailable propagates."""
-    policy = parse_policy(policy)[0]
+    policy, over = parse_policy(policy)
+    if policy == "adaptive":                   # heuristic, learned policy (rl.checkpoint) on predicted stress
+        from ..selectors.adaptive import Adaptive
+        return Adaptive(cfg, stress=over.get("stress", 0.5), load=over.get("load", 1.0)).select
     if policy.startswith("rl_"):
         ck = cfg.benchmark.checkpoints.get(policy)
         if not ck:
