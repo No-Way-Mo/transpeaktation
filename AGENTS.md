@@ -10,8 +10,8 @@ One owner per folder. Only edit another folder with its owner's OK.
 |--------------|-------|-------|-------|
 | `ingest/`    | TBD | Event, city/road, mobility/AV, map inputs → normalize, dedupe, geocode → write to DBs | Python workers, MongoDB Atlas, Tiger Data, DigitalOcean |
 | `ml/`        | TBD | Event understanding, traffic + demand forecast, fleet optimizer | Python, Gemini API |
-| `api/`       | TBD | Places + traffic-aware routes (Mapbox, OSRM fallback) with OSM segment IDs (OSMnx); trip plan `/plan` (reads Mongo/Tiger, event-aware model, logs `trips`); voice → intent; route rewards (devnet SOL for taking the recommended route, `app/rewards.py`); later: fleet controller | FastAPI, Mapbox, OSMnx, ElevenLabs, Solana |
-| `web/`       | TBD | Trip planning app, fleet dashboard, AI transparency / privacy page, `/about` showcase (plays `demo/` at `/about/demo/*` via `app/about/demo/[file]/route.ts`) | Next.js, React, TypeScript, Leaflet |
+| `api/`       | TBD | Places + traffic-aware routes (Mapbox, OSRM fallback) with OSM segment IDs (OSMnx); trip plan `/plan` (reads Mongo/Tiger, event-aware model, logs `trips`); voice → intent; route rewards (devnet SOL for taking the recommended route, `app/rewards.py`); community events (`/community/events`, `/events/lookup`, `/events/{id}/report`, `app/community.py`); later: fleet controller | FastAPI, Mapbox, OSMnx, ElevenLabs, Solana |
+| `web/`       | TBD | Trip planning app, community events (☰ → Add Event / My Events / Saved Events, `app/host.tsx`), fleet dashboard, AI transparency / privacy page, `/about` showcase (plays `demo/` at `/about/demo/*` via `app/about/demo/[file]/route.ts`) | Next.js, React, TypeScript, Leaflet |
 | `ios/`       | TBD | SwiftUI shell that loads the `web/` app (mobile layout) in a WKWebView | SwiftUI, XcodeGen |
 | `contracts/` | everyone | Shared data shapes (events, routes, forecasts, fleet state) | JSON Schema / Pydantic |
 | `demo/`      | — | Standalone transPEAKtation SF demo (`node demo/check.mjs`) | HTML |
@@ -32,8 +32,9 @@ Mongo = long-lived entities / nested JSON. Tiger = time-series + fast-changing n
 
 | Collection | Holds | Indexes |
 |---|---|---|
-| `events` | concerts, sports, festivals (type, time, attendance) | — |
+| `events` | concerts, sports, festivals (type, time, attendance); also rider-hosted community events (`source_names: ["community"]`, written by api, map-only, `contracts/community_event.md`) | — |
 | `venues` | venue locations, capacity | — |
+| `event_reports` | reports on any event, for review (api `POST /events/{id}/report`): `event_id`, `reason`, `details`, `created_at`; no reporter identity; never hides or deletes the event | — |
 | `users` | riders | — |
 | `trips` | trip requests (api `/plan`, not replays): `requested_at`, `depart_at`, origin/destination rounded to ~100 m, picked route's `road_segment_ids` minus 3 at each end, `trip_id` (random, not linked to the rider), `arrived_at` (null until the app reports arrival via `POST /trips/{trip_id}/arrived`), `reward_offer` (recommended route + lamports, if /plan offered one) | — |
 | `rewards` | route rewards a rider took (a little SOL for the recommended route) (`POST /trips/{trip_id}/reward`): `trip_id`, `wallet`, `lamports`, `status` accepted → paid / too_soon / failed, Solana `signature`. The only place a wallet is stored | — |

@@ -925,3 +925,159 @@ input::placeholder { color: var(--muted); }
 }
 .player-big.loading { animation: player-wait 1s ease-in-out infinite alternate; } /* play pressed, demo still loading */
 @keyframes player-wait { to { opacity: 0.45; transform: scale(0.94); } }
+
+/* ---------- community hosting (app/host.tsx): ☰ → Add Event / My Events ---------- */
+/* Add Event: a quiet tint + brand-green icon, a step up from its neighbours, not a CTA. */
+.menu-item.accent { background: var(--brand-tint); color: var(--brand-text); font-weight: 600; }
+.menu-item.accent .lead { color: var(--brand-strong); }
+@media (hover: hover) { .menu-item.accent:hover { background: color-mix(in srgb, var(--brand) 26%, var(--brand-tint)); } }
+
+.host { flex: 1; min-height: 0; display: flex; flex-direction: column; outline: none; }
+.host-head { flex: none; display: flex; align-items: flex-start; gap: 10px; padding: 16px 16px 12px; }
+.host-head .close-btn { margin-top: 1px; }
+.host-title { margin: 0; font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
+.host-sub, .host-lede { font-size: 14px; color: var(--muted); line-height: 1.4; text-wrap: pretty; }
+.host-lede { margin: 0; }
+.host-body { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 4px 16px 20px; display: flex; flex-direction: column; gap: 14px; }
+.host-foot { flex: none; display: flex; flex-direction: column; gap: 8px; padding: 10px 16px 16px; border-top: 1px solid var(--line); }
+.start:disabled { opacity: 0.5; cursor: default; }
+
+.host-form { display: flex; flex-direction: column; gap: 14px; }
+.field { display: flex; flex-direction: column; gap: 6px; min-width: 0; margin: 0; padding: 0; border: none; }
+.field-label { font-size: 13px; font-weight: 600; color: var(--muted); padding: 0 2px; }
+.field-label i { font-style: normal; font-weight: 500; }
+.field input:not([type='radio']), .field textarea { box-sizing: border-box; width: 100%; min-height: 44px; padding: 10px 12px; border: 1.5px solid transparent; border-radius: 12px; background: var(--fill); font-size: 16px; outline: none; }
+.field textarea { resize: vertical; font: inherit; color: inherit; line-height: 1.4; }
+.field input:focus, .field textarea:focus { border-color: var(--action-edge); background: var(--panel); }
+.field [aria-invalid='true'] { border-color: var(--bad) !important; }
+.field .where-to input { min-height: 42px; padding: 0; border: none; background: transparent; }
+.field .where-to:focus-within { box-shadow: inset 0 0 0 1.5px var(--action-edge); background: var(--panel); }
+.field .where-to:has([aria-invalid='true']) { box-shadow: inset 0 0 0 1.5px var(--bad); }
+.field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.field-row .date { grid-column: 1 / -1; }
+.field-row.ticket { grid-template-columns: 1fr 96px; }
+.field-error { font-size: 13px; color: var(--bad); padding: 0 2px; }
+.field-hint { margin-top: -8px; font-size: 12px; color: var(--muted); padding: 0 2px; }
+.field-hint.center { margin: 0; text-align: center; line-height: 1.4; }
+.map-pick-btn { align-self: flex-start; display: flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 999px; background: var(--action-tint); color: var(--action-text); font-size: 14px; font-weight: 600; }
+.place-picked { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 6px 6px 6px 12px; border-radius: 12px; background: var(--fill); }
+.place-picked .lead { color: var(--action-text); }
+.place-picked .link-btn { height: 36px; padding: 0 8px; font-size: 15px; }
+
+.cat-opts { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.cat-opt { position: relative; display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 9px 2px 7px; border-radius: 12px; border: 1.5px solid var(--line); font-size: 12px; font-weight: 600; cursor: pointer; }
+.cat-opt input { position: absolute; opacity: 0; pointer-events: none; }
+.cat-opt:has(input:checked) { border-color: var(--action-edge); background: var(--action-tint); color: var(--action-text); }
+.cat-opt:has(input:focus-visible) { outline: 2px solid var(--action); outline-offset: 2px; }
+.cat-opt .event-pin, .host-summary .event-pin { width: 24px; height: 24px; flex: none; border-width: 1.5px; box-shadow: none; opacity: 1; }
+.seg.two { grid-template-columns: 1fr 1fr; }
+.seg button[aria-checked='true'] { background: var(--panel); box-shadow: var(--shadow-sm); }
+
+.host-summary { display: flex; align-items: flex-start; gap: 12px; padding: 12px; border-radius: 14px; background: var(--fill); text-align: left; }
+.host-done { display: flex; flex-direction: column; align-items: center; gap: 14px; padding-top: 4px; text-align: center; }
+.host-done .host-summary { align-self: stretch; }
+.done-check { width: 56px; height: 56px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--on-brand); background: var(--brand); animation: done-pop 0.4s var(--ease-out); }
+@keyframes done-pop { from { transform: scale(0.6); opacity: 0; } }
+.done-text { margin: 0; font-size: 15px; color: var(--muted); }
+.done-actions { align-self: stretch; display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
+.done-actions .foot-alt { display: flex; align-items: center; justify-content: center; gap: 8px; color: var(--brand-text); background: var(--brand-tint); }
+.done-actions .link-btn { align-self: center; font-size: 15px; }
+
+.boost { display: flex; flex-direction: column; gap: 16px; }
+.boost-pay { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.boost-pay .eyebrow { margin: 0; }
+.sol-chip { display: inline-flex; align-items: center; gap: 6px; height: 32px; padding: 0 12px; border-radius: 999px; background: var(--fill); font-size: 14px; font-weight: 600; }
+.sol-chip b { font-size: 16px; color: var(--action-text); }
+
+.my-events { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.my-event { display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: 16px; border: 1px solid var(--line); background: var(--panel); }
+.my-event[aria-current='true'] { border-color: var(--brand-edge); box-shadow: 0 0 0 2px var(--brand-tint); }
+.my-event .host-summary { padding: 0; background: none; }
+.my-tags { display: flex; flex-wrap: wrap; gap: 6px; }
+.my-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.my-actions .ghost-btn { display: inline-flex; align-items: center; gap: 6px; }
+.empty .pill-btn { align-self: center; display: inline-flex; align-items: center; gap: 6px; margin-top: 6px; }
+
+/* Map card extras: admission, ticket link, description; host controls on the host's own event. */
+.event-pop .admission { margin-top: 2px; }
+.event-pop .ticket-link { color: var(--action-text); font-weight: 600; }
+.event-pop .desc { max-width: 240px; line-height: 1.35; }
+.event-pop .host-eyebrow { margin-bottom: 4px; font-size: 10px; font-weight: 750; letter-spacing: 0.08em; text-transform: uppercase; color: var(--brand-text); }
+
+/* "View on map": one ring around the event's pin (removed when it ends). */
+.event-pin.pulse, .snap-pin.pulse { animation: pin-pulse 1.1s var(--ease-out) 2; }
+@keyframes pin-pulse { from { outline: 3px solid var(--k); outline-offset: 0; } to { outline: 3px solid transparent; outline-offset: 16px; } }
+
+/* Choose on map: a pin fixed at the map centre (tip on the spot) and the confirm bar. */
+.pick-cross { position: absolute; left: 50%; top: 50%; z-index: 20; width: 28px; height: 36px; margin: -35px 0 0 -14px; pointer-events: none; }
+.pick-cross svg { width: 100%; height: 100%; display: block; overflow: visible; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.3)); }
+.pick-cross .body { fill: var(--brand-strong); stroke: var(--marker-ring); stroke-width: 2; }
+.pick-cross .hole { fill: var(--marker-ring); }
+.pick-bar { display: flex; align-items: center; gap: 8px; }
+.pick-bar .pill-btn { align-self: center; }
+.mob-pick { position: absolute; left: 12px; right: 12px; bottom: calc(var(--safe-bottom) + 8px); z-index: 30; padding: 12px 12px 12px 16px; border-radius: 18px; background: var(--sheet-bg); backdrop-filter: blur(20px) saturate(1.6); -webkit-backdrop-filter: blur(20px) saturate(1.6); box-shadow: var(--shadow); }
+.mob-pick .ghost-btn, .mob-pick .pill-btn { height: 40px; }
+.mob-pick .sub { font-size: 14px; }
+
+/* Phone: the hosting sheet sits over the map on its own; the route UI steps aside until it closes. */
+.host-sheet { z-index: 26; height: auto; max-height: calc(100dvh - var(--bar-bottom) - 64px); }
+.host-sheet .host-head { padding-top: 10px; }
+.host-sheet .host-foot { padding-bottom: var(--safe-bottom); }
+.mob.hosting :is(.sheet:not(.host-sheet), .search-sheet, .mob-top, .compass, .mob-layers, .turn, .nav-bar) { display: none; }
+@media (max-width: 380px) {
+  .cat-opts { grid-template-columns: repeat(2, 1fr); }
+  .cat-opt { flex-direction: row; justify-content: flex-start; padding: 8px 10px; font-size: 13px; }
+}
+@media (prefers-reduced-motion: reduce) { .event-pin.pulse, .snap-pin.pulse, .done-check { animation: none; } }
+:root[data-theme='pride'] .menu-item.accent { background: linear-gradient(90deg, #FFE3E3, #FFF8CC, #DDF3E2, #DDE5FA); }
+
+/* My Events cards: ⋯ menu top right (Edit, Advertise, Add to list, Report), View event + Directions below. */
+.my-event-top { display: flex; align-items: flex-start; gap: 8px; }
+.my-event-top .host-summary { flex: 1; min-width: 0; }
+.my-actions .ghost-btn { flex: 1; justify-content: center; }
+.my-actions .ghost-btn:disabled { opacity: 0.5; cursor: default; }
+.more { position: relative; flex: none; }
+.more-btn { width: 32px; height: 32px; margin: -4px -4px 0 0; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: var(--muted); }
+.more-btn svg path { stroke-width: 3.2; }
+.more-btn[aria-expanded='true'] { background: var(--fill); color: var(--ink); }
+.more-pop { position: absolute; top: calc(100% + 4px); right: -4px; z-index: 5; min-width: 190px; padding: 6px; border-radius: 14px; background: var(--pop); border: 1px solid var(--line); box-shadow: var(--shadow); }
+.more-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 8px 10px; border-radius: 10px; font-size: 15px; text-align: left; }
+.more-item .lead { color: var(--action-text); }
+.more-item.danger, .more-item.danger .lead { color: var(--bad); }
+@media (hover: hover) { .more-btn:hover, .more-item:hover { background: var(--fill); } }
+
+/* Event cards everywhere: View event + Directions, ⋯ top right. Map card: the same, built in app/map-view.tsx. */
+.event-pop .leaflet-popup-content { position: relative; padding-right: 22px; }
+.event-pop .card-actions { display: flex; gap: 6px; margin-top: 8px; }
+.event-pop .card-actions .ghost-btn { flex: 1; height: 30px; padding: 0 10px; font-size: 13px; white-space: nowrap; }
+.event-pop .card-more { position: absolute; top: -4px; right: -10px; }
+.event-pop .card-more .more-btn { width: 28px; height: 28px; margin: 0; font-size: 18px; line-height: 1; }
+.event-pop .more-pop { min-width: 170px; }
+.event-pop .more-item { min-height: 34px; font-size: 13px; }
+.more-item:disabled { color: var(--muted); cursor: default; }
+.detail-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.detail-list { margin: 0; display: flex; flex-direction: column; gap: 12px; }
+.detail-list div { display: grid; grid-template-columns: 84px 1fr; gap: 10px; }
+.detail-list dt { font-size: 13px; font-weight: 600; color: var(--muted); }
+.detail-list dd { margin: 0; font-size: 15px; line-height: 1.4; overflow-wrap: anywhere; }
+.detail-list a { color: var(--action-text); font-weight: 600; }
+.detail-actions { display: flex; gap: 10px; }
+.detail-actions .start { flex: 1; width: auto; }
+.start.danger { background: var(--bad-fill); }
+.link-btn.center { align-self: center; font-size: 15px; }
+.toast { position: fixed; left: 50%; bottom: calc(var(--safe-bottom) + 24px); z-index: 95; transform: translateX(-50%); max-width: calc(100vw - 32px); padding: 10px 16px; border-radius: 999px; background: var(--ink); color: var(--panel); font-size: 14px; font-weight: 600; box-shadow: var(--shadow); overflow-wrap: anywhere; }
+/* An open event card sits under the activity legend's layer: step the legend aside while one is open. */
+.map:has(.leaflet-popup) .activity-legend { visibility: hidden; }
+
+/* "Coming soon" previews: promotion options (Advertise) and host analytics (event details). No numbers, no prices. */
+.soon-pill { flex: none; align-self: center; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 650; color: var(--muted); background: var(--fill); white-space: nowrap; }
+.promo-opts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.promo-opt { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--line); }
+.promo-opt .lead { color: var(--brand-text); }
+.promo-title { font-size: 12px; font-weight: 750; letter-spacing: 0.05em; text-transform: uppercase; }
+.analytics { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 14px; background: var(--fill); }
+.analytics-head { display: flex; align-items: center; justify-content: space-between; }
+.analytics-head .eyebrow { margin: 0; }
+.analytics-grid { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; }
+.analytics-grid li { display: flex; align-items: center; justify-content: space-between; }
+.analytics-grid .lead { color: var(--muted); }

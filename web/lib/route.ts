@@ -59,7 +59,7 @@ const ANGLES: Record<string, number> = {
   straight: 0, 'slight right': 45, right: 90, 'sharp right': 135, 'slight left': -45, left: -90, 'sharp left': -135,
 };
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
+export const API = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:8000';
 
 export async function api<T>(path: string, signal?: AbortSignal): Promise<T> {
   const res = await fetch(`${API}${path}`, { signal });

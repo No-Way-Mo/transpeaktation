@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
-import { CLOSED, MENU, open, PAGE_TITLES, SECTIONS, toggle, type Nav, type Page, type Panel, type Section } from '@/lib/nav.ts';
+import { CLOSED, MENU, open, PAGE_TITLES, SECTIONS, toggle, type HostAction, type Nav, type Page, type Panel, type Section } from '@/lib/nav.ts';
 import { LOCATION_MODES } from '@/lib/location.ts';
 import { LAYERS, layerOn, overlaysOn, STYLES } from '@/lib/map-prefs.ts';
 import { inIosApp } from '@/lib/route.ts';
@@ -18,8 +18,9 @@ import { AiPrivacy, EventKey, Icon, Toggle, type IconName } from './parts.tsx';
 type Planner = ReturnType<typeof useRoutePlanner>;
 export type NavApi = ReturnType<typeof useNav>;
 
-/** Open / close state for every overlay here. `wide` = desktop layout (Settings opens on its first section). */
-export function useNav(wide: boolean) {
+/** Open / close state for every overlay here. `wide` = desktop layout (Settings opens on its first section).
+ *  `onHost`: ☰ → Add Event / My Events, which open over the map (app/host.tsx), not as a menu page. */
+export function useNav(wide: boolean, onHost?: (a: HostAction) => void) {
   const [nav, setNav] = useState<Nav>(CLOSED);
   const isOpen = !!nav.panel;
   useEffect(() => {
@@ -34,6 +35,7 @@ export function useNav(wide: boolean) {
     toggle: (panel: 'menu') => setNav(n => toggle(n, panel)),
     section: (section: Section | null) => setNav(n => ({ ...n, section })),
     close: () => setNav(CLOSED),
+    host: (a: HostAction) => { setNav(CLOSED); onHost?.(a); },
   };
 }
 
@@ -108,7 +110,9 @@ function MenuList({ n }: { n: NavApi }) {
       {MENU.map((m, i) => !m ? <hr key={i} className="menu-sep" />
         : 'href' in m
           ? <a key={m.id} className="menu-item" href={m.href} target="_blank" rel="noopener" onClick={n.close}><Icon name={m.icon} size={18} className="lead" /><span>{m.label}</span></a>
-          : <button key={m.id} className="menu-item" onClick={() => n.open(m.id)}><Icon name={m.icon} size={18} className="lead" /><span>{m.label}</span></button>)}
+          : 'host' in m
+            ? <button key={m.id} className={`menu-item${m.accent ? ' accent' : ''}`} onClick={() => n.host(m.id)}><Icon name={m.icon} size={18} className="lead" /><span>{m.label}</span></button>
+            : <button key={m.id} className="menu-item" onClick={() => n.open(m.id)}><Icon name={m.icon} size={18} className="lead" /><span>{m.label}</span></button>)}
     </nav>
   );
 }
@@ -405,6 +409,9 @@ const PAGES: Record<Page, ReactNode> = {
       <h3>Map layers</h3>
       <p>One tap on the layers button on the map hides or shows event pins and route traffic colours. Settings → Map
         &amp; Routing switches each one on its own and picks the standard or satellite map.</p>
+      <h3>Adding your event</h3>
+      <p>☰ → <i>Add Event</i> puts your event on the map for people traveling nearby. <i>My Events</i> lists the ones you
+        added in this browser. There are no accounts, so host access stays on this device.</p>
       <h3>Feedback</h3>
       <p>There’s no feedback form in the app yet.</p>
     </>
