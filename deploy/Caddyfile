@@ -1,5 +1,12 @@
-167-172-23-38.sslip.io {
+yowaymo.us, www.yowaymo.us, 167-172-23-38.sslip.io {
 	encode gzip
+	# /demo/ = the standalone demo, served by web/ from git (app/about/demo/[file]/route.ts), so it's never stale
+	redir /demo /demo/index.html
+	redir /demo/ /demo/index.html
+	handle_path /demo/* {
+		rewrite * /about/demo{path}
+		reverse_proxy 127.0.0.1:3000
+	}
 	# api/ under /api (same origin as the web app, so no CORS needed); uvicorn and next listen on localhost only
 	handle_path /api/* {
 		reverse_proxy 127.0.0.1:8000
