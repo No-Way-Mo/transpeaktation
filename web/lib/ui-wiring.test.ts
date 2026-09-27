@@ -61,7 +61,7 @@ test('setting off tells the API (road reservation), on both layouts', () => {
 });
 
 test('map layers are wired to what the map draws', () => {
-  assert.match(map, /const events = eventPins \? latest\.current\.events : undefined;/);
+  assert.match(map, /const events = eventPins \? liveEvents\(latest\.current\.events \?\? \[\], latest\.current\.eventsAt \?\? Date\.now\(\)\) : undefined;/);
   assert.match(map, /if \(traffic\) for \(const run of trafficRuns\(r\)\)/);
   assert.match(desktop, /\{prefs\.eventPins && (MAP_EXPERIMENT !== 'snapmap' && )?<EventLegend /); // snapmap draws its own legend
 });
@@ -95,4 +95,124 @@ test('device mode: the maneuver banner is not a button, only demo taps advance',
   assert.match(mobile, /\{demo && <span className="hint">Next<\/span>\}/);
   assert.doesNotMatch(mobile, /goTo\(/);                                   // the old device-mode turn preview is gone
   assert.equal(count(mobile, /setStep\(g\.step\)|setStep\(Math\.max\(0, steps\.length - 1\)\)/g), 2); // only progress/arrival set the turn
+});
+
+// ---------- community events ----------
+const host = src('host.tsx'), snapLayers = src('snapmap-layers.ts');
+const lib = (f: string) => readFileSync(new URL(`./${f}`, import.meta.url), 'utf8');
+const hosting = lib('use-hosting.ts'), community = lib('community.ts');
+
+test('☰ Add Event / My Events / Saved Events open over the map on both layouts (no floating + on the map)', () => {
+  assert.match(menu, /'host' in m\s*\? <button key=\{m\.id\} className=\{`menu-item\$\{m\.accent \? ' accent' : ''\}`\} onClick=\{\(\) => n\.host\(m\.id\)\}>/);
+  assert.match(menu, /host: \(a: HostAction\) => \{ setNav\(CLOSED\); onHost\?\.\(a\); \}/); // closes the menu first
+  for (const s of [desktop, mobile]) assert.match(s, /const h = useHosting\(\);\s*const n = useNav\((true|false), h\.start\);/);
+  assert.match(hosting, /start: \(a: HostAction\) => a === 'addEvent' \? openForm\(emptyDraft\(\), null\) : a === 'myEvents' \? openMine\(\) : openSaved\(\)/);
+  assert.match(mobile, /<div className="sheet host-sheet">[\s\S]{0,120}<HostViews /);     // phone: a bottom sheet over the map
+  assert.match(desktop, /\{h\.view \? <HostViews /);                                      // desktop: the left panel
+  assert.equal(count(mobile, /name="plus"/g), 0);
+  assert.equal(count(desktop, /name="plus"/g), 1); // zoom in only
+});
+
+test('Add Event form: header, subtitle, required fields, free vs ticketed', () => {
+  assert.match(host, /'Add an event'/);
+  assert.match(host, /'Share what’s happening with people traveling nearby\.'/);
+  for (const label of ['Event name', 'Location', 'Date', 'Start time', 'End time', 'Category', 'Admission']) assert.match(host, new RegExp(`>${label}<`));
+  assert.match(host, /Choose on map/);
+  assert.match(host, /\{d\.admission === 'ticketed' && \(\s*<div className="field-row ticket">/); // ticket link + price only when Ticketed
+  assert.match(host, /<button className="start" disabled=\{h\.saving\} onClick=\{submit\}>/);
+  assert.match(hosting, /setTried\(true\);\s*if \(!check\.body \|\| saving\) return;/);           // invalid forms never post
+});
+
+test('success state: Event added, View on map, Advertise event, Maybe later', () => {
+  assert.match(host, /'Event added'/);
+  assert.match(host, /'Your event has been added to the map\.'/);
+  assert.match(host, /onClick=\{\(\) => h\.viewOnMap\(ev\)\}>View on map</);
+  assert.match(host, /onClick=\{\(\) => h\.boost\(ev\)\}><Icon name="bolt" size=\{18\} \/>Advertise event</);
+  assert.match(host, /onClick=\{h\.close\}>Maybe later</);
+});
+
+test('View on map / Show on map: closes the sheet, the map flies to the event with its card open', () => {
+  assert.match(hosting, /const viewOnMap = \(ev: MapEvent\) => \{ setView\(null\); setSpotlight\(ev\); setFocus\(f => \(\{ id: ev\.id, n: \(f\?\.n \?\? 0\) \+ 1 \}\)\); \};/);
+  for (const s of [desktop, mobile]) {
+    assert.match(s, /withEvent\(p\.mapEvents, h\.spotlight\)/);
+    assert.match(s, /focusEvent=\{h\.focus\} card=\{card\}\s*eventsAt=\{p\.when\.mode === 'now' \? null : p\.mapSpan\.from\} \/>/);
+  }
+  assert.match(map, /if \(snap\.current\) \{ snap\.current\.focus\(id\); return; \}/);
+  assert.match(snapLayers, /focus\(id: string\): boolean \{[\s\S]{0,80}this\.select\(id, true\);/);
+  assert.match(mobile, /useEffect\(\(\) => \{ if \(h\.focus\) sheet\.setIdx\(0\); \}, \[h\.focus\?\.n\]\);/);
+  // an ended event isn't put back on the live map
+  assert.match(host, /\{eventStatus\(ev\) !== 'Ended' && <button className="foot-alt" onClick=\{\(\) => h\.viewOnMap\(ev\)\}>Show on map<\/button>\}/);
+});
+
+test('every event card (map, My Events, Saved Events, details): View event + Directions, ⋯ from the same rules', () => {
+  // lists
+  assert.match(host, /onClick=\{\(\) => h\.viewEvent\(ev\)\}>View event<\/button>\s*<button className="ghost-btn" onClick=\{\(\) => onDirections\(ev\)\}>Directions</);
+  assert.match(host, /const items = cardActions\(ev, \{ hosted: h\.isHost\(ev\), saved: h\.savedIds\.has\(ev\.id\), reported: h\.isReported\(ev\) \}\);/);
+  // map cards
+  assert.match(map, /for \(const \[a, label\] of \[\['view', 'View event'\], \['directions', 'Directions'\]\] as const\)/);
+  assert.match(map, /for \(const a of c\.actions\(ev\)\)/);
+  for (const s of [desktop, mobile]) {
+    assert.match(s, /actions: ev => cardActions\(ev, \{ hosted: h\.isHost\(ev\), saved: h\.savedIds\.has\(ev\.id\), reported: h\.isReported\(ev\) \}\)/);
+    assert.match(s, /on: \(a, ev\) => a === 'view' \? h\.viewEvent\(ev\) : a === 'directions' \? directions\(ev\) : h\.act\(a, ev\)/);
+  }
+});
+
+test('Directions goes into this app’s route planner with the event as destination (no Google / Apple Maps)', () => {
+  for (const s of [desktop, mobile]) assert.match(s, /const directions = \(ev: MapEvent\) => \{ h\.close\(\);[^}]*p\.go\(eventPlace\(ev\)\); \};/);
+  assert.doesNotMatch(desktop + mobile + host + map + hosting, /maps\.google|google\.com\/maps|maps\.apple|maps:\/\/|comgooglemaps/);
+});
+
+test('host-only actions are re-checked on use, not just hidden (Edit / Delete need isHost; Report never on your own; anyone can Advertise)', () => {
+  assert.match(hosting, /const host = isHost\(ev, hostIds\);/);
+  assert.match(hosting, /else if \(a === 'report' && !host\) push\('report', ev\);/);
+  assert.match(hosting, /else if \(a === 'edit' && host\)/);
+  assert.match(hosting, /else if \(a === 'advertise'\) push\('boost', ev\);/);          // not a host control
+  assert.match(hosting, /else if \(a === 'delete' && host\)/);
+  assert.match(hosting, /boost: \(ev: MapEvent\) => push\('boost', ev\),/);
+  assert.match(hosting, /if \(busy \|\| isHost\(ev, hostIds\)\) return;/);   // sendReport
+  assert.match(community, /e\.source === 'community' && \(keys instanceof Set/);
+  assert.match(map, /if \(c\.isHost\(ev\)\) box\.prepend/);                   // "Your event" only on your own
+});
+
+test('Saved Events vs My Events: separate menu entries and screens, both local to this browser', () => {
+  assert.match(host, /title="Saved Events" sub="Events you saved on this browser\."/);
+  assert.match(host, /title="My Events" sub="Events created on this browser appear here\."/);
+  assert.match(host, /<b>No events yet\.<\/b>/);
+  assert.match(host, /<b>No saved events\.<\/b>/);
+  assert.doesNotMatch(host, /Add to list/);
+  assert.match(hosting, /if \(a === 'save' \|\| a === 'unsave'\) \{ setSaved\(toggleSaved\(ev\)\);/);
+});
+
+test('Report: five reasons, optional details, never hides or deletes; Delete confirms first', () => {
+  assert.match(host, /disabled=\{!reason \|\| h\.busy\}/);
+  assert.match(host, /The event stays up while it’s checked\./);
+  assert.match(community, /`\/events\/\$\{encodeURIComponent\(id\)\}\/report`, \{ reason, details: details\.trim\(\) \|\| null \}/);
+  assert.doesNotMatch(community + hosting, /reporter_key|reporterKey|randomUUID|device_id|deviceId/);  // no identity / device id
+  assert.match(host, /title="Delete event\?"/);
+  assert.match(host, /onClick=\{\(\) => h\.confirmDelete\(ev\)\}/);
+});
+
+test('Advertise is a Coming soon preview: options with pills, disabled Coming soon, nothing paid, signed or marked advertised', () => {
+  assert.match(host, /title=\{own \? 'Advertise your event' : 'Advertise this event'\} sub="Reach more people traveling nearby\."/);
+  assert.match(host, /foot=\{<button className="start" disabled aria-describedby=\{note\}>Coming soon<\/button>\}/);
+  assert.match(host, /\{PROMOTION_OPTIONS\.map\(o => \([\s\S]{0,400}\{SOON\}/);
+  assert.match(host, /const SOON = <span className="soon-pill">Coming soon<\/span>;/);
+  assert.match(host, /Promotion payments will be available with Solana\./);
+  assert.match(host, /\{h\.isHost\(ev\) && <AnalyticsPreview \/>\}/);                   // analytics: host only, locked
+  assert.doesNotMatch(host, /Continue<\/button>|lamports|\$\{?price/);
+  for (const s of [host, hosting, community, map]) {
+    assert.doesNotMatch(s, /signTransaction|signAndSend|sendTransaction|connectPhantom|\/boost|\/promot|status: 'active'/);
+  }
+});
+
+test('host keys never go into a URL, a share link or the map', () => {
+  assert.doesNotMatch(community, /\?[^'"`]*host_key|\/\$\{[^}]*host_key/);   // only ever a request-body field
+  assert.doesNotMatch(map + snapLayers, /host_key|hostKeys/);
+  assert.match(community, /export function shareLink\(e: Pick<MapEvent, 'id'>, origin: string\): string \{/);
+});
+
+test('ended events leave the live map at the map’s time; "Leave now" re-checks each minute without refetching', () => {
+  assert.match(map, /if \(eventsAt != null\) return;\s*const t = setInterval\(draw, LIVE_RECHECK_MS\);/);
+  assert.match(map, /useEffect\(draw, \[eventsAt\]\);/);                          // a new chosen time redraws at once
+  assert.doesNotMatch(map, /setInterval\([^)]*fetch/);
 });

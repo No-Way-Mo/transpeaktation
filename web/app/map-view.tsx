@@ -1,7 +1,8 @@
 'use client';
 import { useEffect, useImperativeHandle, useRef, type Ref } from 'react';
 import type * as Leaflet from 'leaflet';
-import { EVENT_KINDS, eventGlyph, eventImpact, eventKind, fmtCrowd, fmtEventTime, type MapEvent, type Span } from '@/lib/context.ts';
+import { CARD_LABELS, fmtAdmission, isWebLink, type CardAction } from '@/lib/community.ts';
+import { EVENT_KINDS, eventGlyph, eventImpact, eventKind, fmtCrowd, fmtEventTime, LIVE_RECHECK_MS, liveEvents, type MapEvent, type Span } from '@/lib/context.ts';
 import { MAP_EXPERIMENT } from '@/lib/experiment.ts';
 import { DEMO_START } from '@/lib/location.ts';
 import { fmtDist, labelPoint, trafficRuns, type LatLng, type Place, type Route } from '@/lib/route.ts';
@@ -11,7 +12,7 @@ import { useMapPrefs } from '@/lib/use-map-prefs.ts';
 import { useTheme } from '@/lib/use-theme.ts';
 import { hexRgb, paintBasemap } from '@/lib/water.ts';
 import { SF_BOUNDS } from '@/lib/snapmap.ts';
-import { SnapMapLayers } from './snapmap-layers.ts';
+import { pulseOnce, SnapMapLayers } from './snapmap-layers.ts';
 
 // Experiment boundary: with 'snapmap' the event layer below is replaced by snapmap-layers.ts (heat + progressive pins);
 // routes, labels and endpoints are drawn exactly as before.
@@ -19,8 +20,15 @@ const SNAP = MAP_EXPERIMENT === 'snapmap';
 const START_REL = 1.25; // start view vs the all-of-SF zoom: where a 1440px desktop lands at zoom 14
 
 /** `focus` dy: show the point this many px above the map's centre (to clear a bottom sheet). `pan`: move to p at
- *  the current zoom (navigation following the rider). */
-export type MapHandle = { fit(): void; focus(p: LatLng, zoom?: number, dy?: number): void; pan(p: LatLng): void; zoomIn(): void; zoomOut(): void };
+ *  the current zoom (navigation following the rider). `center`: the spot under the map's centre ("Choose on map"). */
+export type MapHandle = { fit(): void; focus(p: LatLng, zoom?: number, dy?: number): void; pan(p: LatLng): void; zoomIn(): void; zoomOut(): void; center(): LatLng | null; closePopup(): void };
+/** What an event card on the map can do (app/host.tsx, lib/community.ts cardActions): `isHost` = this browser holds
+ *  the key of this community event; `actions` = its ⋯ menu; `on` = View event, Directions or a ⋯ item. */
+export type CardControls = {
+  isHost(ev: MapEvent): boolean;
+  actions(ev: MapEvent): CardAction[];
+  on(a: CardAction | 'view' | 'directions', ev: MapEvent): void;
+};
 
 type Props = {
   ref?: Ref<MapHandle>;
@@ -35,6 +43,9 @@ type Props = {
   events?: MapEvent[];              // ingested events in the trip's time window
   span?: Span;                      // the trip span those events were fetched for (snapmap: heat time filter)
   routeEvents?: MapEvent[] | null;  // events near the selected route (snapmap: kept visible at every zoom)
+  focusEvent?: { id: string; n: number } | null; // bring this event into view, card open, one pulse (n: each request)
+  eventsAt?: number | null;         // the map's time (Leave at / Arrive by departure); null = now, re-checked each minute
+  card?: CardControls;              // View event / Directions / ⋯ on every event card
   onSelect(i: number): void;
   pad: { topLeft: [number, number]; bottomRight: [number, number] }; // room left for overlays when fitting
 };
@@ -75,19 +86,25 @@ function canvasLayer(l: typeof Leaflet, t: Theme, fills: Fills): Leaflet.Layer {
   return new (Canvas as new (o: Leaflet.GridLayerOptions) => Leaflet.GridLayer)({ attribution: 'Tiles © Esri', maxNativeZoom: 16, maxZoom: 18 });
 }
 
-export default function MapView({ ref, routes, sel, tp, labels, from, to, marker, me, events, span, routeEvents, onSelect, pad }: Props) {
+export default function MapView({ ref, routes, sel, tp, labels, from, to, marker, me, events, span, routeEvents, focusEvent, eventsAt = null, card, onSelect, pad }: Props) {
   const el = useRef<HTMLDivElement>(null);
   const L = useRef<typeof Leaflet>(null);
   const map = useRef<Leaflet.Map>(null);
   const layer = useRef<Leaflet.LayerGroup>(null);
   const base = useRef<Leaflet.Layer>(null); // basemap: satellite tiles, or the repainted Canvas tiles (lib/water.ts)
   const snap = useRef<SnapMapLayers>(null);
+  const pins = useRef(new Map<string, Leaflet.Marker>()); // stable map: event pins by id (focusEvent)
   const { theme } = useTheme();
   const { prefs } = useMapPrefs(); // map style + layers (Map layers button / Settings → Map & Routing)
   const look = useRef({ theme, prefs }); // Leaflet loads async: the tile layer must use the theme and style at that moment
   look.current = { theme, prefs };
-  const latest = useRef({ routes, sel, tp, labels, from, to, marker, me, events, span, routeEvents, pad, onSelect });
-  latest.current = { routes, sel, tp, labels, from, to, marker, me, events, span, routeEvents, pad, onSelect };
+  const latest = useRef({ routes, sel, tp, labels, from, to, marker, me, events, span, routeEvents, pad, onSelect, card, eventsAt });
+  latest.current = { routes, sel, tp, labels, from, to, marker, me, events, span, routeEvents, pad, onSelect, card, eventsAt };
+  /** Every event's card: community extras, View event / Directions and the ⋯ menu. */
+  const decorate = (ev: MapEvent, box: HTMLElement) => {
+    const c = latest.current.card;
+    if (c) eventCardControls(ev, box, c, () => map.current?.closePopup());
+  };
 
   const fit = () => {
     const { routes, sel, from, to, pad } = latest.current;
@@ -113,6 +130,8 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
     pan: p => map.current?.panTo(p),
     zoomIn: () => map.current?.zoomIn(),
     zoomOut: () => map.current?.zoomOut(),
+    center: () => { const c = map.current?.getCenter(); return c ? [c.lat, c.lng] : null; },
+    closePopup: () => { map.current?.closePopup(); },
   }));
 
   // --map-water / --map-park for the theme showing right now (<html data-theme> flips before React re-renders).
@@ -126,7 +145,8 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
     if (!l || !g || !el.current) return;
     const { routes, sel, tp, labels, from, to, marker, me, span, routeEvents } = latest.current;
     const { eventPins, traffic } = look.current.prefs;
-    const events = eventPins ? latest.current.events : undefined; // Event Pins off: no pins, no impact areas (snapmap: no heat)
+    // Event Pins off: no pins, no impact areas (snapmap: no heat). On: only events that haven't ended at the map's time.
+    const events = eventPins ? liveEvents(latest.current.events ?? [], latest.current.eventsAt ?? Date.now()) : undefined;
     // Colours come from the CSS theme tokens, so light/dark and brand changes stay in globals.css.
     const cs = getComputedStyle(el.current), c = (n: string) => cs.getPropertyValue(n).trim();
     const casing = c('--route-casing'), line = c(tp ? '--brand-line' : '--route');
@@ -163,11 +183,12 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
     });
     // Event pins under the ETA labels; the popup is built from text nodes, never HTML from the data.
     // Colour + glyph per kind; big draws (festivals, concerts, conferences...) larger than block parties and markets.
+    pins.current.clear();
     if (!SNAP) events?.forEach(ev => {
       const kind = eventKind(ev), n = EVENT_KINDS[kind].big ? 24 : 18;
       const icon = l.divIcon({ className: `event-pin k-${kind}`, iconSize: [n, n], html: eventGlyph(kind) });
-      l.marker([ev.lat, ev.lon], { icon, keyboard: false, zIndexOffset: EVENT_KINDS[kind].big ? -900 : -1000, title: `${EVENT_KINDS[kind].label}: ${ev.name}` })
-        .bindPopup(() => eventPopup(ev), { className: 'event-pop', closeButton: false, offset: [0, -2] }).addTo(g);
+      pins.current.set(ev.id, l.marker([ev.lat, ev.lon], { icon, keyboard: false, zIndexOffset: EVENT_KINDS[kind].big ? -900 : -1000, title: `${EVENT_KINDS[kind].label}: ${ev.name}` })
+        .bindPopup(() => eventPopup(ev, decorate), { className: 'event-pop', closeButton: false, offset: [0, -2] }).addTo(g));
     });
     const ring = c('--marker-ring');
     if (marker) l.circleMarker(marker, { radius: 7, color: line, weight: 3, fillColor: ring, fillOpacity: 1 }).addTo(g);
@@ -177,7 +198,7 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
     if (me) l.circleMarker(me, { radius: 8, color: ring, weight: 3, fillColor: c('--action'), fillOpacity: 1, interactive: false }).addTo(g);
     snap.current?.update({
       events: events ?? [], span: span ?? { from: Date.now(), to: Date.now() },
-      routeEventIds: new Set((routeEvents ?? []).map(e => e.id)), routeActive: routes.length > 0, theme: look.current.theme,
+      routeEventIds: new Set((routeEvents ?? []).map(e => e.id)), routeActive: routes.length > 0, theme: look.current.theme, decorate,
     });
   };
 
@@ -207,6 +228,14 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
     if (l && m && base.current) { base.current.remove(); base.current = baseLayer(l, theme, prefs.style, fills()).addTo(m); }
     draw();
   }, [theme, prefs.style]);
+  // "Leave now": time moves on with the map open, so re-check once a minute and an event that ends leaves the map.
+  // Redraw only (client-side filter): no refetch, no React render. A chosen time is fixed, so no timer then.
+  useEffect(() => {
+    if (eventsAt != null) return;
+    const t = setInterval(draw, LIVE_RECHECK_MS);
+    return () => clearInterval(t);
+  }, [eventsAt]);
+  useEffect(draw, [eventsAt]);
   // Event Pins / Traffic switched: redraw with or without them.
   useEffect(draw, [prefs.eventPins, prefs.traffic]);
 
@@ -216,6 +245,17 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
   useEffect(draw, [routes, sel, tp, labels?.join(), from, to, marker, me, events, spanKey, routeEventKey]);
   // New routes or endpoints: frame them.
   useEffect(fit, [routes, from, to]);
+  // "View on map": after the draw above has the event, fly to it with its card open and one pulse.
+  useEffect(() => {
+    const m = map.current, id = focusEvent?.id;
+    if (!m || !id) return;
+    if (snap.current) { snap.current.focus(id); return; }
+    const pin = pins.current.get(id);
+    if (!pin) return;
+    m.setView(pin.getLatLng(), Math.max(m.getZoom(), 16));
+    pin.openPopup();
+    pulseOnce(pin.getElement());
+  }, [focusEvent?.n]);
 
   return (
     <>
@@ -251,7 +291,7 @@ function PrideGradient() {
 const DEST_PIN = '<svg viewBox="0 0 28 36" aria-hidden="true"><path class="body" d="M14 34.5C14 34.5 26.5 21.8 26.5 13.5a12.5 12.5 0 0 0-25 0C1.5 21.8 14 34.5 14 34.5Z"/><circle class="hole" cx="14" cy="13.5" r="4.75"/></svg>';
 
 /** Event name, venue, time, kind: what we already have, nothing more. */
-function eventPopup(ev: MapEvent): HTMLElement {
+function eventPopup(ev: MapEvent, decorate?: (ev: MapEvent, card: HTMLElement) => void): HTMLElement {
   const box = document.createElement('div');
   const kind = eventKind(ev), tag = box.appendChild(document.createElement('div'));
   tag.className = `kind k-${kind}`;
@@ -264,5 +304,55 @@ function eventPopup(ev: MapEvent): HTMLElement {
     line.className = cls!;
     line.textContent = text;
   }
+  decorate?.(ev, box);
   return box;
+}
+
+const el = <K extends keyof HTMLElementTagNameMap>(parent: HTMLElement, tag: K, cls: string, text?: string) => {
+  const e = parent.appendChild(document.createElement(tag));
+  e.className = cls;
+  if (text) e.textContent = text;
+  return e;
+};
+
+/** Every event card: a community event's extras (text nodes only, never HTML from the data), then View event +
+ *  Directions and the ⋯ menu (lib/community.ts cardActions: host items only for this browser's own community event).
+ *  "Your event" on top when this browser hosts it. */
+function eventCardControls(ev: MapEvent, box: HTMLElement, c: CardControls, close: () => void) {
+  const info = ev.community;
+  if (info) {
+    const line = el(box, 'div', 'sub admission', fmtAdmission(info));
+    if (info.admission === 'ticketed' && info.ticket_url && isWebLink(info.ticket_url)) {
+      line.append(' · ');
+      const a = el(line, 'a', 'ticket-link', 'Tickets ↗');
+      a.href = info.ticket_url; a.target = '_blank'; a.rel = 'noopener noreferrer';
+    }
+    if (info.description) el(box, 'div', 'sub desc', info.description);
+  }
+  if (c.isHost(ev)) box.prepend(Object.assign(document.createElement('div'), { className: 'host-eyebrow', textContent: 'Your event' }));
+  const go = (a: CardAction | 'view' | 'directions') => { if (a !== 'save' && a !== 'unsave') close(); c.on(a, ev); };
+  const row = el(box, 'div', 'card-actions');
+  for (const [a, label] of [['view', 'View event'], ['directions', 'Directions']] as const) {
+    el(row, 'button', 'ghost-btn', label).addEventListener('click', () => go(a));
+  }
+  // ⋯ top right: a small menu built from the same rules as the lists; rebuilt each time it opens (saved state changes).
+  const more = el(box, 'div', 'more card-more');
+  const btn = el(more, 'button', 'more-btn', '⋯');
+  btn.setAttribute('aria-label', `More for ${ev.name}`); btn.setAttribute('aria-haspopup', 'menu'); btn.setAttribute('aria-expanded', 'false');
+  let pop: HTMLElement | null = null;
+  const shut = () => { pop?.remove(); pop = null; btn.setAttribute('aria-expanded', 'false'); };
+  btn.addEventListener('click', () => {
+    if (pop) return shut();
+    pop = el(more, 'div', 'more-pop');
+    pop.setAttribute('role', 'menu');
+    for (const a of c.actions(ev)) {
+      const item = el(pop, 'button', `more-item${a === 'delete' || a === 'report' ? ' danger' : ''}`, CARD_LABELS[a]);
+      item.setAttribute('role', 'menuitem');
+      if (a === 'reported') item.disabled = true;
+      item.addEventListener('click', () => { shut(); go(a); });
+    }
+    btn.setAttribute('aria-expanded', 'true');
+    pop.querySelector<HTMLElement>('button:not([disabled])')?.focus();
+  });
+  more.addEventListener('keydown', e => { if (e.key === 'Escape' && pop) { e.stopPropagation(); shut(); btn.focus(); } });
 }

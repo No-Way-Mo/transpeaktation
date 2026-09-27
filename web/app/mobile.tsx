@@ -2,10 +2,14 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 import { fmtDist, fmtTime, fmtWhen, iosArrival, mins, stepText, type LatLng } from '@/lib/route.ts';
 import { ARRIVED_EXIT_MS, isArrived, navFix, navProgress, type NavProgress } from '@/lib/nav-progress.ts';
+import { cardActions, eventPlace, withEvent } from '@/lib/community.ts';
+import type { MapEvent } from '@/lib/context.ts';
+import { useHosting } from '@/lib/use-hosting.ts';
 import { useMapPrefs } from '@/lib/use-map-prefs.ts';
 import { usePosition } from '@/lib/use-position.ts';
 import { useRoutePlanner } from '@/lib/use-route-planner.ts';
-import MapView, { type MapHandle } from './map-view.tsx';
+import { HostViews, PickBar, PickCross } from './host.tsx';
+import MapView, { type CardControls, type MapHandle } from './map-view.tsx';
 import { AppBar, MapLayers, NavDialogs, useNav } from './menu.tsx';
 import { Compass, Endpoints, Icon, MicButton, RecentPlaces, RouteList, SearchResults, TripNote, TurnIcon, WhenPicker, WhereTo } from './parts.tsx';
 import { RewardPanel } from './reward.tsx';
@@ -103,7 +107,8 @@ const withUnit = (s: string) => {
 
 export default function Mobile() {
   const p = useRoutePlanner();
-  const n = useNav(false);
+  const h = useHosting();
+  const n = useNav(false, h.start);
   const map = useRef<MapHandle>(null);
   const [nav, setNav] = useState(false);
   const [step, setStep] = useState(0);
@@ -192,14 +197,29 @@ export default function Mobile() {
   };
   const closeDirs = () => { setDirs(false); setDirStep(-1); map.current?.fit(); };
   const close = () => { setNav(false); setStep(0); setDirs(false); p.goStart(); };
+  // Community events (app/host.tsx): the host's sheet covers the others; "View on map" drops the main sheet to its
+  // lowest detent so the event shows. A host's own event stays on the map even outside the trip window.
+  const events = useMemo(() => withEvent(p.mapEvents, h.spotlight), [p.mapEvents, h.spotlight]);
+  useEffect(() => { if (h.focus) sheet.setIdx(0); }, [h.focus?.n]);
+  const directions = (ev: MapEvent) => { h.close(); setNav(false); setDirs(false); p.go(eventPlace(ev)); };
+  useEffect(() => { if (h.view) map.current?.closePopup(); }, [h.view?.kind]); // an open map card would sit behind the sheet
+  // Every event card on the map: View event (details), Directions (this app's planner) and the ⋯ menu.
+  const card: CardControls = {
+    isHost: h.isHost,
+    actions: ev => cardActions(ev, { hosted: h.isHost(ev), saved: h.savedIds.has(ev.id), reported: h.isReported(ev) }),
+    on: (a, ev) => a === 'view' ? h.viewEvent(ev) : a === 'directions' ? directions(ev) : h.act(a, ev),
+  };
+  const center = () => map.current?.center() ?? null;
   const grabber = (
     <button className="grabber" aria-label={['Expand panel', 'Expand panel', 'Collapse panel'][sheet.idx]} onClick={sheet.cycle} />
   );
 
   return (
-    <div className={`mob${sheet.full ? ' sheet-full' : ''}`} ref={sheet.root}>
-      <MapView ref={map} routes={p.routes} sel={p.sel} tp={p.choice.tp} labels={p.mapLabels} from={p.from} to={p.to} events={p.mapEvents} onSelect={p.setSel}
-        marker={marker} me={fix?.pos ?? null} span={p.mapSpan} routeEvents={p.selectedContext?.events} pad={{ topLeft: [24, 242], bottomRight: [24, 420] }} />
+    <div className={`mob${sheet.full ? ' sheet-full' : ''}${h.view ? ' hosting' : ''}`} ref={sheet.root}>
+      <MapView ref={map} routes={p.routes} sel={p.sel} tp={p.choice.tp} labels={p.mapLabels} from={p.from} to={p.to} events={events} onSelect={p.setSel}
+        marker={marker} me={fix?.pos ?? null} span={p.mapSpan} routeEvents={p.selectedContext?.events} pad={{ topLeft: [24, 242], bottomRight: [24, 420] }}
+        focusEvent={h.focus} card={card}
+        eventsAt={p.when.mode === 'now' ? null : p.mapSpan.from} />
       <AppBar n={n} className="mob-bar" />
 
       {p.screen !== 'search' && !nav && (
@@ -304,7 +324,16 @@ export default function Mobile() {
         </>
       )}
 
+      {h.view && h.view.kind !== 'pick' && (
+        <div className="sheet host-sheet">
+          <div className="grabber static" />
+          <HostViews h={h} onDirections={directions} center={center} />
+        </div>
+      )}
+      {h.view?.kind === 'pick' && <><PickCross /><PickBar h={h} center={center} className="mob-pick" /></>}
+
       <NavDialogs n={n} p={p} wide={false} />
+      {h.notice && <div className="toast" role="status">{h.notice}</div>}
 
       {p.screen === 'route' && nav && r && (
         <>
