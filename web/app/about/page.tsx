@@ -61,8 +61,8 @@ export default function About() {
         </Link>
         <span className="grow" />
         <nav className="about-nav" aria-label="About page">
-          <a href="#crowd">How it’s different</a>
           <a href="#story">Story</a>
+          <a href="#crowd">How it’s different</a>
           <a href="#live">Live app</a>
         </nav>
         <Link href="/" className="btn">Open the app</Link>
@@ -76,6 +76,12 @@ export default function About() {
             the same few streets. transPEAKtation spreads trips across the city before the gridlock starts.</p>
         </section>
 
+        <section id="story" className="about-sec">
+          <h2>The story in under a minute</h2>
+          <p className="sub">A simulation of July 4 on San Francisco’s real street network: first everyone takes the fastest route, then transPEAKtation routes the crowd together.</p>
+          <Player title="transPEAKtation demo" />
+        </section>
+
         <section id="crowd" className="about-sec">
           <h2>It routes the crowd, not just your car.</h2>
           <p className="about-sec-lead">Map apps plan each trip on its own, so when 100 people leave the same place for the same
@@ -84,12 +90,6 @@ export default function About() {
             the whole crowd.</p>
           <div className="splits"><Split kind="alone" /><Split kind="crowd" /></div>
           <p className="sub about-note">Illustration: 100 riders from A to B. Minutes are example travel times with that many riders on each route.</p>
-        </section>
-
-        <section id="story" className="about-sec">
-          <h2>The story in under a minute</h2>
-          <p className="sub">A simulation of July 4 on San Francisco’s real street network: first everyone takes the fastest route, then transPEAKtation routes the crowd together.</p>
-          <Player title="transPEAKtation demo" />
         </section>
 
         <ul className="about-points">
