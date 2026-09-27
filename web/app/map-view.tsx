@@ -39,25 +39,21 @@ type Props = {
   pad: { topLeft: [number, number]; bottomRight: [number, number] }; // room left for overlays when fitting
 };
 
-// Esri's own light / dark grey basemaps, tinted toward the palette by --map-tint (globals.css), with their water and
-// parks repainted --map-water / --map-park (lib/water.ts); satellite is Esri's World Imagery from the same keyless tile server, left as is.
+// Esri's own light / dark grey basemaps, repainted in our palette pixel by pixel (lib/water.ts paintBasemap: land,
+// buildings and roads tone-mapped, water / parks in --map-water / --map-park); satellite is Esri's World Imagery
+// from the same keyless tile server, left as is.
 const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services';
 const canvasUrl = (t: Theme) => `${ESRI}/Canvas/World_${t === 'dark' ? 'Dark' : 'Light'}_Gray_Base/MapServer/tile/{z}/{y}/{x}`;
-// crossOrigin on both layers: one CORS request per tile, shared by the basemap and the water layer that reads its pixels.
 type Fills = { water: string; park: string };
 const baseLayer = (l: typeof Leaflet, t: Theme, s: MapStyle, fills: Fills): Leaflet.Layer => s === 'satellite'
   ? l.tileLayer(`${ESRI}/World_Imagery/MapServer/tile/{z}/{y}/{x}`, { attribution: 'Tiles © Esri, Maxar, Earthstar Geographics', maxNativeZoom: 18, maxZoom: 18 })
-  : l.layerGroup([
-    l.tileLayer(canvasUrl(t), { attribution: 'Tiles © Esri', maxNativeZoom: 16, maxZoom: 18, crossOrigin: 'anonymous' }),
-    waterLayer(l, t, fills),
-  ]);
+  : canvasLayer(l, t, fills);
 
-/** The basemap's water and parks only, in their colours, on the 'water' pane: above the (tinted) tiles, so the blue
- *  and green are exact, and under routes and pins. A tile that fails to load just draws neither; the basemap under
- *  it is unchanged. */
-function waterLayer(l: typeof Leaflet, t: Theme, fills: Fills): Leaflet.Layer {
-  const water = hexRgb(fills.water) ?? [0x9D, 0xD5, 0xE5], park = hexRgb(fills.park) ?? [0xC9, 0xE4, 0xB4];
-  const Water = l.GridLayer.extend({
+/** The grey Canvas tiles, fetched with CORS so their pixels can be read, drawn through paintBasemap. A tile that
+ *  fails to load stays empty (the map's --canvas background shows), as a plain tile layer would. */
+function canvasLayer(l: typeof Leaflet, t: Theme, fills: Fills): Leaflet.Layer {
+  const water = hexRgb(fills.water) ?? [0x9D, 0xD5, 0xE5], park = hexRgb(fills.park) ?? [0xB9, 0xD7, 0xA8];
+  const Canvas = l.GridLayer.extend({
     createTile(c: Leaflet.Coords, done: (err: Error | undefined, tile: HTMLElement) => void) {
       const tile = document.createElement('canvas');
       tile.width = tile.height = 256;
@@ -67,7 +63,7 @@ function waterLayer(l: typeof Leaflet, t: Theme, fills: Fills): Leaflet.Layer {
         const g = tile.getContext('2d', { willReadFrequently: true })!;
         g.drawImage(img, 0, 0);
         const d = g.getImageData(0, 0, 256, 256);
-        paintBasemap(d.data, 256, t, water, park);
+        paintBasemap(d.data, 256, t, c.z, water, park);
         g.putImageData(d, 0, 0);
         done(undefined, tile);
       };
@@ -76,7 +72,7 @@ function waterLayer(l: typeof Leaflet, t: Theme, fills: Fills): Leaflet.Layer {
       return tile;
     },
   });
-  return new (Water as new (o: Leaflet.GridLayerOptions) => Leaflet.GridLayer)({ pane: 'water', maxNativeZoom: 16, maxZoom: 18 });
+  return new (Canvas as new (o: Leaflet.GridLayerOptions) => Leaflet.GridLayer)({ attribution: 'Tiles © Esri', maxNativeZoom: 16, maxZoom: 18 });
 }
 
 export default function MapView({ ref, routes, sel, tp, labels, from, to, marker, me, events, span, routeEvents, onSelect, pad }: Props) {
@@ -84,7 +80,7 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
   const L = useRef<typeof Leaflet>(null);
   const map = useRef<Leaflet.Map>(null);
   const layer = useRef<Leaflet.LayerGroup>(null);
-  const base = useRef<Leaflet.Layer>(null); // basemap: a tile layer, or tiles + water in a group (lib/water.ts)
+  const base = useRef<Leaflet.Layer>(null); // basemap: satellite tiles, or the repainted Canvas tiles (lib/water.ts)
   const snap = useRef<SnapMapLayers>(null);
   const { theme } = useTheme();
   const { prefs } = useMapPrefs(); // map style + layers (Map layers button / Settings → Map & Routing)
@@ -193,9 +189,6 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
       // snapmap: quarter-level zoom steps, so pins and heat change gradually as you wheel / pinch.
       const m = (map.current = l.map(el.current, { zoomControl: false, ...(SNAP ? { zoomSnap: 0.25, zoomDelta: 0.5, wheelPxPerZoomLevel: 100 } : {}) }).setView([DEMO_START.lat, DEMO_START.lon], 14));
       m.attributionControl.setPrefix(false);
-      const water = m.createPane('water'); // between the tile pane (200) and the routes / pins (400+)
-      water.style.zIndex = '250';
-      water.style.pointerEvents = 'none';
       base.current = baseLayer(l, look.current.theme, look.current.prefs.style, fills()).addTo(m);
       layer.current = l.layerGroup().addTo(m);
       if (SNAP) snap.current = new SnapMapLayers(l, m);

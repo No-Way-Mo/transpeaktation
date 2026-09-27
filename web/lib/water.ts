@@ -1,4 +1,4 @@
-// Blue water on the Esri grey Canvas basemap. Those tiles are raster JPEGs with water as one flat, slightly blue-grey
+// Our palette on the Esri grey Canvas basemap (app/map-view.tsx draws every tile through paintBasemap). Water first. Those tiles are raster JPEGs with water as one flat, slightly blue-grey
 // fill (the same at every zoom we fetch, 11-16), so water is picked out of the provider's own pixels and repainted in
 // --map-water. Nothing is drawn by hand: no polygons, no coastline. Plain TS so `node --test` can run it.
 
@@ -14,14 +14,6 @@ const ramp = (v: number, lo: number, hi: number) => (v <= lo ? 0 : v >= hi ? 1 :
 export function waterAlpha(r: number, g: number, b: number, [wr, wg, wb]: RGB): number {
   const d = Math.max(Math.abs(r - wr), Math.abs(g - wg), Math.abs(b - wb));
   return (1 - ramp(d, 4, 12)) * ramp(b - (r + g) / 2, 1.5, 3.5);
-}
-
-/** Turn a tile's RGBA pixels into a water-only layer: `to` where it's water, transparent everywhere else. */
-export function paintWater(px: Uint8ClampedArray, water: RGB, to: RGB): void {
-  for (let i = 0; i < px.length; i += 4) {
-    const a = waterAlpha(px[i], px[i + 1], px[i + 2], water);
-    px[i] = to[0]; px[i + 1] = to[1]; px[i + 2] = to[2]; px[i + 3] = Math.round(a * 255);
-  }
 }
 
 /** "#9DD5E5" → [157, 213, 229]; null if it isn't a 6-digit hex colour. */
@@ -43,9 +35,54 @@ export function parkAlpha(r: number, g: number, b: number, cast: number, t: 'lig
   return (1 - ramp(d, 4, 12)) * ramp(cast, lo, hi);
 }
 
-/** A w×w tile's water and parks in their theme colours, transparent everywhere else (roads, labels, buildings). */
-export function paintBasemap(px: Uint8ClampedArray, w: number, t: 'light' | 'dark', water: RGB, park: RGB): void {
-  const n = px.length / 4, cast = new Float32Array(n), box = new Float32Array(n), K = 2;
+// Everything else is tone-mapped, not classified. The Canvas tiles draw each feature as its own flat grey band, in
+// the same order at every zoom we fetch (measured on SF tiles, z11-16):
+//   light: labels < buildings ~224 < land ~232-239 < roads ~254
+//   dark:  land ~72-78 < buildings ~81 (z14+) < roads ~95-103 < labels ~120-130
+// So one monotonic brightness curve per theme moves each band to its colour: order (and so every label, edge and
+// anti-aliased pixel) is kept, no pixel is ever guessed at. Dark land shifts at z14 and roads brighten at z15, so dark
+// has a curve per zoom band. Road class isn't in the pixels (light majors and minors are the same white); the tiles'
+// own widths carry it, and thin roads' anti-aliasing reads dimmer in dark.
+type Curve = [number, number][];
+const LIGHT_CURVE: Curve = [[0, 0], [200, 200], [220, 212], [226, 219], [232, 236], [242, 241], [250, 251], [255, 255]];
+const DARK_CURVES: [maxZoom: number, Curve][] = [
+  [13, [[0, 0], [66, 28], [78, 34], [84, 48], [95, 112], [100, 126], [130, 185], [255, 255]]],
+  [14, [[0, 0], [62, 28], [72, 34], [81, 55], [86, 68], [95, 118], [100, 130], [130, 185], [255, 255]]],
+  [99, [[0, 0], [62, 28], [72, 34], [81, 55], [88, 84], [103, 126], [108, 142], [130, 185], [255, 255]]],
+];
+export const toneCurve = (t: 'light' | 'dark', z: number): Curve =>
+  t === 'light' ? LIGHT_CURVE : DARK_CURVES.find(([max]) => z <= max)![1];
+
+const luts = new Map<string, Uint8ClampedArray>();
+/** 256-entry lookup of a curve (piecewise linear between its anchors). */
+export function toneLut(t: 'light' | 'dark', z: number): Uint8ClampedArray {
+  const curve = toneCurve(t, z), key = `${t}${curve === LIGHT_CURVE ? '' : DARK_CURVES.findIndex(([, c]) => c === curve)}`;
+  let lut = luts.get(key);
+  if (!lut) {
+    lut = new Uint8ClampedArray(256);
+    for (let v = 0, j = 0; v < 256; v++) {
+      while (curve[j + 1][0] < v) j++;
+      const [x0, y0] = curve[j], [x1, y1] = curve[j + 1];
+      lut[v] = Math.round(y0 + (y1 - y0) * (v - x0) / (x1 - x0));
+    }
+    luts.set(key, lut);
+  }
+  return lut;
+}
+
+/** One pixel through the theme's curve. Light keeps (a little more of) the tiles' own faint cast, so buildings stay
+ *  cool grey and land neutral; dark adds a slate cast that grows with brightness (charcoal land, slate roads). */
+export function tone(r: number, g: number, b: number, t: 'light' | 'dark', lut: Uint8ClampedArray): RGB {
+  const l = (r + g + b) / 3, v = lut[Math.round(l)];
+  if (t === 'light') return [v + (r - l) * 1.5, v + (g - l) * 1.5, v + (b - l) * 1.5].map(c => Math.round(Math.min(255, Math.max(0, c)))) as RGB;
+  const k = Math.min(9, 1 + 0.06 * v);
+  return [v - k + (r - l), v + (g - l), v + k + (b - l)].map(c => Math.round(Math.min(255, Math.max(0, c)))) as RGB;
+}
+
+/** A w×w tile of zoom z repainted in our palette: every pixel tone-mapped (tone), then water and parks laid over in
+ *  their theme colours, edges blended by how surely they are water / park. Opaque: this is the whole basemap. */
+export function paintBasemap(px: Uint8ClampedArray, w: number, t: 'light' | 'dark', z: number, water: RGB, park: RGB): void {
+  const n = px.length / 4, cast = new Float32Array(n), box = new Float32Array(n), K = 2, lut = toneLut(t, z);
   for (let i = 0; i < n; i++) cast[i] = px[i * 4 + 1] - (px[i * 4] + px[i * 4 + 2]) / 2;
   // separable box blur, edges clamped
   const pass = (src: Float32Array, dst: Float32Array, dx: number, dy: number) => {
@@ -62,7 +99,8 @@ export function paintBasemap(px: Uint8ClampedArray, w: number, t: 'light' | 'dar
   for (let i = 0, o = 0; i < n; i++, o += 4) {
     const r = px[o], g = px[o + 1], b = px[o + 2];
     const wa = waterAlpha(r, g, b, ESRI_WATER[t]), pa = wa > 0 ? 0 : parkAlpha(r, g, b, cast[i], t);
-    const to = wa > 0 ? water : park;
-    px[o] = to[0]; px[o + 1] = to[1]; px[o + 2] = to[2]; px[o + 3] = Math.round(Math.max(wa, pa) * 255);
+    const a = Math.max(wa, pa), to = wa > 0 ? water : park, base = tone(r, g, b, t, lut);
+    for (let c = 0; c < 3; c++) px[o + c] = Math.round(base[c] + (to[c] - base[c]) * a);
+    px[o + 3] = 255;
   }
 }

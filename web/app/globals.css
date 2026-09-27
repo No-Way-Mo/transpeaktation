@@ -62,16 +62,15 @@
   --ev-community: #1098AD;
   --ev-other: #7A848E;
   --compass-n: #D9454F;
-  /* Esri light-grey basemap, washed toward the meadow end so roads/water pick up the palette. */
-  --map-tint: sepia(0.28) hue-rotate(58deg) saturate(1.25) brightness(0.985) contrast(1.06);
-  /* Water and parks, repainted over the basemap on their own untinted pane (app/map-view.tsx, lib/water.ts). */
+  /* Basemap (app/map-view.tsx → lib/water.ts paintBasemap): land, buildings and roads are the Esri tiles' own greys
+     tone-mapped in code; land here only fills tiles still loading. Water and parks are repainted in these. */
+  --map-land: #F0F0F0;
   --map-water: #9DD5E5;
-  --map-park: #C0DDA6;
+  --map-park: #B9D7A8;
 
   --shadow: 0 2px 10px rgba(16, 41, 61, 0.08), 0 8px 28px rgba(16, 41, 61, 0.1);
   --shadow-sm: 0 1px 3px rgba(16, 41, 61, 0.1), 0 4px 12px rgba(16, 41, 61, 0.08);
-  /* Inter, self-hosted by next/font (app/layout.tsx sets --font-inter); system fonts only while it loads. */
-  --sans: var(--font-inter), -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
   /* Mobile overlay offsets: notch-aware on iPhone, plain 12px in a narrow browser. */
   --safe-top: max(calc(env(safe-area-inset-top) + 4px), 12px);
   --bar-bottom: calc(env(safe-area-inset-top) + 52px); /* phone menu bar: overlays start 8px under it */
@@ -132,10 +131,9 @@
   --ev-market: #37B24D;
   --ev-community: #15AABF;
   --ev-other: #7C8894;
-  /* Esri dark-grey basemap pushed toward #184e77 navy; contrast lifts the lighter road strokes off the land. */
-  --map-tint: sepia(0.5) hue-rotate(168deg) saturate(1.7) brightness(0.92) contrast(1.18);
-  --map-water: #184E77;
-  --map-park: #284A33;
+  --map-land: #202326;
+  --map-water: #244653;
+  --map-park: #33503B;
 
   --shadow: 0 2px 10px rgba(0, 0, 0, 0.35), 0 10px 32px rgba(0, 0, 0, 0.4);
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4), 0 4px 14px rgba(0, 0, 0, 0.35);
@@ -154,11 +152,7 @@ input::placeholder { color: var(--muted); }
 * { scrollbar-width: thin; scrollbar-color: var(--fill-2) transparent; }
 
 .map { position: absolute; inset: 0; z-index: 0; }
-.leaflet-container { background: var(--canvas); font-family: var(--sans); }
-/* ponytail: CSS-filter tint over the grey Esri tiles (GPU, cheap); swap for a styled vector basemap if we need exact hues.
-   Water sits on its own 'water' pane outside this filter, so it keeps its exact --map-water. */
-.leaflet-tile-pane { filter: var(--map-tint); }
-.map[data-style='satellite'] .leaflet-tile-pane { filter: none; } /* photos keep their real colours */
+.leaflet-container { background: var(--map-land); font-family: var(--sans); }
 .leaflet-control-attribution { background: var(--sheet-bg) !important; color: var(--muted) !important; font-size: 10px !important; }
 .leaflet-control-attribution a { color: var(--muted) !important; }
 

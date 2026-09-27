@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ESRI_PARK, ESRI_WATER, hexRgb, paintBasemap, paintWater, parkAlpha, waterAlpha, type RGB } from './water.ts';
+import { ESRI_PARK, ESRI_WATER, hexRgb, paintBasemap, parkAlpha, tone, toneLut, waterAlpha, type RGB } from './water.ts';
 
 const hex = (h: string) => hexRgb(h)!;
 const alpha = (h: string, w: RGB) => waterAlpha(...hex(h), w);
@@ -20,13 +20,6 @@ test('dark basemap: water yes; land, parks and neutral greys no', () => {
   for (const c of ['#4D4D4F', '#48484A', '#494B4A', '#5A5C5B', '#232323', '#2A2A2A']) assert.equal(alpha(c, w), 0, c);
 });
 
-test('paintWater: water pixels take the target colour, everything else goes transparent', () => {
-  const px = new Uint8ClampedArray([0xD0, 0xCF, 0xD4, 255, 0xE8, 0xE8, 0xE8, 255]);
-  paintWater(px, ESRI_WATER.light, hex('#9DD5E5'));
-  assert.deepEqual([...px.slice(0, 4)], [0x9D, 0xD5, 0xE5, 255]);
-  assert.equal(px[7], 0);
-});
-
 test('hexRgb', () => {
   assert.deepEqual(hexRgb(' #9dd5e5 '), [157, 213, 229]);
   assert.equal(hexRgb('blue'), null);
@@ -41,14 +34,48 @@ test('parks: the flat green-cast fill is park, neutral land / roads / buildings 
   assert.equal(parkAlpha(0x66, 0x66, 0x66, 0, 'dark'), 0);    // road
 });
 
-test('paintBasemap: water and park pixels take their colours, the rest goes transparent', () => {
+test('paintBasemap: water and park pixels take their colours, the rest is tone-mapped and opaque', () => {
   const w = 16, px = new Uint8ClampedArray(w * w * 4); // rows 0-2 water, 3-11 park, 12-15 land
   for (let i = 0; i < w * w; i++) {
-    const row = Math.floor(i / w), c = row < 3 ? ESRI_WATER.light : row < 12 ? ESRI_PARK.light : [0xED, 0xED, 0xED];
+    const row = Math.floor(i / w), c = row < 3 ? ESRI_WATER.light : row < 12 ? ESRI_PARK.light : [0xEE, 0xEE, 0xEE];
     px.set([...c, 255], i * 4);
   }
-  paintBasemap(px, w, 'light', hex('#9DD5E5'), hex('#C9E4B4'));
+  paintBasemap(px, w, 'light', 16, hex('#9DD5E5'), hex('#B9D7A8'));
   assert.deepEqual([...px.slice(0, 4)], [0x9D, 0xD5, 0xE5, 255]);
-  assert.deepEqual([...px.slice(7 * 64, 7 * 64 + 4)], [0xC9, 0xE4, 0xB4, 255]);
-  assert.equal(px[w * w * 4 - 1], 0);
+  assert.deepEqual([...px.slice(7 * 64, 7 * 64 + 4)], [0xB9, 0xD7, 0xA8, 255]);
+  assert.deepEqual([...px.slice(w * w * 4 - 4)], [...tone(0xEE, 0xEE, 0xEE, 'light', toneLut('light', 16)), 255]);
+});
+
+// Grey bands sampled from the real tiles (lib/water.ts): the curve must keep their order and land near the targets.
+const lum = ([r, g, b]: RGB) => (r + g + b) / 3;
+const near = (got: RGB, want: string, tol: number) => got.every((c, i) => Math.abs(c - hex(want)[i]) <= tol);
+
+test('tone curves are monotonic, so labels, edges and anti-aliasing keep their order', () => {
+  for (const [t, z] of [['light', 16], ['dark', 12], ['dark', 14], ['dark', 16]] as const) {
+    const lut = toneLut(t, z);
+    for (let v = 1; v < 256; v++) assert.ok(lut[v] >= lut[v - 1], `${t} z${z} at ${v}`);
+    assert.equal(lut[0], 0); assert.equal(lut[255], 255);
+  }
+});
+
+test('light: buildings cool grey < land < white roads; dark label text untouched', () => {
+  const lut = toneLut('light', 16), t = (h: string) => tone(...hex(h), 'light', lut);
+  const bldg = t('#DEE0E2'), land = t('#EEEEEE'), road = t('#FEFEFE'), label = t('#6E6E6E');
+  assert.ok(lum(bldg) < lum(land) && lum(land) < lum(road));
+  assert.ok(near(bldg, '#D8DBDE', 4), `${bldg}`);
+  assert.ok(near(land, '#F0F1EF', 3), `${land}`);
+  assert.ok(lum(road) >= 253);
+  assert.deepEqual(label, hex('#6E6E6E'));
+  assert.ok(bldg[2] > bldg[0]); // keeps its cool cast
+});
+
+test('dark: charcoal land < grey buildings < slate roads < labels, at every zoom band', () => {
+  for (const [z, land, bldg, road] of [[12, '#4E4E50', null, '#5F5F61'], [14, '#48484A', '#505052', '#5F5F61'], [16, '#48484A', '#505052', '#666668']] as const) {
+    const lut = toneLut('dark', z), t = (h: string) => tone(...hex(h), 'dark', lut);
+    const l = t(land), r = t(road), label = t('#828284');
+    assert.ok(near(l, '#202326', 5), `z${z} land ${l}`);
+    if (bldg) { const b = t(bldg); assert.ok(near(b, '#34393E', 5), `z${z} bldg ${b}`); assert.ok(lum(l) < lum(b) && lum(b) < lum(r)); }
+    assert.ok(lum(r) > 105 && lum(r) < 150, `z${z} road ${r}`);
+    assert.ok(lum(label) > lum(r) && r[2] > r[0]); // labels brightest; roads slate (cool)
+  }
 });

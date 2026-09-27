@@ -1,12 +1,7 @@
 import type { Metadata, Viewport } from 'next';
-import { Inter } from 'next/font/google';
 import 'leaflet/dist/leaflet.css';
 import { THEME_SCRIPT } from '@/lib/theme.ts';
 import './globals.css';
-
-// Variable Inter (every weight 100-900, so the 550 / 650 in globals.css render as written), exposed as --font-inter
-// for --sans. Self-hosted by next/font at build time: the browser never calls Google.
-const inter = Inter({ subsets: ['latin'], variable: '--font-inter' });
 
 export const metadata: Metadata = {
   title: 'transPEAKtation · Directions',
@@ -22,7 +17,7 @@ export const viewport: Viewport = { width: 'device-width', initialScale: 1, view
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     // THEME_SCRIPT sets data-theme on <html> while the HTML is parsed (no light/dark flash); the DOM wins on hydration.
-    <html lang="en" className={inter.variable} suppressHydrationWarning>
+    <html lang="en" suppressHydrationWarning>
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
       </head>
