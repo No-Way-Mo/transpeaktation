@@ -199,12 +199,14 @@ input::placeholder { color: var(--muted); }
 .route .stack { gap: 4px; }
 .route .sub.ellipsis { font-size: 13px; }
 .route-note { font-size: 13px; line-height: 1.4; color: var(--brand-text); text-wrap: pretty; }
-.eta { display: flex; align-items: baseline; gap: 6px; }
+.eta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; }
+.eta .tag { white-space: nowrap; }
 .eta b { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; line-height: 1; }
 .eta .unit { font-size: 14px; color: var(--muted); font-weight: 500; }
 .tag { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; color: var(--warn); background: var(--warn-tint); }
 .tag.fast { color: var(--action-text); background: var(--action-tint); }
 .tag.tp { color: var(--on-brand); background: var(--brand); }
+.tag.sol { color: var(--brand-text); background: var(--brand-tint); box-shadow: inset 0 0 0 1px var(--brand-edge); }
 .arrive { flex: none; text-align: right; display: flex; flex-direction: column; gap: 2px; }
 .arrive .sub { font-size: 11px; }
 .arrive b { font-size: 15px; font-weight: 600; }
@@ -227,6 +229,17 @@ input::placeholder { color: var(--muted); }
 .when-foot { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .when-foot .pill-btn { margin-left: auto; }
 .route-sec .advice { margin-top: 8px; }
+/* Balance-route reward (app/reward.tsx): under the route card it belongs to */
+.reward { display: flex; flex-direction: column; gap: 8px; margin: -2px 0 8px; padding: 10px 12px; border-radius: 12px; background: var(--brand-tint); border: 1px solid var(--brand-edge); font-size: 13px; line-height: 1.4; }
+.reward-head { display: flex; align-items: baseline; gap: 8px; }
+.reward-head b { font-size: 15px; color: var(--brand-text); }
+.reward-why { text-wrap: pretty; }
+.reward-form { display: flex; gap: 8px; min-width: 0; }
+.reward-form input { flex: 1; min-width: 0; height: 36px; padding: 0 10px; border-radius: 10px; border: 1px solid var(--line-strong); background: var(--panel); color: var(--ink); font: 13px ui-monospace, SFMono-Regular, Menlo, monospace; }
+.reward-error { color: var(--bad); }
+.reward.paid b, .reward.accepted b { color: var(--brand-text); }
+.reward.too_soon, .reward.failed { background: var(--fill); border-color: var(--line); }
+.reward a { color: var(--action-text); font-weight: 600; }
 
 /* "12 min" bubbles on the lines (Leaflet divIcon; the 12×12 icon box is centred on the point) */
 .eta-pin { background: none; border: none; }
@@ -387,6 +400,7 @@ input::placeholder { color: var(--muted); }
 .nav-bar.two-row { flex-wrap: wrap; gap: 14px 12px; }
 .nav-bar.two-row .nav-stats { flex-basis: 100%; }
 .nav-bar .arrived-btn { flex: 1; }
+.nav-bar .reward { flex-basis: 100%; margin: 0; }
 .arrived-btn { background: var(--action); color: var(--on-action); }
 .arrived-btn:disabled { background: var(--good-tint); color: var(--good); }
 .steps-head .arrived-btn { align-self: center; flex: none; }

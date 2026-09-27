@@ -12,6 +12,7 @@ dependencies = [
   "osmnx>=2,<3",
   "pymongo>=4.6,<5",         # reads ingest/'s events + road_incidents, writes trips
   "psycopg[binary]>=3.1,<4", # reads Tiger traffic_metrics + prediction_metrics
+  "solders>=0.21,<1",        # balance-route rewards: builds + signs the devnet payout tx (app/rewards.py)
 ]
 
 [project.optional-dependencies]

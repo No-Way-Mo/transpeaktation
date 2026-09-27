@@ -243,6 +243,30 @@ class Store:
         return self._mongo_call(lambda db: db.trips.update_one(
             {"trip_id": trip_id, "arrived_at": None}, {"$set": {"arrived_at": at}}).matched_count)
 
+    def claim_reward(self, trip_id: str, wallet: str, route: int, at: datetime) -> dict | str | None:
+        """A finished trip's route reward, claimed once: one Mongo `rewards` doc per trip (the only place a wallet
+        address is stored), status "paying" until settled. The reward doc; "no_offer", "not_arrived", "wrong_route"
+        or "taken" (already claimed); None = no database."""
+        def q(db):
+            trip = db.trips.find_one({"trip_id": trip_id})
+            if not trip or not trip.get("reward_offer"):
+                return "no_offer"
+            if trip.get("arrived_at") is None:
+                return "not_arrived"
+            o = trip["reward_offer"]
+            if route != o["route"]:
+                return "wrong_route"
+            doc = {"trip_id": trip_id, "wallet": wallet, "lamports": o["lamports"], "route": o["route"],
+                   "expected_sec": o["expected_sec"], "depart_at": trip["depart_at"], "arrived_at": trip["arrived_at"],
+                   "claimed_at": at, "status": "paying", "signature": None}
+            if db.rewards.update_one({"trip_id": trip_id}, {"$setOnInsert": doc}, upsert=True).upserted_id is None:
+                return "taken"
+            return doc
+        return self._mongo_call(q)
+
+    def finish_reward(self, trip_id: str, result: dict) -> None:
+        self._mongo_call(lambda db: db.rewards.update_one({"trip_id": trip_id}, {"$set": result}))
+
 
 # === map views (/events window, /road-conditions, /traffic) ======================================================
 

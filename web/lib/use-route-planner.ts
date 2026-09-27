@@ -1,12 +1,13 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { fetchPlan, fmtWhen, markArrived, mins, ORIGIN, REPLAY, searchPlaces, spokenTime, voiceNote,
-  type Plan, type Place, type Route, type TransPeak, type VoiceIntent, type When } from './route.ts';
+import { claimReward, fetchPlan, fmtWhen, markArrived, mins, ORIGIN, REPLAY, searchPlaces, spokenTime, voiceNote,
+  type Plan, type Place, type Reward, type Route, type TransPeak, type VoiceIntent, type When } from './route.ts';
 // Ingested events (windowed /events) + /road-conditions: map pins and the route card's context line.
 import { conditionWindow, eventWindow, fetchEvents as fetchWindowEvents, fetchRoadConditions, routeContext,
   type ContextData, type Span } from './context.ts';
 import { privacyQuery, type Privacy } from './privacy.ts';
 import { getPrivacy } from './use-privacy.ts';
+import { saveWallet } from './wallet.ts';
 
 type Field = 'from' | 'to';
 export type Screen = 'start' | 'search' | 'route';
@@ -183,10 +184,26 @@ export function useRoutePlanner() {
   // The logged trip (undefined if it wasn't saved): the rider marks it arrived (web button, or iOS GPS) once.
   const tripId = trace?.data.trip_record?.trip_id as string | undefined;
   const [arrivedId, setArrivedId] = useState('');
+  // Route reward: earned by arriving with the transPEAKtation card selected, then claimed to a wallet (keyed by trip,
+  // so a new plan starts clean).
+  const [arrivedTp, setArrivedTp] = useState(false);
+  const [reward, setReward] = useState<{ tripId: string; r: Reward } | null>(null);
+  const arrival = useRef<Promise<unknown>>(Promise.resolve());
+  const myReward = reward && reward.tripId === tripId ? reward.r : null;
   const arrived = () => {
     if (!tripId || arrivedId === tripId) return;
-    setArrivedId(tripId);
-    markArrived(tripId).catch(() => {}); // demand just counts this rider a bit longer
+    setArrivedId(tripId); setArrivedTp(choice.tp);
+    arrival.current = markArrived(tripId).catch(() => {}); // demand just counts this rider a bit longer
+  };
+  const offer = tripId ? tp?.reward ?? null : null;
+  /** Claim the finished trip's reward to `wallet`; paid right away. Throws the api's reason (bad address, already
+   *  claimed, ...) for the panel to show. */
+  const claim = async (wallet: string) => {
+    if (!tripId || !offer) return;
+    await arrival.current; // the api only pays a trip it has seen arrive
+    const r = await claimReward(tripId, wallet.trim(), offer.route);
+    saveWallet(r.wallet);
+    setReward({ tripId, r });
   };
 
   // Empty "from" box offers "Current location" back.
@@ -200,6 +217,10 @@ export function useRoutePlanner() {
     showSuggest: !!active && (suggestions.length > 0 || fieldSearch.searching),
     routes, sel, setSel, choice, setChoice, tp, card, loading, error, retry: () => route(),
     trace, applyAdvice, tripId, arrived, hasArrived: !!tripId && arrivedId === tripId,
+    /** The route reward: offered on the transPEAKtation card (logged trips only), earned by arriving on it, then
+     *  claimed; `reward` is how the claim went. */
+    rewardOffer: offer, reward: myReward, claim,
+    earned: !!offer && !!tripId && arrivedId === tripId && arrivedTp && !myReward,
     selected: routes[sel] as Route | undefined,
     selectedCard: routes.length ? card(sel, choice.tp) : undefined,
     when, setWhen,

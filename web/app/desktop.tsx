@@ -7,6 +7,7 @@ import { useMapPrefs } from '@/lib/use-map-prefs.ts';
 import MapView, { type MapHandle } from './map-view.tsx';
 import { AppBar, MapLayers, NavDialogs, useNav } from './menu.tsx';
 import { Compass, Endpoints, EventLegend, Icon, RouteList, SearchResults, TripNote, TurnIcon, WhenPicker, WhereTo } from './parts.tsx';
+import { RewardPanel } from './reward.tsx';
 
 export default function Desktop() {
   const p = useRoutePlanner();
@@ -89,6 +90,7 @@ export default function Desktop() {
                       <div><b>{fmtWhen(p.when.mode === 'arrive' ? c.leave : c.arrive)}</b><span>{p.when.mode === 'arrive' ? 'leave by' : 'arrival'}</span></div>
                       <div><b>{fmtDist(r.dist)}</b><span>distance</span></div>
                     </div>
+                    {(p.earned || p.reward) && <RewardPanel p={p} />}
                     <div className="steps">
                       {r.steps.map((st, i) => (
                         <button key={i} className={`step${i === step ? ' on' : ''}`} onClick={() => {

@@ -10,7 +10,7 @@ One owner per folder. Only edit another folder with its owner's OK.
 |--------------|-------|-------|-------|
 | `ingest/`    | TBD | Event, city/road, mobility/AV, map inputs → normalize, dedupe, geocode → write to DBs | Python workers, MongoDB Atlas, Tiger Data, DigitalOcean |
 | `ml/`        | TBD | Event understanding, traffic + demand forecast, fleet optimizer | Python, Gemini API |
-| `api/`       | TBD | Places + traffic-aware routes (Mapbox, OSRM fallback) with OSM segment IDs (OSMnx); trip plan `/plan` (reads Mongo/Tiger, event-aware model, logs `trips`); voice → intent; later: fleet controller, confirm → Solana tx | FastAPI, Mapbox, OSMnx, ElevenLabs, Solana |
+| `api/`       | TBD | Places + traffic-aware routes (Mapbox, OSRM fallback) with OSM segment IDs (OSMnx); trip plan `/plan` (reads Mongo/Tiger, event-aware model, logs `trips`); voice → intent; route rewards (devnet SOL for taking the recommended route, `app/rewards.py`); later: fleet controller | FastAPI, Mapbox, OSMnx, ElevenLabs, Solana |
 | `web/`       | TBD | Trip planning app, fleet dashboard, AI transparency / privacy page | Next.js, React, TypeScript, Leaflet |
 | `ios/`       | TBD | SwiftUI shell that loads the `web/` app (mobile layout) in a WKWebView | SwiftUI, XcodeGen |
 | `contracts/` | everyone | Shared data shapes (events, routes, forecasts, fleet state) | JSON Schema / Pydantic |
@@ -23,7 +23,7 @@ One owner per folder. Only edit another folder with its owner's OK.
 - Branch per task: `<folder>/<short-desc>` (e.g. `ml/forecast-v1`). Small PRs, rebase on `main` often.
 - Secrets live in `.env` (gitignored); add new keys to `<folder>/.env.example`.
 - Each folder keeps its own deps (`package.json` / `pyproject.toml`) and a one-line run command in this file.
-- Voice never authorizes spending: Solana tx requires explicit user confirmation.
+- Voice never authorizes spending: Solana tx requires explicit user confirmation. Reward payouts come from the api's devnet treasury; riders never sign or spend.
 
 ## Data stores
 Mongo = long-lived entities / nested JSON. Tiger = time-series + fast-changing numbers. Both are empty; field names below are the join keys, keep them.
@@ -35,7 +35,8 @@ Mongo = long-lived entities / nested JSON. Tiger = time-series + fast-changing n
 | `events` | concerts, sports, festivals (type, time, attendance) | — |
 | `venues` | venue locations, capacity | — |
 | `users` | riders | — |
-| `trips` | trip requests (api `/plan`, not replays): `requested_at`, `depart_at`, origin/destination rounded to ~100 m, picked route's `road_segment_ids` minus 3 at each end, `trip_id` (random, not linked to the rider), `arrived_at` (null until the app reports arrival via `POST /trips/{trip_id}/arrived`) | — |
+| `trips` | trip requests (api `/plan`, not replays): `requested_at`, `depart_at`, origin/destination rounded to ~100 m, picked route's `road_segment_ids` minus 3 at each end, `trip_id` (random, not linked to the rider), `arrived_at` (null until the app reports arrival via `POST /trips/{trip_id}/arrived`), `reward_offer` (recommended route + lamports, if /plan offered one) | — |
+| `rewards` | route rewards a rider took (a little SOL for the recommended route) (`POST /trips/{trip_id}/reward`): `trip_id`, `wallet`, `lamports`, `status` accepted → paid / too_soon / failed, Solana `signature`. The only place a wallet is stored | — |
 | `route_plans` | candidate / chosen routes, explanations | — |
 | `bookings` | confirmed bookings + Solana tx | — |
 | `privacy_settings` | per-user AI / data choices | — |
@@ -74,6 +75,7 @@ Forecast models need one fixed road list, one unit, and one time step. Raw feeds
 - ingest DataSF live check: `cd ingest && python -m datasf` · test: `cd ingest && python -m unittest discover -s tests -t .`
 - ingest data sources plan + backlog: `ingest/TODO.md`
 - api: `cd api && python3 -m venv .venv && .venv/bin/pip install -e .[test]` · run: `.venv/bin/uvicorn app.main:app --reload` → http://localhost:8000/docs · test: `.venv/bin/python -m unittest discover -s tests -t .`
+- api rewards (devnet): `cd api && .venv/bin/python -m app.rewards keygen` → `SOLANA_TREASURY_KEY` in `api/.env`, fund it with `airdrop` or https://faucet.solana.com, check with `balance`; `/health` shows `rewards`. `REWARD_MIN_TRIP_FRACTION=0` pays on any arrival (stage demo only)
 - web: `cd web && npm install && npm run dev` → http://localhost:3000 (≤760px wide = mobile layout) · test: `npm test` · build: `npm run build` · replay demo (past dates allowed; `/plan?replay=true` uses the traffic/closures stored for then): `NEXT_PUBLIC_REPLAY=1 npm run dev`
 - ios: start web first, then `open ios/Transpeaktation.xcodeproj` and Run on a simulator. Web URL = `WEB_APP_URL` in `ios/project.yml`; after editing that file run `cd ios && xcodegen`.
 - ci/cd: `.github/workflows/ci.yml` runs api, ingest, web (test + build) and the demo check on every PR and push; a green push to `main` runs `deploy/tp-redeploy` on the droplet (secret `DEPLOY_SSH_KEY`). Manual redeploy: `ssh tp@167.172.23.38 tp-redeploy`.

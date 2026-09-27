@@ -20,13 +20,14 @@ import httpx
 from dotenv import load_dotenv
 from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Path as PathParam, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 _API_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(_API_DIR / ".env")  # api/.env; real env vars win
 # Local dev: reuse keys already in ingest/.env (e.g. its MAPBOX_TOKEN) instead of copying them. Never overrides.
 load_dotenv(_API_DIR.parent / "ingest" / ".env")
 
-from . import advice, ml, model, providers, voice
+from . import advice, ml, model, providers, rewards, voice
 from . import store as ingested  # map views (find_*); `store` below is the planner's Store
 from .segments import Segments
 from .store import Store
@@ -51,6 +52,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "http://localhost:3000").split(",") if o.strip()],
     allow_methods=["GET", "POST"],
+    allow_headers=["Content-Type"],  # JSON bodies (POST /trips/{id}/reward)
 )
 
 # ponytail: in-process TTL cache, cleared wholesale when it grows. Protects the shared Mapbox quota from
@@ -248,9 +250,12 @@ async def plan_trip(
         for p, text in zip(slower, texts or []):
             p["note"] = text
     best = result["preds"][result["best"]]
+    logged = save and not replay  # a simulation isn't demand
+    # A little SOL for taking the recommended route: only on a logged trip (claimed by trip_id), when the treasury can pay.
+    result["reward"] = rewards.offer(result["best"]) if logged and rewards.available() else None
 
     record = None
-    if save and not replay:  # a simulation isn't demand
+    if logged:
         record = {
             # random, returned only to this client so it can report arrival; not linked to the rider
             "trip_id": uuid.uuid4().hex, "arrived_at": None,
@@ -263,7 +268,13 @@ async def plan_trip(
             # the picked route, so ml/ can count riders on the same roads at the same time; ponytail: 3 segments
             # (~1-3 blocks) cut off each end to keep exact addresses out, trim by metres if that's too coarse
             "road_segment_ids": (found[result["best"]].get("road_segment_ids") or [])[3:-3]}
-        background.add_task(store.save_trip, dict(record))  # a copy: insert_one adds _id
+        if offer := result["reward"]:  # what POST /trips/{id}/reward may accept
+            record["reward_offer"] = {"route": offer["route"], "lamports": offer["lamports"],
+                                      "expected_sec": round(best["dur"])}
+        if record.get("reward_offer"):  # written before answering, so a quick claim finds it
+            await asyncio.to_thread(store.save_trip, dict(record))
+        else:
+            background.add_task(store.save_trip, dict(record))  # a copy: insert_one adds _id
     return {
         "routes": found, "source": got["source"], "plan": result,
         "events": [model.event_view(e) for e in evs if _near_any(e, found)],
@@ -277,8 +288,11 @@ async def plan_trip(
     }
 
 
+TRIP_ID = PathParam(pattern="^[0-9a-f]{32}$", description="data.trip_record.trip_id from /plan")
+
+
 @app.post("/trips/{trip_id}/arrived")
-async def trip_arrived(trip_id: str = PathParam(pattern="^[0-9a-f]{32}$", description="data.trip_record.trip_id from /plan")):
+async def trip_arrived(trip_id: str = TRIP_ID):
     """The rider reached the destination: sets the trip's arrived_at, so demand counts only riders still on the way."""
     at = datetime.now(timezone.utc)
     n = await asyncio.to_thread(store.mark_arrived, trip_id, at)
@@ -287,6 +301,34 @@ async def trip_arrived(trip_id: str = PathParam(pattern="^[0-9a-f]{32}$", descri
     if not n:
         raise HTTPException(404, "unknown trip or already arrived")
     return {"trip_id": trip_id, "arrived_at": at.isoformat()}
+
+
+class RewardClaim(BaseModel):
+    wallet: str  # Solana address (base58) the reward is paid to
+    route: int   # the route the rider drove; the reward is only for the recommended one (plan.reward.route)
+
+
+@app.post("/trips/{trip_id}/reward")
+async def claim_reward(claim: RewardClaim, trip_id: str = TRIP_ID):
+    """A completed trip on the recommended route (plan.reward) -> the reward is paid to `wallet` now: status paid
+    (with the Solana tx), too_soon (arrived implausibly soon after departing) or failed. Once per trip. The address
+    is stored with this trip (Mongo `rewards`) only to pay it; the rider never signs or spends anything."""
+    if not rewards.available():
+        raise HTTPException(503, "rewards unavailable")
+    if not rewards.valid_wallet(claim.wallet):
+        raise HTTPException(400, "not a Solana address")
+    at = datetime.now(timezone.utc)
+    got = await asyncio.to_thread(store.claim_reward, trip_id, claim.wallet, claim.route, at)
+    if got is None:
+        raise HTTPException(503, "trip store unavailable")
+    if isinstance(got, str):
+        raise HTTPException(*{"no_offer": (404, "no reward offered for this trip"),
+                              "not_arrived": (409, "finish the trip first"),
+                              "wrong_route": (409, "the reward is for the recommended route"),
+                              "taken": (409, "reward already claimed for this trip")}[got])
+    result = await rewards.settle(state["http"], got)
+    await asyncio.to_thread(store.finish_reward, trip_id, {**result, "settled_at": datetime.now(timezone.utc)})
+    return {"trip_id": trip_id, **rewards.view({**got, **result})}
 
 
 async def _resolve(query: str | None) -> dict | None:
@@ -452,4 +494,4 @@ def health():
     else:
         mapbox = "ready" if providers.mapbox_available() else "backing off after an error"
     return {"ok": True, "mapbox": mapbox, "road_graph": segments.status, **store.status(),
-            "voice": "ready" if voice.available() else "no ELEVENLABS_API_KEY"}
+            "voice": "ready" if voice.available() else "no ELEVENLABS_API_KEY", "rewards": rewards.status()}
