@@ -4,6 +4,7 @@
     python -m forecast prepare  --config configs/event_patch_v1.yaml
     python -m forecast retrain  --config configs/event_patch_v4_h18.yaml --parent data/forecast/experiments/event_patch_v2_main/best.pt [--resume]
     python -m forecast evaluate-retrain --checkpoint data/forecast/experiments/event_patch_v4_h18_full/best.pt --partition test
+    python -m forecast jam-wrapper --checkpoint data/forecast/experiments/event_patch_v4_h18_full/best.pt
     python -m forecast rebuild-cache --config configs/event_patch_v2_main.yaml [--workers 8]   # frozen dataset: runs/ only
     python -m forecast sanity   --config configs/event_patch_v1.yaml     # overfit a tiny batch + profile one city batch
     python -m forecast train    --config configs/event_patch_v1.yaml [--resume]
@@ -47,6 +48,10 @@ def main(argv=None) -> None:
     p = sub.add_parser("evaluate-retrain", help="lead-time x horizon evaluation of a retrained checkpoint")
     p.add_argument("--checkpoint", required=True)
     p.add_argument("--partition", default="val", choices=["val", "test"])
+    p.add_argument("--config", help="score on this config's dataset instead of the checkpoint's own")
+    p.add_argument("--tag", help="suffix for the output directory")
+    p = sub.add_parser("jam-wrapper", help="calibrated jam probabilities over a trained point forecaster")
+    p.add_argument("--checkpoint", required=True)
     p = sub.add_parser("rebuild-cache", help="rebuild missing per-run arrays of a frozen dataset (metadata untouched)")
     p.add_argument("--config", required=True)
     p.add_argument("--workers", type=int, default=8)
@@ -112,12 +117,17 @@ def main(argv=None) -> None:
         print(json.dumps(res, indent=1, default=str)[:8000])
         return
 
+    if a.cmd == "jam-wrapper":
+        from .jam_wrapper import run
+        res = run(a.checkpoint)
+        print(json.dumps(res, indent=1, default=str)[:6000])
+        return
     if a.cmd in ("retrain", "evaluate-retrain"):
         from . import retrain as rt
         if a.cmd == "retrain":
             res = rt.retrain(cfg_mod.load(a.config), a.parent, a.resume, a.max_epochs)
         else:
-            res = rt.evaluate(a.checkpoint, a.partition)
+            res = rt.evaluate(a.checkpoint, a.partition, dataset_config=a.config, tag=a.tag)
         print(json.dumps(res, indent=1, default=str)[:8000])
         return
     if a.cmd == "audit":

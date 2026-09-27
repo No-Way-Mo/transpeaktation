@@ -42,23 +42,62 @@ class Data:
         self.graph = graph_mod.load(d / "graph")
         self.norm = read_json(d / "norm.json")
         self.windows = pd.read_parquet(d / "windows.parquet")
+        self.windows["ds"] = 0
         self.manifest_sha = sha256_file(d / "manifest.json")
         self.splits_sha = sha256_file(d / "splits.json")
         self._runs: dict[str, RunArrays] = {}
         self._ev: dict[str, ev_mod.EventTensors] = {}
+        self.run_dir = {r: d / "runs" / r for r in self.windows.run_id.unique()}
+        self.run_meta = {r["run_id"]: r for r in read_json(d / "manifest.json")["selected_runs"]}
+        extra = getattr(cfg.data, "extra_datasets", None) or []
+        for i, e in enumerate(extra, 1):   # more frozen datasets on the same roads (section 3.7)
+            ed = cfg.path(cfg.data.out_root) / "datasets" / e["dataset_id"]
+            g = graph_mod.load(ed / "graph")
+            if list(map(str, g.model_ids)) != list(map(str, self.graph.model_ids)):
+                raise SystemExit(f"{e['dataset_id']}: road order differs from {cfg.data.dataset_id}")
+            w = pd.read_parquet(ed / "windows.parquet")
+            w["ds"] = i
+            part = dict(zip(self.windows.family_group, self.windows.partition))
+            clash = {g_ for g_, p in zip(w.family_group, w.partition) if g_ in part and part[g_] != p}
+            if clash:
+                raise SystemExit(f"{e['dataset_id']}: event groups {sorted(clash)} are in a different partition")
+            self.windows = pd.concat([self.windows, w], ignore_index=True)
+            self.run_dir.update({r: ed / "runs" / r for r in w.run_id.unique()})
+            self.run_meta.update({r["run_id"]: r for r in read_json(ed / "manifest.json")["selected_runs"]})
 
     def run(self, rid: str) -> RunArrays:
         if rid not in self._runs:
-            self._runs[rid] = RunArrays(self.cfg.dataset_dir / "runs" / rid)
+            self._runs[rid] = RunArrays(self.run_dir[rid])
         return self._runs[rid]
 
     def event_tensors(self, rid: str, context: dict | None = None) -> ev_mod.EventTensors:
         if context is not None:
             return ev_mod.build_tensors(context, self.graph, self.cfg, self.att_norm).to_torch(self.device)
         if rid not in self._ev:
-            self._ev[rid] = ev_mod.build_tensors(self.run(rid).context, self.graph, self.cfg,
-                                                 self.att_norm).to_torch(self.device)
+            ev = ev_mod.build_tensors(self.run(rid).context, self.graph, self.cfg, self.att_norm)
+            if getattr(self.cfg.model, "oracle_features", None):   # diagnostic only (hidden per-run parameters)
+                ev.case_oracle = self._oracle(rid, self.run(rid).context, ev.case_static.shape[0])
+            self._ev[rid] = ev.to_torch(self.device)
         return self._ev[rid]
+
+    def _oracle(self, rid: str, ctx: dict, C: int) -> np.ndarray:
+        meta = self.run_meta[rid]
+        out = np.zeros((C, len(ev_mod.ORACLE_FEATURES)), np.float32)
+        fam = self._family(meta["family_id"])
+        if fam is not None and meta["with_event"]:
+            for ci, c in enumerate(ctx["cases"]):
+                if c["kind"] == "public_event":
+                    out[ci] = ev_mod.oracle_vector(fam)
+        return out
+
+    def _family(self, fid: str):
+        if not hasattr(self, "_fam_cache"):
+            self._fam_cache = {}
+            batches = [self.cfg.data.batch] + [e["batch"] for e in (getattr(self.cfg.data, "extra_datasets", None) or [])]
+            for b in batches:
+                sc = read_json(self.cfg.sim_root / "batches" / b / "scenarios.json")
+                self._fam_cache.update({f["family_id"]: f for f in sc["families"]})
+        return self._fam_cache.get(fid)
 
     @property
     def att_norm(self):
@@ -78,7 +117,8 @@ def to_batch(w: Window, device, ev: ev_mod.EventTensors | None, cfg: Config) -> 
     if ev is not None:
         B = cfg.data.bucket_min * 60
         times = torch.as_tensor(np.concatenate([[w.issued_at - B], w.fut_start]), dtype=torch.float64, device=device)
-        b["event_feats"] = ev_mod.pair_features(ev, times, B, cfg.events.clip_hours)[None]
+        onset = ev_mod.onset_features(ev, b["hist"][0]) if getattr(cfg.model, "onset_features", None) else None
+        b["event_feats"] = ev_mod.pair_features(ev, times, B, cfg.events.clip_hours, onset)[None]
         b["pair_road"] = ev.pair_road
     return b
 
@@ -155,7 +195,7 @@ def checkpoint_payload(cfg, data: Data, model, opt, state: dict, rng) -> dict:
             "model_ids": list(map(str, g.model_ids)), "patch_idx": g.patch_idx, "road_patch": g.road_patch,
             "arcs": np.stack([g.src, g.dst]), "norm": data.norm,
             "feature_schema": {"history": HIST_FEATURES, "time": TIME_FEATURES, "future_base": FUTURE_BASE_FEATURES,
-                               "event_pair": ev_mod.EVENT_PAIR_FEATURES, "static": graph_mod.STATIC_FEATURES},
+                               "event_pair": ev_mod.event_feature_names(cfg), "static": graph_mod.STATIC_FEATURES},
             "model_version": f"{cfg.name}-{cfg.hash()}"}
 
 

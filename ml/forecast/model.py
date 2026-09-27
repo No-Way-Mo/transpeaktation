@@ -132,10 +132,12 @@ class PatchBlock(nn.Module):
 
 
 class EventBranch(nn.Module):
-    def __init__(self, n_feat: int, d: int, hops: int, blocks: int):
+    def __init__(self, n_feat: int, d: int, hops: int, blocks: int, attn_pool: bool = False):
         super().__init__()
         self.pair = nn.Sequential(nn.Linear(n_feat, d), nn.GELU(), nn.Linear(d, d))
-        self.agg = nn.Sequential(nn.Linear(2 * d + 1, d), nn.GELU(), nn.Linear(d, d))
+        # attention pooling appends a third d-vector after [mean, max, log count] (migration adds zero columns)
+        self.attn = nn.Linear(d, 1) if attn_pool else None
+        self.agg = nn.Sequential(nn.Linear((3 if attn_pool else 2) * d + 1, d), nn.GELU(), nn.Linear(d, d))
         self.prop = nn.ModuleList([nn.ModuleDict({"ln": nn.LayerNorm(d), "down": nn.Linear(d, d),
                                                   "up": nn.Linear(d, d)}) for _ in range(hops)])
         self.film = nn.ModuleList([nn.Linear(d, 3 * d) for _ in range(blocks)])
@@ -155,7 +157,16 @@ class EventBranch(nn.Module):
         mean = scatter_mean(e, pair_road, N, cnt)
         mx = e.new_zeros(K, N, d).index_reduce_(1, pair_road, e, "amax", include_self=False)
         has = (cnt > 0).to(e.dtype)[None, :, None]
-        c = self.agg(torch.cat([mean, mx, torch.log1p(cnt.to(e.dtype))[None, :, None].expand(K, N, 1)], -1)) * has
+        parts = [mean, mx, torch.log1p(cnt.to(e.dtype))[None, :, None].expand(K, N, 1)]
+        if self.attn is not None:   # softmax over the pairs of each road (scatter softmax), weighted sum
+            ef = e.float()                                                          # fp32 (bf16 autocast safe)
+            s = self.attn(e).squeeze(-1).float()                                    # [K, P]
+            smax = s.new_full((K, N), -1e4).index_reduce_(1, pair_road, s, "amax", include_self=True)
+            w = torch.exp(s - smax[:, pair_road])
+            den = w.new_zeros(K, N).index_add_(1, pair_road, w)
+            att = ef.new_zeros(K, N, d).index_add_(1, pair_road, ef * w[..., None]) / den.clamp(min=1e-9)[..., None]
+            parts.append(att.to(mean.dtype))
+        c = self.agg(torch.cat(parts, -1)) * has
         for layer in self.prop:
             u = layer["ln"](c)
             c = c + F.gelu(layer["down"](scatter_mean(u[:, g.src], g.dst, N, g.indeg))
@@ -166,7 +177,8 @@ class EventBranch(nn.Module):
 class EventPatchForecaster(nn.Module):
     def __init__(self, gb: GraphBuffers, n_hist: int, n_time: int, n_fut_base: int, n_event: int, history: int,
                  horizon: int, hidden=64, heads=4, blocks=3, dropout=0.1, use_events=True, event_hops=2,
-                 z_bias: float = 0.0):
+                 z_bias: float = 0.0, jam_head: bool = False, quantiles: list | None = None, jam_bias: float = -1.1,
+                 event_attn_pool: bool = False):
         super().__init__()
         d = hidden
         self.g, self.T, self.H, self.use_events = gb, history, horizon, use_events
@@ -181,9 +193,20 @@ class EventPatchForecaster(nn.Module):
         self.dec_ln = nn.LayerNorm(d)
         self.head = nn.Sequential(nn.Linear(d, d), nn.GELU(), nn.Linear(d, 1))
         nn.init.constant_(self.head[-1].bias, z_bias)
-        self.events = EventBranch(n_event, d, event_hops, blocks) if use_events else None
+        self.events = EventBranch(n_event, d, event_hops, blocks, event_attn_pool) if use_events else None
+        # optional heads on the decoder state (absent in older checkpoints)
+        self.quantiles = list(quantiles) if quantiles else []
+        self.jam_head = None
+        if jam_head:
+            self.jam_head = nn.Sequential(nn.Linear(d, d), nn.GELU(), nn.Linear(d, 1))
+            nn.init.constant_(self.jam_head[-1].bias, jam_bias)      # ~ base jam rate before training
+        self.q_head = None
+        if self.quantiles:
+            self.q_head = nn.Linear(d, len(self.quantiles))
+            nn.init.zeros_(self.q_head.weight)
+            nn.init.constant_(self.q_head.bias, -2.25)                # softplus(-2.25) ~ 0.1 in z
 
-    def forward(self, hist, time_hist, time_fut, fut_base, event_feats=None, pair_road=None):
+    def forward(self, hist, time_hist, time_fut, fut_base, event_feats=None, pair_road=None, aux: bool = False):
         """hist [B,T,N,F]; time_hist [B,T,4]; time_fut [B,H,4]; fut_base [B,H,N,Fb];
         event_feats [B, 1+H, P, Fe] (context at the last history bucket, then each future bucket); B must be 1 when
         events are used (pair lists differ per window). Returns z [B, H, N]."""
@@ -208,14 +231,53 @@ class EventPatchForecaster(nn.Module):
             q = q + self.events.dec_ctx(cf)
             gamma, beta = self.events.dec_film(cf).chunk(2, -1)
             q = q * (1 + gamma) + beta
-        return self.head(q).squeeze(-1)
+        z = self.head(q).squeeze(-1)
+        if not aux:
+            return z
+        out = {"z": z}
+        if self.jam_head is not None:
+            out["jam_logit"] = self.jam_head(q).squeeze(-1)
+        if self.q_head is not None:   # quantiles as offsets around the point forecast (ordered by construction)
+            off = F.softplus(self.q_head(q))
+            out["z_q"] = torch.stack([z - off[..., i] if qq < 0.5 else z + off[..., i]
+                                      for i, qq in enumerate(self.quantiles)], -1)
+        return out
 
 
-def build_model(cfg, graph, norm, n_event: int) -> EventPatchForecaster:
+def build_model(cfg, graph, norm, n_event: int | None = None) -> EventPatchForecaster:
+    """n_event is derived from the config (base event features + enabled extensions); the argument is kept for
+    older callers and ignored."""
     from .data import FUTURE_BASE_FEATURES, HIST_FEATURES, TIME_FEATURES, static_normalized
+    from .events import event_feature_names
+    n_event = len(event_feature_names(cfg))
     gb = GraphBuffers(torch.as_tensor(graph.patch_idx), torch.as_tensor(graph.road_patch), torch.as_tensor(graph.src),
                       torch.as_tensor(graph.dst), torch.as_tensor(static_normalized(graph, norm)))
     m = cfg.model
     return EventPatchForecaster(gb, len(HIST_FEATURES), len(TIME_FEATURES), len(FUTURE_BASE_FEATURES), n_event,
                                 cfg.data.history_steps, cfg.data.horizon_steps, m.hidden, m.heads, m.blocks,
-                                m.dropout, m.use_events, m.event_hops, z_bias=norm.get("target_z_mean_train", 0.0))
+                                m.dropout, m.use_events, m.event_hops, z_bias=norm.get("target_z_mean_train", 0.0),
+                                jam_head=bool(getattr(m, "jam_head", None)), quantiles=getattr(m, "quantiles", None),
+                                event_attn_pool=bool(getattr(m, "event_attn_pool", None)))
+
+
+class Ensemble(nn.Module):
+    """Mean of member forecasts (z), of their jam probabilities and of their quantiles. Members share graph,
+    horizon and event features (checked by the loader)."""
+
+    def __init__(self, members: list):
+        super().__init__()
+        self.members = nn.ModuleList(members)
+        self.quantiles = getattr(members[0], "quantiles", [])
+
+    def forward(self, *args, aux: bool = False, **kw):
+        outs = [m(*args, aux=True, **kw) for m in self.members]
+        z = torch.stack([o["z"] for o in outs]).mean(0)
+        if not aux:
+            return z
+        out = {"z": z}
+        if all("jam_logit" in o for o in outs):
+            p = torch.stack([torch.sigmoid(o["jam_logit"].float()) for o in outs]).mean(0).clamp(1e-6, 1 - 1e-6)
+            out["jam_logit"] = torch.log(p / (1 - p))
+        if all("z_q" in o for o in outs):
+            out["z_q"] = torch.stack([o["z_q"] for o in outs]).mean(0)
+        return out

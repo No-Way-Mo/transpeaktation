@@ -1,0 +1,7 @@
+# DIAGNOSTIC ONLY - NOT DEPLOYABLE. The "route" variant plus the focal event's hidden per-run sampler parameters
+# (arrival offset / spread, vehicles, parking radius, departure surge, ride-hail share). Measures how much of the
+# remaining event error is explained by information no real forecast can have (upper bound, not a candidate).
+inherit: event_patch_v6_route.yaml
+name: event_patch_x_oracle
+model:
+  oracle_features: true

@@ -1,0 +1,5 @@
+# Round 1, variant "route_att": route + attendance-scaled window weights (loss only; section 3.6).
+inherit: event_patch_v6_route.yaml
+name: event_patch_v6_route_att
+retrain:
+  attendance_weight: true

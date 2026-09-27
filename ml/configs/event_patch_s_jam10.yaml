@@ -1,0 +1,7 @@
+# Overnight sweep: "route" variant with much heavier build-up emphasis (anticipation x10, jam loss x2, positives x5).
+inherit: event_patch_v6_route.yaml
+name: event_patch_s_jam10
+retrain:
+  weights: {global: 1.0, event_near: 1.0, anticipation: 10.0}
+  jam_weight: 2.0
+  jam_pos_weight: 5.0

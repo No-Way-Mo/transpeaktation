@@ -1,0 +1,17 @@
+# Overnight: bigger model trained from scratch (no v2 weights; v2 used for input normalisation only) on all
+# simulations, all event features and heads. Tests whether the v2 initialisation limits event anticipation.
+inherit: event_patch_x_all.yaml
+name: event_patch_x_scratch_big
+model:
+  hidden: 128
+  heads: 8
+  blocks: 4
+  event_attn_pool: true
+retrain:
+  init: scratch
+  lr_backbone: 0.0005
+  lr_event: 0.0005
+  warmup_epochs: 1.0
+  max_epochs: 15
+  patience: 6
+  per_family: 8
