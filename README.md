@@ -5,7 +5,9 @@ Event-aware predictive routing + autonomous fleet orchestration for San Francisc
 - How the system fits together: [`ARCHITECTURE.md`](ARCHITECTURE.md)
 - Who owns which folder, team rules, database schemas: [`AGENTS.md`](AGENTS.md)
 
-What runs today: the **demo** (`demo/`), the **data pullers** (`ingest/`), the **routing API** (`api/`), the **route map web app** (`web/`), and the **iOS app** (`ios/`) that wraps it. `ml/` is not built yet; their owners add a run command to `AGENTS.md` when they land.
+What runs today: the **demo** (`demo/`), the **data pullers and ingestion worker** (`ingest/`), the **event-aware forecaster and coordinated-routing load balancer** (`ml/`), the **routing API** (`api/`), the **route map web app** (`web/`), and the **iOS app** (`ios/`) that wraps it.
+
+Live: https://yowaymo.us (web app; the API is under `/api`, e.g. `/api/health`). Showcase page: `/about`.
 
 ## 1. Install tools
 
@@ -64,7 +66,7 @@ Both are empty for now. What each collection and table holds: `AGENTS.md` → Da
 cd ingest
 python3 -m venv .venv                 # Windows: python -m venv .venv
 .venv/bin/pip install -e '.[osm]'     # Windows: .venv/Scripts/pip install -e .[osm]
-.venv/bin/python -m unittest discover -s tests -t .   # "Ran 22 tests ... OK"
+.venv/bin/python -m unittest discover -s tests -t .   # ends with "OK"
 .venv/bin/python -m pull              # all sources, ~1 min → ingest/data/raw/*.json
 .venv/bin/python -m pull.check        # data-quality report
 .venv/bin/python -m pull.poll --once  # live corridor speeds from Mapbox (needs MAPBOX_TOKEN)
@@ -74,38 +76,67 @@ Keep speed history growing with `.venv/bin/python -m pull.poll` (every 10 min un
 
 Pull a single layer with `python -m pull static|planned|live`, or name one source (`python -m pull chp_incidents`). Expect `sf511_*` to say `skip` without a 511 key, and `chp_incidents` freshness to FAIL when CHP's own feed is stale; both are normal. Source list and backlog: `ingest/TODO.md`.
 
-## 6. Run the API
+The ingestion worker loads the pulled data into the databases (road segments, traffic, closures/incidents, PredictHQ events):
+
+```bash
+.venv/bin/pip install -e '.[osm,db]'
+.venv/bin/python -m pull osm_drive_graph streets speed_limits   # the worker needs these first
+.venv/bin/python -m worker bootstrap                            # one full load
+.venv/bin/python -m worker schedule                             # keep it running
+```
+
+One job at a time: `python -m worker run traffic|incidents|events|segments [--dry-run]`. A past day for a replay demo: `python -m worker backfill --date YYYY-MM-DD`. Design: `ingest/DESIGN.md`.
+
+## 6. Run ml (optional)
+
+The API works without `ml/` (it falls back to its own heuristic). `ml/` holds the SUMO event simulations, the event-aware traffic forecaster and the coordinated-routing load balancer; both services are deployed on their own droplet.
+
+```bash
+cd ml
+pip install -e '.[forecast,coordination,solver]'
+python -m unittest discover -s tests -t .
+```
+
+Stages, configs and deployment: `ml/README.md`, `ml/forecast/README.md`, `ml/coordination/README.md`, `ml/deploy/README.md`. How `api/` calls it: `contracts/route_decision.md` (`ML_URL`) and `contracts/congestion_map.md`.
+
+## 7. Run the API
 
 ```bash
 cd api
 python3 -m venv .venv
-.venv/bin/pip install -e .
-.venv/bin/python -m unittest discover -s tests -t .   # "Ran 10 tests ... OK"
+.venv/bin/pip install -e '.[test]'
+.venv/bin/python -m unittest discover -s tests -t .   # ends with "OK"
 .venv/bin/uvicorn app.main:app --reload               # http://localhost:8000/docs
 ```
 
 - `GET /plan?from=lon,lat&to=lon,lat[&depart_at|arrive_by=ISO]` is what the web app calls: candidate routes + the events, closures, live traffic and forecasts that `ingest/` / `ml/` stored for their road segments (Mongo / Tiger) + the event-aware model → pick, explanation, better departure time. Each request is logged to Mongo `trips` (area-level, no user identity) unless `save=false`; `ai_text=false` keeps trip facts away from Gemini (the web app's AI & privacy panel sets both, and shows `data.trip_record`, exactly what was logged). Without databases it still works, with demo events and no closures/traffic (`data` in the response says which inputs were live).
-- `GET /events` today's events for search suggestions, `GET /places?q=...` place search, `GET /routes?...` raw candidate routes, `GET /health` (includes Mongo / Tiger status).
+- `GET /events` today's events for search suggestions, `GET /places?q=...` place search, `GET /routes?...` raw candidate routes, `GET /road-conditions` / `GET /traffic` map layers from the databases, `GET /health` (includes Mongo / Tiger / road graph / rewards status).
+- Trip lifecycle (the web app calls these during navigation): `POST /trips/{trip_id}/start`, `/cancel`, `/arrived`, and `/reward` to claim the route reward. `POST /voice` turns a spoken request into a trip (voice only plans, never pays).
 - Databases: `MONGODB_URI` / `TIGER_DATABASE_URL` in `api/.env`; locally, values in `ingest/.env` are used when `api/.env` still has the `<password>` placeholder.
 - Put `MAPBOX_TOKEN` in `api/.env` for live-traffic ETAs (`dur_typical`, `congestion`); locally the API also picks it up from `ingest/.env` if `api/.env` doesn't set it. Without it the API uses the free OSRM + Nominatim services and says `"source": "osrm"`.
+- Optional keys in `api/.env` (each feature switches off cleanly without its key):
+  - `ML_URL`: route decision by `ml/` (`contracts/route_decision.md`); `COORDINATION_URL` + `COORDINATION_API_TOKEN`: `ml/`'s load balancer for trips leaving now. Without them `/plan` uses its own heuristic and `data.decision` says so.
+  - `GEMINI_API_KEY`: short congestion notes on the route cards (only trip facts are sent, never coordinates).
+  - `ELEVENLABS_API_KEY`: speech-to-text for `/voice`.
+  - `SOLANA_TREASURY_KEY` (+ `SOLANA_RPC_URL`): devnet SOL reward for taking the recommended route. Create and fund the treasury with `.venv/bin/python -m app.rewards keygen | airdrop | balance`. Riders never sign or spend.
 - Each route also carries `road_segment_ids`: the OSM road edges it drives, same IDs as our databases. The first start downloads the SF road graph (~15 s) into `api/data/`; `/health` shows `road_graph: loading` until then.
 
-## 7. Run the web app
+## 8. Run the web app
 
-Start the API first (step 6); the web app gets places and routes from it.
+Start the API first (step 7); the web app gets places and routes from it.
 
 ```bash
 cd web
 npm install
-npm test          # "pass 3"
+npm test          # ends with "fail 0"
 npm run dev       # http://localhost:3000
 ```
 
-Wide window = desktop layout (sidebar + map). Narrow the window to 760px or less, or open it on a phone, for the mobile layout. The API address defaults to `http://localhost:8000`; set `NEXT_PUBLIC_API_URL` in `web/.env` to change it.
+Wide window = desktop layout (sidebar + map). Narrow the window to 760px or less, or open it on a phone, for the mobile layout. The API address defaults to `http://localhost:8000`; set `NEXT_PUBLIC_API_URL` in `web/.env` to change it. `/about` is the project showcase page (it plays the `demo/`). Replay demo with past dates: `NEXT_PUBLIC_REPLAY=1 npm run dev`.
 
-## 8. Run the iOS app
+## 9. Run the iOS app
 
-The iOS app is a SwiftUI shell that shows the web app's mobile layout, so **start the API and web app first** (steps 6–7).
+The iOS app is a SwiftUI shell that shows the web app's mobile layout, so **start the API and web app first** (steps 7–8).
 
 ```bash
 open ios/Transpeaktation.xcodeproj   # pick an iPhone simulator, press Run (⌘R)
@@ -114,6 +145,12 @@ open ios/Transpeaktation.xcodeproj   # pick an iPhone simulator, press Run (⌘R
 - The app loads `http://localhost:3000`, which works in the Simulator. On a real iPhone, set `WEB_APP_URL` in `ios/project.yml` to your Mac's LAN address (e.g. `http://192.168.1.20:3000`, same Wi-Fi) or the deployed URL (and point `NEXT_PUBLIC_API_URL` at the Mac's LAN address too), then run `cd ios && xcodegen` (`brew install xcodegen`).
 - If the web app isn't running, the app shows a "Can't reach transPEAKtation" screen with Retry.
 - Debug the page inside the app: Safari → Develop → Simulator → localhost.
+
+## Deployment
+
+- One DigitalOcean droplet serves https://yowaymo.us (also reachable at https://167-172-23-38.sslip.io): Caddy (HTTPS) proxies `/api/*` to uvicorn and everything else to Next.js; systemd runs `tp-api`, `tp-web`, `tp-poll` (live polling) and `tp-worker` (ingestion schedule). Files and setup: `deploy/`.
+- CI (`.github/workflows/ci.yml`) runs the api, ingest and web tests, the web build and the demo check on every PR and push. A green push to `main` redeploys the droplet automatically. Manual redeploy: `ssh tp@167.172.23.38 tp-redeploy`.
+- `ml/`'s forecaster and load balancer run on a separate droplet: `ml/deploy/README.md`.
 
 ## Troubleshooting
 
@@ -124,7 +161,7 @@ open ios/Transpeaktation.xcodeproj   # pick an iPhone simulator, press Run (⌘R
 | `. ingest/.env` prints `command not found` or runs in the background | The URL lost its double quotes; put them back. |
 | `psql: command not found` on macOS | Run the `export PATH=...libpq...` line from step 1 (add it to `~/.zshrc`). |
 | `osm_drive_graph ... skip: needs osmnx` | You ran the system `python` instead of `.venv/bin/python`. |
-| Web app says "Couldn't load routes." | The API isn't running (step 6); check http://localhost:8000/health. |
+| Web app says "Couldn't load routes." | The API isn't running (step 7); check http://localhost:8000/health. |
 | iOS app stuck on "Can't reach transPEAKtation" | `npm run dev` isn't running in `web/`, or on a real iPhone `WEB_APP_URL` still says `localhost`. |
 | `CERTIFICATE_VERIFY_FAILED` to overpass-api.de (Windows) | `.venv/Scripts/pip install certifi`; the pullers use it automatically. |
 
