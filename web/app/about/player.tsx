@@ -4,30 +4,38 @@ import { Icon } from '../parts.tsx';
 
 // The demo (../demo/index.html) as a video: poster frame + play button, then play/pause, a scrub bar and fullscreen.
 // It is a live canvas animation, not a video file, so this drives the `window.player` hooks it exposes (same origin).
-type Demo = { total: number; t: number; paused: boolean; play(): void; pause(): void; seek(t: number): void };
+type Demo = { ready: boolean; total: number; t: number; paused: boolean; play(): void; pause(): void; seek(t: number): void };
 const POSTER = 57; // the end card: logo, "by YoWayMo", tagline
+// &v=2 skips copies browsers cached under the route's old 1-hour max-age (before window.player.ready existed).
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
 export function Player({ title }: { title: string }) {
   const box = useRef<HTMLDivElement>(null);
   const frame = useRef<HTMLIFrameElement>(null);
   const [started, setStarted] = useState(false);
+  const [waiting, setWaiting] = useState(false); // play pressed before the demo finished loading
+  const queued = useRef(false);
   const [s, setS] = useState({ t: 0, total: 60, paused: true, ready: false });
-  const demo = () => (frame.current?.contentWindow as (Window & { player?: Demo }) | null)?.player;
+  const demo = () => {
+    try { return (frame.current?.contentWindow as (Window & { player?: Demo }) | null)?.player; } catch { return undefined; }
+  };
+  const start = (d: Demo) => { setStarted(true); setWaiting(false); d.seek(0); d.play(); };
 
-  // Mirror the demo's clock (it also pauses itself on Space and stops at the end).
+  // Mirror the demo's clock (it also pauses itself on Space and stops at the end); start a queued play once it's ready.
   useEffect(() => {
     const id = setInterval(() => {
       const d = demo();
-      if (d) setS({ t: d.t, total: d.total, paused: d.paused, ready: true });
+      if (!d?.ready) return;
+      setS({ t: d.t, total: d.total, paused: d.paused, ready: true });
+      if (queued.current) { queued.current = false; start(d); }
     }, 200);
     return () => clearInterval(id);
   }, []);
 
   const toggle = () => {
     const d = demo();
-    if (!d) return;
-    if (!started) { setStarted(true); d.seek(0); d.play(); }
+    if (!d?.ready) { queued.current = true; setWaiting(true); return; }
+    if (!started) start(d);
     else if (d.paused) d.play();
     else d.pause();
   };
@@ -44,12 +52,12 @@ export function Player({ title }: { title: string }) {
   return (
     <figure className="framed wide">
       <div className={`framed-box player${started ? '' : ' poster'}${playing ? ' playing' : ''}`} ref={box}>
-        <iframe ref={frame} src={`/demo/index.html?t=${POSTER}&paused`} title={title} tabIndex={-1} />
-        <button className="player-hit" onClick={toggle} disabled={!s.ready} aria-label={playing ? 'Pause' : 'Play'}>
-          {!playing && <span className="player-big"><Icon name="play" size={34} /></span>}
+        <iframe ref={frame} src={`/demo/index.html?t=${POSTER}&paused&v=2`} title={title} tabIndex={-1} />
+        <button className="player-hit" onClick={toggle} aria-label={waiting ? 'Loading' : playing ? 'Pause' : 'Play'} aria-busy={waiting}>
+          {!playing && <span className={`player-big${waiting ? ' loading' : ''}`}><Icon name="play" size={34} /></span>}
         </button>
         <div className="player-bar">
-          <button className="player-btn" onClick={toggle} disabled={!s.ready} aria-label={playing ? 'Pause' : 'Play'}>
+          <button className="player-btn" onClick={toggle} aria-label={playing ? 'Pause' : 'Play'}>
             <Icon name={playing ? 'pause' : 'play'} size={18} />
           </button>
           <input type="range" className="player-seek" min={0} max={s.total} step={0.1} aria-label="Seek"
