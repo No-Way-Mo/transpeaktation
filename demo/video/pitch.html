@@ -295,6 +295,11 @@ h1, h2, h3, p { margin: 0; }
   const STEP_LABELS = { boot: 'Launch', map: 'Live map', privacy: 'Privacy switches', 'opt-out': 'Opt out', voice: 'Voice request',
     routes: 'Event-aware routes', explain: 'Gemini explains', trace: 'Data trace', start: 'Navigate' };
   const SAY = 'Go to Chase Center';
+  // The 2-minute cut (?short): recording speeds that replace BEATS' where given, the demo's video-second map
+  // [pitch s, demo s] (the gridlock and act 2 played faster), and scene lengths (below).
+  const FAST = { launch: 2.5, map: 1.5, privacy: 2.2, 'opt-out': 2, voice: 1.3, planning: 3, routes: 1.3, explain: 1.6, trace: 3, start: 4 };
+  const DEMO_FAST = [[0, 0], [2.5, 4], [4.5, 7.5], [7.5, 12.5], [9.5, 18], [10.5, 22], [12.5, 24.5], [13.5, 27], [15.5, 31],
+    [17.5, 34.5], [20, 39.5], [22, 49], [23.5, 51.5], [28.5, 56.4]];
 
   // ---------- helpers ----------
   const $ = s => document.querySelector(s);
@@ -302,14 +307,21 @@ h1, h2, h3, p { margin: 0; }
   const smooth = (a, b, t) => { const u = clamp((t - a) / (b - a)); return u * u * (3 - 2 * u); };
   const lerp = (a, b, u) => a + (b - a) * u;
   const win = (t, a, b, f = 0.6) => Math.min(smooth(a - f, a, t), 1 - smooth(b, b + f, t));   // fade in at a, out at b
-  const Q = new URLSearchParams(location.search), RENDER = Q.has('render');
+  const Q = new URLSearchParams(location.search), RENDER = Q.has('render'), SHORT = Q.has('short');
 
   const marks = await fetch('footage/marks.json').then(r => r.json());
   const simSrc = 'footage/sim.mp4';
 
   // ---------- timeline ----------
   // Title card, then the demo up to its comparison (it shows its own end card from 56.5 s); scenes cross-fade over XF.
-  const INTRO = 5, DEMO_END = INTRO + 56.4, XF = 0.8;
+  const DEMO_KEYS = SHORT ? DEMO_FAST : [[0, 0], [56.4, 56.4]];
+  const INTRO = SHORT ? 3 : 5, DEMO_END = INTRO + DEMO_KEYS.at(-1)[0], XF = 0.8;
+  const demoAt = s => {   // pitch second (from the demo's start) -> demo second
+    let i = 0;
+    while (i + 2 < DEMO_KEYS.length && s >= DEMO_KEYS[i + 1][0]) i++;
+    const [ta, da] = DEMO_KEYS[i], [tb, db] = DEMO_KEYS[i + 1];
+    return clamp(lerp(da, db, (s - ta) / (tb - ta)), 0, DEMO_KEYS.at(-1)[1] - 0.001);
+  };
   // The part of the recording we keep: from just before the tap on the app icon (on screen ~1.3 s later at boot's 3x)
   // to 1.5 s after arriving (the app is back on the map, then idles).
   const REC = [marks.taps[0][0] - 3.9, marks.beats.arrived + 1.5];
@@ -320,6 +332,7 @@ h1, h2, h3, p { margin: 0; }
   const SEGS = [];
   let tv = DEMO_END;
   used.forEach(([id, speed], i) => {
+    if (SHORT && id in FAST) speed = FAST[id];
     const a = beatAt[id], b = i + 1 < used.length ? beatAt[used[i + 1][0]] : a;
     SEGS.push({ id, a, b, speed, v: tv }); tv += (b - a) / speed;
   });
@@ -333,7 +346,10 @@ h1, h2, h3, p { margin: 0; }
     for (const g of SEGS) if (src >= g.a && src <= g.b) return g.v + (src - g.a) / g.speed;
     return src < SEGS[0].a ? DEMO_END : APP_END;
   };
-  const SCENES = [['ten', 16], ['both', 13], ['problem', 18], ['end', 8]];
+  // [id, seconds, seconds in the 2-minute cut]; a shorter scene plays its animation faster (PACE), not cut off
+  const SCENES = [['ten', 16, 12], ['both', 13, 8.5], ['problem', 18, 13], ['end', 8, 5]].map(([id, d, ds]) => [id, SHORT ? ds : d, d]);
+  const PACE = Object.fromEntries(SCENES.map(([id, d, d0]) => [id, d0 / d]));
+  const local = (id, t) => (t - AT[id][0]) * PACE[id];   // a scene's own clock
   const AT = { intro: [0, INTRO], demo: [INTRO, DEMO_END], app: [DEMO_END, APP_END] };
   let t0 = APP_END;
   for (const [id, d] of SCENES) { AT[id] = [t0, t0 + d]; t0 += d; }
@@ -437,7 +453,7 @@ h1, h2, h3, p { margin: 0; }
     return vInt.main;
   };
   function drawTen(t) {
-    const c = tctx, T = t - AT.ten[0], share = shareAt(T), load = loadAt(T), mp = mainPos(T);
+    const c = tctx, T = local('ten', t), share = shareAt(T), load = loadAt(T), mp = mainPos(T);
     c.clearRect(0, 0, 1920, 1080);
     // road diagram, left
     // traffic colours, kept pale when flowing so the green riders stay visible on them
@@ -499,7 +515,7 @@ h1, h2, h3, p { margin: 0; }
 
   // ---------- 4. people + fleets ----------
   function drawBoth(t) {
-    const c = bctx, T = t - AT.both[0];
+    const c = bctx, T = local('both', t);
     c.clearRect(0, 0, 1920, 1080);
     const E = [500, 566], P1 = [[...E], [610, 566], [590, 448], [700, 448]], P2 = [[...E], [610, 566], [590, 684], [700, 684]];
     for (const [P, col] of [[P1, '#1A759F'], [P2, '#52B69A']]) {
@@ -532,7 +548,7 @@ h1, h2, h3, p { margin: 0; }
   };
   const car = (x, y, col) => { pctx.beginPath(); pctx.arc(x, y, 7, 0, 7); pctx.fillStyle = col; pctx.fill(); pctx.lineWidth = 2; pctx.strokeStyle = '#FFFFFF'; pctx.stroke(); };
   function drawProblem(t) {
-    const c = pctx, T = t - AT.problem[0];
+    const c = pctx, T = local('problem', t);
     c.clearRect(0, 0, 1920, 1080);
     c.fillStyle = 'rgba(24,78,119,0.14)'; c.fillRect(959.5, 110, 1, 860);
     c.textAlign = 'center'; c.textBaseline = 'alphabetic';
@@ -629,7 +645,7 @@ h1, h2, h3, p { margin: 0; }
     }
     curtain.style.opacity = 1 - smooth(0, 0.5, t);   // fade up from the page colour
     if (t < INTRO + XF) drawTitle('intro', t);
-    if (t > INTRO - XF && t < DEMO_END + XF) frame.contentWindow?.seek?.(clamp(t - INTRO, 0, DEMO_END - INTRO - 0.001));
+    if (t > INTRO - XF && t < DEMO_END + XF) frame.contentWindow?.seek?.(demoAt(t - INTRO));
     if (t > DEMO_END - XF && t < APP_END + XF) drawApp(t);
     if (t > AT.ten[0] - XF && t < AT.ten[1] + XF) drawTen(t);
     if (t > AT.both[0] - XF && t < AT.both[1] + XF) drawBoth(t);

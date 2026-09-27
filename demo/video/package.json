@@ -5,6 +5,7 @@
   "scripts": {
     "record": "bash record.sh",
     "render": "node render.mjs",
+    "render:short": "node render.mjs --short",
     "preview": "node render.mjs --serve"
   },
   "devDependencies": {
