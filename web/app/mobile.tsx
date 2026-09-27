@@ -1,6 +1,9 @@
 'use client';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 import { fmtDist, fmtTime, fmtWhen, iosArrival, mins, RECENT, stepText, type LatLng } from '@/lib/route.ts';
+import { ARRIVED_EXIT_MS, isArrived, navFix, navProgress, type NavProgress } from '@/lib/nav-progress.ts';
+import { useMapPrefs } from '@/lib/use-map-prefs.ts';
+import { usePosition } from '@/lib/use-position.ts';
 import { useRoutePlanner } from '@/lib/use-route-planner.ts';
 import MapView, { type MapHandle } from './map-view.tsx';
 import { AppBar, MapLayers, NavDialogs, useNav } from './menu.tsx';
@@ -98,6 +101,11 @@ export default function Mobile() {
   const map = useRef<MapHandle>(null);
   const [nav, setNav] = useState(false);
   const [step, setStep] = useState(0);
+  const [prog, setProg] = useState<NavProgress | null>(null); // from the last trusted GPS fix (null: none yet)
+  const [navArrived, setNavArrived] = useState(false);        // GPS put the rider at the route's end
+  const demo = useMapPrefs().prefs.location === 'demo';        // Settings → Map & Routing → Location mode
+  const [demoStep, setDemoStep] = useState(0);                 // demo mode: the turn the simulated rider is at
+  const gps = usePosition(nav && !navArrived && !demo);        // device mode: live GPS only while navigating
   const [dirs, setDirs] = useState(false);    // route screen: the full turn list (desktop's "Directions")
   const [dirStep, setDirStep] = useState(-1); // highlighted turn in that list
   const top = useRef<HTMLDivElement>(null);
@@ -109,16 +117,22 @@ export default function Mobile() {
   const rest = steps.slice(step);
   // Step timings are the provider's; scale them to the picked card so navigation starts at the minutes it showed.
   const scale = r?.dur && c ? c.dur / r.dur : 1;
-  const remDur = rest.reduce((a, x) => a + x.duration, 0) * scale, remDist = rest.reduce((a, x) => a + x.distance, 0);
+  // What's left: from GPS progress once there is a trusted fix, else from the turn shown (no GPS / denied).
+  const remDur = prog ? prog.remDur : rest.reduce((a, x) => a + x.duration, 0) * scale;
+  const remDist = prog ? prog.remDist : rest.reduce((a, x) => a + x.distance, 0);
   // Highlighted turn on the map: the upcoming one while navigating, the tapped one in the directions list.
   const markIdx = nav ? nextIdx : dirs ? dirStep : -1;
+  // Where the rider is, from either source; both go through the same progress / arrival check below.
+  const TurnBox = demo ? 'button' : 'div'; // the maneuver banner
+  const fix = useMemo(() => nav && r ? navFix(demo ? 'demo' : 'device', r, demoStep, gps) : null, [nav, demo, r, demoStep, gps]);
   const marker = useMemo<LatLng | null>(() => {
     const loc = r?.steps[markIdx]?.maneuver.location;
     return loc ? [loc[1], loc[0]] : null;
   }, [r, markIdx]);
   useEffect(() => { sheet.setIdx(1); setDirs(false); }, [p.screen]); // each screen opens at half height, on its first view
   useEffect(() => setDirStep(-1), [p.sel, p.routes]);
-  // iOS app: while navigating a saved trip, native GPS marks it arrived near the destination. Browser: the button.
+  // iOS app: while navigating a saved trip, native GPS also logs its arrival (ios/, its own radius). UI arrival is
+  // the position check below, on every platform.
   const ios = iosArrival();
   const arrivedRef = useRef(p.arrived);
   arrivedRef.current = p.arrived;
@@ -130,11 +144,36 @@ export default function Mobile() {
     return () => { removeEventListener('tp-arrived', on); ios.postMessage(null); };
   }, [nav, p.to, p.tripId, p.hasArrived]);
 
-  const goTo = (i: number) => {
-    setStep(i);
-    const loc = steps[i]?.maneuver.location;
-    if (loc) map.current?.focus([loc[1], loc[0]]);
+  // Each fix (GPS, or demo taps): arrived only within ARRIVAL_THRESHOLD_METERS of the route's end (lib/nav-progress.ts); otherwise
+  // move the turn and what's left along the route. Vague or off-route fixes change nothing.
+  useEffect(() => {
+    if (!fix || !r || navArrived) return;
+    if (isArrived(fix, r)) {
+      setNavArrived(true); setProg(null); setStep(Math.max(0, steps.length - 1));
+      arrivedRef.current(); // logs the saved trip's arrival (no-op if it wasn't saved or already arrived)
+      return;
+    }
+    const g = navProgress(fix, r, scale);
+    if (g) { setProg(g); setStep(g.step); }
+  }, [fix]);
+  useEffect(() => { if (nav && fix) map.current?.pan(fix.pos); }, [fix]); // the map follows the rider
+
+  /** Leave navigation. Arrived: back to the start screen to search again. Cancelled (End): back to the route list. */
+  const finishNavigation = (why: 'arrived' | 'cancelled') => {
+    setNav(false); setStep(0); setDemoStep(0); setProg(null); setNavArrived(false);
+    if (why === 'arrived') { setDirs(false); p.goStart(); }
+    else map.current?.fit();
   };
+  // Arrived: show "Arrived ✓" briefly, then close. A reward to claim keeps it open until End.
+  const holdOpen = p.earned || !!p.reward;
+  const finishRef = useRef(finishNavigation);
+  finishRef.current = finishNavigation;
+  useEffect(() => {
+    if (!navArrived || holdOpen) return;
+    const t = setTimeout(() => finishRef.current('arrived'), ARRIVED_EXIT_MS);
+    return () => clearTimeout(t);
+  }, [navArrived, holdOpen]);
+
   /** Directions list: highlight a turn and bring it into the map left between the from/to card and the sheet. */
   const pickTurn = (i: number) => {
     setDirStep(i);
@@ -154,7 +193,7 @@ export default function Mobile() {
   return (
     <div className={`mob${sheet.full ? ' sheet-full' : ''}`} ref={sheet.root}>
       <MapView ref={map} routes={p.routes} sel={p.sel} tp={p.choice.tp} labels={p.mapLabels} from={p.from} to={p.to} events={p.mapEvents} onSelect={p.setSel}
-        marker={marker} span={p.mapSpan} routeEvents={p.selectedContext?.events} pad={{ topLeft: [24, 242], bottomRight: [24, 420] }} />
+        marker={marker} me={fix?.pos ?? null} span={p.mapSpan} routeEvents={p.selectedContext?.events} pad={{ topLeft: [24, 242], bottomRight: [24, 420] }} />
       <AppBar n={n} className="mob-bar" />
 
       {p.screen !== 'search' && !nav && (
@@ -255,7 +294,7 @@ export default function Mobile() {
             {hasRoutes && (
               <div className="sheet-foot">
                 {!dirs && <button className="foot-alt" onClick={() => { setDirs(true); setDirStep(-1); }}>Directions</button>}
-                <button className="start" onClick={() => { setNav(true); setStep(0); p.start(); if (r) map.current?.focus(r.coords[0]); }}>Start</button>
+                <button className="start" onClick={() => { setNav(true); setStep(0); setDemoStep(0); setProg(null); setNavArrived(false); p.start(); if (r) map.current?.focus(r.coords[0]); }}>Start</button>
               </div>
             )}
           </div>
@@ -266,25 +305,26 @@ export default function Mobile() {
 
       {p.screen === 'route' && nav && r && (
         <>
-          <button className="turn" onClick={() => goTo(Math.min(step + 1, steps.length - 1))}>
+          {/* Demo: tapping moves the simulated rider to the next turn. Device: GPS alone drives it, so not a button. */}
+          <TurnBox className="turn" onClick={demo ? () => setDemoStep(i => Math.min(i + 1, steps.length - 1)) : undefined}>
             <span className="turn-arrow">{next ? <TurnIcon step={next} size={28} /> : <Icon name="arrow" size={28} />}</span>
             <span className="stack grow">
-              <span className="sub">In {steps[step] ? fmtDist(steps[step].distance) : ''}</span>
+              <span className="sub">{navArrived || !steps[step] ? '' : `In ${fmtDist(prog ? prog.toNext : steps[step].distance)}`}</span>
               <span className="turn-text">{next ? stepText(next, p.to?.label ?? '') : ''}</span>
             </span>
-            <span className="hint">Tap for next</span>
-          </button>
-          <div className={`nav-bar${p.earned || p.reward || (p.tripId && (!ios || p.hasArrived)) ? ' two-row' : ''}`}>
-            <div className="nav-stats">
-              <div><b className="good">{mins(remDur)}</b><span>min left</span></div>
-              <div><b>{fmtTime(remDur)}</b><span>arrival</span></div>
-              <div><b>{fmtDist(remDist)}</b><span>remaining</span></div>
-            </div>
-            {(p.earned || p.reward) && <RewardPanel p={p} />}
-            {p.tripId && (!ios || p.hasArrived) && (
-              <button className="end arrived-btn" disabled={p.hasArrived} onClick={p.arrived}>{p.hasArrived ? 'Arrived ✓' : 'Arrived'}</button>
+            {demo && <span className="hint">Tap for next</span>}
+          </TurnBox>
+          <div className={`nav-bar${p.earned || p.reward ? ' two-row' : ''}`}>
+            {!navArrived && (
+              <div className="nav-stats">
+                <div><b className="good">{mins(remDur)}</b><span>min left</span></div>
+                <div><b>{fmtTime(remDur)}</b><span>arrival</span></div>
+                <div><b>{fmtDist(remDist)}</b><span>remaining</span></div>
+              </div>
             )}
-            <button className="end" onClick={() => { setNav(false); setStep(0); map.current?.fit(); }}>End</button>
+            {(p.earned || p.reward) && <RewardPanel p={p} />}
+            {navArrived && <button className="end arrived-btn" disabled>Arrived ✓</button>}
+            <button className="end" onClick={() => finishNavigation(navArrived ? 'arrived' : 'cancelled')}>End</button>
           </div>
         </>
       )}

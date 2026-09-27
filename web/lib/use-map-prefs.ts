@@ -1,5 +1,6 @@
 'use client';
 import { useSyncExternalStore } from 'react';
+import type { LocationMode } from './location.ts';
 import { DEFAULT_MAP_PREFS, MAP_KEY, readMapPrefs, setOverlays, toggleLayer, writeMapPrefs, type MapPrefs, type MapStyle } from './map-prefs.ts';
 
 // Same pattern as lib/use-privacy.ts: one copy in memory (so choices still work when storage is blocked), mirrored to
@@ -9,6 +10,8 @@ const listeners = new Set<() => void>();
 let current: MapPrefs | null = null;
 
 const get = (): MapPrefs => (current ??= readMapPrefs(storage()));
+/** Outside React (the route planner, when it plans): the current choices. */
+export const getMapPrefs = get;
 
 function set(p: MapPrefs) {
   current = p;
@@ -31,5 +34,6 @@ export function useMapPrefs() {
     toggle: (id: string) => set(toggleLayer(get(), id)),
     setStyle: (style: MapStyle) => set({ ...get(), style }),
     setOverlays: (on: boolean) => set(setOverlays(get(), on)),
+    setLocation: (location: LocationMode) => set({ ...get(), location }),
   };
 }

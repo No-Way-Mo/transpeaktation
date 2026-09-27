@@ -2,12 +2,13 @@
 import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { CLOSED, MENU, open, PAGE_TITLES, SECTIONS, toggle, type Nav, type Page, type Panel, type Section } from '@/lib/nav.ts';
+import { LOCATION_MODES } from '@/lib/location.ts';
 import { LAYERS, layerOn, overlaysOn, STYLES } from '@/lib/map-prefs.ts';
 import type { ThemePref } from '@/lib/theme.ts';
 import type { useRoutePlanner } from '@/lib/use-route-planner.ts';
 import { useMapPrefs } from '@/lib/use-map-prefs.ts';
 import { useTheme } from '@/lib/use-theme.ts';
-import { AiPrivacy, Icon, Logo, Toggle, type IconName } from './parts.tsx';
+import { AiPrivacy, EventKey, Icon, Logo, Toggle, type IconName } from './parts.tsx';
 
 // Logo menu, Map layers button, Settings and the menu's pages. Shared by desktop (centred dialogs) and mobile
 // (full-screen pages). Which one is open lives in lib/nav.ts: one at a time, Esc or a click outside closes it.
@@ -109,16 +110,35 @@ function MenuList({ n }: { n: NavApi }) {
 // ---------- map layers ----------
 
 /** Floating layers button on the map's right edge: one tap shows or hides the map's layers (event pins + route
- *  traffic). The map style and each layer on its own are in Settings → Map & Routing. */
+ *  traffic). The map style and each layer on its own are in Settings → Map & Routing. While event pins show, a small
+ *  key button beside it opens what the pin colours / glyphs mean; an outside tap or Escape closes it. */
 export function MapLayers({ className = '' }: { className?: string }) {
   const { prefs, setOverlays } = useMapPrefs();
   const on = overlaysOn(prefs);
+  const [keyOpen, setKeyOpen] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null), popId = useId();
+  const showKey = keyOpen && prefs.eventPins;
+  useEffect(() => {
+    if (!showKey) return;
+    const close = (e: Event) => {
+      if (e instanceof KeyboardEvent ? e.key === 'Escape' : !wrap.current?.contains(e.target as Node)) setKeyOpen(false);
+    };
+    addEventListener('pointerdown', close); addEventListener('keydown', close);
+    return () => { removeEventListener('pointerdown', close); removeEventListener('keydown', close); };
+  }, [showKey]);
   return (
-    <div className={`layers-wrap ${className}`}>
+    <div ref={wrap} className={`layers-wrap ${className}`}>
       <button className="layers-btn" aria-label="Map layers" aria-pressed={on} title={on ? 'Hide map layers' : 'Show map layers'}
         onClick={() => setOverlays(!on)}>
         <Icon name={on ? 'layers' : 'layersOff'} size={18} />
       </button>
+      {prefs.eventPins && (
+        <button className="layers-btn key-btn" aria-label="Event types" aria-expanded={showKey} aria-controls={popId} title="Event types"
+          onClick={() => setKeyOpen(o => !o)}>
+          <Icon name="info" size={18} />
+        </button>
+      )}
+      {showKey && <div id={popId} className="key-pop" role="group" aria-label="Event types"><h4 className="eyebrow">Event types</h4><EventKey /></div>}
     </div>
   );
 }
@@ -259,15 +279,31 @@ function Appearance() {
 
 /** Same state as the Map layers button: changing either changes both, and it's remembered on this device. */
 function MapDefaults() {
-  const { prefs, toggle, setStyle } = useMapPrefs();
+  const { prefs, toggle, setStyle, setLocation } = useMapPrefs();
+  const name = useId();
   return (
     <div className="set-stack">
+      <fieldset className="choice">
+        <legend className="eyebrow">Location mode</legend>
+        <div className="choice-list">
+          {LOCATION_MODES.map(m => (
+            <label key={m.id} className="choice-row">
+              <input type="radio" name={name} value={m.id} checked={prefs.location === m.id} onChange={() => setLocation(m.id)} />
+              <span className="stack grow"><span className="name">{m.label}</span><span className="sub">{m.sub}</span></span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
       <StylePicker value={prefs.style} onChange={setStyle} legend="Default map style" />
       <section className="layer-group" aria-label="Default map layers">
         <h4 className="eyebrow">Default map layers</h4>
         <div className="aip-switches">
           {LAYERS.filter(l => l.key).map(l => <Toggle key={l.id} label={l.label} detail={l.detail} on={layerOn(prefs, l)} onChange={() => toggle(l.id)} />)}
         </div>
+      </section>
+      <section className="layer-group" aria-label="Event types">
+        <h4 className="eyebrow">Event types</h4>
+        <EventKey />
       </section>
       <p className="sub set-foot">The layers button on the map turns these on or off together. Remembered in this browser.
  Event Activity and Road Disruptions aren’t available yet.</p>

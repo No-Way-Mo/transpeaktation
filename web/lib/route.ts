@@ -1,7 +1,10 @@
 // Place search + the trip plan (via api/: routes, stored events/closures/traffic, model) + display formatting.
 // Shared by the desktop and mobile layouts. Plain TS (no enums etc.) so `node --test` can run it directly.
 
-export type Place = { label: string; sub: string; lat: number; lon: number };
+import { DEMO_START } from './location.ts';
+
+/** `current`: "Current location", resolved when planning (lib/location.ts: the demo start, or this device's GPS). */
+export type Place = { label: string; sub: string; lat: number; lon: number; current?: boolean };
 export type LatLng = [number, number];
 export type Step = {
   distance: number;
@@ -44,8 +47,8 @@ export const fromPtInput = (v: string): number | null => {
   return m ? ptTime(+m[1], +m[2], +m[3], +m[4], +m[5]) : null;
 };
 
-// ponytail: "Current location" is fixed to Union Square; swap in navigator.geolocation when we need real GPS.
-export const ORIGIN: Place = { label: 'Current location', sub: 'Union Square', lat: 37.788, lon: -122.4075 };
+/** "Current location" as the demo start (lib/location.ts). Device mode swaps in this device's position when planning. */
+export const ORIGIN: Place = { label: 'Current location', sub: DEMO_START.name, lat: DEMO_START.lat, lon: DEMO_START.lon, current: true };
 export const RECENT: Place[] = [
   { label: 'Oracle Park', sub: '24 Willie Mays Plaza', lat: 37.7786, lon: -122.3893 },
   { label: 'Chase Center', sub: '1 Warriors Way', lat: 37.768, lon: -122.3877 },

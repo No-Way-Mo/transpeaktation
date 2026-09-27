@@ -161,15 +161,28 @@ export type EventKind = 'music' | 'sports' | 'parade' | 'market' | 'community' |
 /** Pin label, whether it's a big draw (drawn larger) or a small local one (drawn small and muted), and a typical
  *  crowd for one closed block of it (a guess for SF: Portola, Folsom St Fair, Dreamforce vs. a street's block party). */
 export const EVENT_KINDS: Record<EventKind, { label: string; big: boolean; crowd: number }> = {
-  music: { label: 'Concert & music', big: true, crowd: 12_000 },
-  sports: { label: 'Sports & races', big: true, crowd: 5_000 },
+  music: { label: 'Music', big: true, crowd: 12_000 },
+  sports: { label: 'Sports', big: true, crowd: 5_000 },
+  festival: { label: 'Festival', big: true, crowd: 8_000 },
   parade: { label: 'Parade', big: true, crowd: 8_000 },
-  festival: { label: 'Festival & fair', big: true, crowd: 8_000 },
   conference: { label: 'Conference', big: true, crowd: 5_000 },
   market: { label: 'Market', big: false, crowd: 1_500 },
-  community: { label: 'Block party', big: false, crowd: 150 },
-  other: { label: 'Event', big: false, crowd: 500 },
+  community: { label: 'Community', big: false, crowd: 150 },
+  other: { label: 'Other', big: false, crowd: 500 },
 };
+// 24×24 stroke glyphs (static strings, never data), drawn white inside the kind's coloured disc. One set for the
+// legend and both pin styles (app/map-view.tsx, app/snapmap-layers.ts); colours are --ev-<kind> in app/globals.css.
+const GLYPHS: Record<EventKind, string> = {
+  music: '<path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/>',
+  sports: '<path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6M18 9h1.5a2.5 2.5 0 0 0 0-5H18M4 22h16M10 14.7V17c0 .6-.5 1-1 1.2C7.9 18.8 7 20.2 7 22M14 14.7V17c0 .6.5 1 1 1.2 1.1.6 2 2 2 3.8M18 2H6v7a6 6 0 0 0 12 0V2Z"/>',
+  parade: '<path d="M4 22V3M4 4h14l-3 4.5L18 13H4"/>',
+  festival: '<path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9Z"/>',
+  conference: '<path d="M3 4h18M4 4v10a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V4M12 16v4M8 21l4-1 4 1"/>',
+  market: '<path d="M3 9h18l-1.5 11h-15ZM8 9l4-6 4 6M9 13v4M15 13v4"/>',
+  community: '<path d="M3 11 12 3l9 8M5 9.5V21h14V9.5M10 21v-6h4v6"/>',
+  other: '<circle cx="12" cy="12" r="3.5"/>',
+};
+export const eventGlyph = (k: EventKind) => `<svg viewBox="0 0 24 24" aria-hidden="true">${GLYPHS[k]}</svg>`;
 const KIND_BY_CATEGORY: Record<string, EventKind> = {
   concert: 'music', concerts: 'music', music: 'music', performing_arts: 'music',
   sports: 'sports', sport: 'sports', festival: 'festival', festivals: 'festival', community: 'community',

@@ -3,7 +3,7 @@
 // No plugin: the heat layer is an additive density grid (kernel sized in metres), normalised to the busiest cluster in
 // the time window, coloured through our palette as a lookup table.
 import type * as Leaflet from 'leaflet';
-import { fmtCategory, fmtEventTime, type MapEvent, type Span } from '@/lib/context.ts';
+import { EVENT_KINDS, eventGlyph, eventKind, fmtCategory, fmtEventTime, type MapEvent, type Span } from '@/lib/context.ts';
 import {
   ACTIVITY_PALETTE, PRIDE_ACTIVITY_PALETTE, activityPoints, densityPeak, focusRel, heatAlpha, heatLevel, heatOpacity, heatRadiusMeters, kernel, legendOpacity,
   pinStates, relZoom, SF_BOUNDS, type HeatPoint,
@@ -22,7 +22,6 @@ const PANE = 'snap-activity';      // between tiles (200) and route lines (400):
 const RES = 0.4;                   // heat computed at 0.4x resolution: it's a soft glow, ~6x fewer pixels
 const PAD = 0.25;                  // pins kept for this much of the view beyond each edge (smooth panning)
 const MAX_ALPHA: Record<Theme, number> = { light: 0.78, dark: 0.8, pride: 0.85 }; // hotspot centre; edges fade to 0 (heatAlpha)
-const GLYPH = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4M16 3v4M4 10h16"/><path d="m12 12.6.9 1.8 2 .3-1.45 1.4.35 2-1.8-.95-1.8.95.35-2-1.45-1.4 2-.3Z" fill="#fff" stroke="none"/></svg>';
 
 /** Palette as a 256-entry RGB lookup, low -> high. */
 function paletteLut(palette: readonly string[]): Uint8ClampedArray {
@@ -185,8 +184,10 @@ export class SnapMapLayers {
       keep.add(st.id);
       let m = this.pins.get(st.id);
       if (!m) {
-        const icon = L.divIcon({ className: 'snap-pin-icon', iconSize: [30, 30], html: `<span class="snap-pin" style="--o:0;--s:1">${GLYPH}</span>` });
-        m = L.marker([ev.lat, ev.lon], { icon, keyboard: false, title: ev.name, zIndexOffset: -1000 + Math.round(st.imp.score * 100) })
+        // Same kind colour + glyph as the legend and the stable map's pins (lib/context.ts eventKind / eventGlyph).
+        const kind = eventKind(ev);
+        const icon = L.divIcon({ className: 'snap-pin-icon', iconSize: [30, 30], html: `<span class="snap-pin k-${kind}" style="--o:0;--s:1">${eventGlyph(kind)}</span>` });
+        m = L.marker([ev.lat, ev.lon], { icon, keyboard: false, title: `${EVENT_KINDS[kind].label}: ${ev.name}`, zIndexOffset: -1000 + Math.round(st.imp.score * 100) })
           .on('click', () => this.select(st.id)).addTo(this.group);
         this.pins.set(st.id, m);
       }

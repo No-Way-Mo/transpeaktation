@@ -6,6 +6,8 @@ import { claimReward, fetchPlan, fmtWhen, markArrived, mins, startTrip, ORIGIN, 
 import { conditionWindow, eventWindow, fetchEvents as fetchWindowEvents, fetchRoadConditions, routeContext,
   type ContextData, type Span } from './context.ts';
 import { privacyQuery, type Privacy } from './privacy.ts';
+import { getMapPrefs } from './use-map-prefs.ts';
+import { deviceLocation, NO_LOCATION } from './use-position.ts';
 import { getPrivacy } from './use-privacy.ts';
 import { saveWallet } from './wallet.ts';
 
@@ -57,6 +59,10 @@ function useTripContext(span: Span): ContextData {
   return data;
 }
 
+/** "Current location" for planning: the demo start (lib/location.ts), or in device mode this device's GPS. */
+const resolve = (x: Place): Promise<Place> =>
+  !x.current ? Promise.resolve(x) : getMapPrefs().location === 'device' ? deviceLocation() : Promise.resolve(ORIGIN);
+
 /** Screens (start → search → route), searches, departure time, and route cards. Shared by desktop and mobile. */
 export function useRoutePlanner() {
   const [screen, setScreen] = useState<Screen>('start');
@@ -86,11 +92,15 @@ export function useRoutePlanner() {
     const ctl = (inflight.current = new AbortController());
     setLoading(true);
     try {
+      [a, b] = await Promise.all([resolve(a), resolve(b)]);
+      if (ctl.signal.aborted) return;
+      const [ra, rb] = [a, b];
+      setFrom(f => f?.current ? ra : f); setTo(t => t?.current ? rb : t); // pins where it was really planned from
       const used = getPrivacy();
       const res = await fetchPlan(a, b, w, ctl.signal, privacyQuery(used));
       setRoutes(res.routes); setTp(res.plan); setTrace({ data: res.data, source: res.source, used }); setChoice({ i: 0, tp: true });
-    } catch {
-      if (!ctl.signal.aborted) setError("Couldn't load routes.");
+    } catch (e) {
+      if (!ctl.signal.aborted) setError(e === NO_LOCATION ? "Couldn't get this device's location." : "Couldn't load routes.");
     } finally {
       if (!ctl.signal.aborted) setLoading(false);
     }
@@ -214,7 +224,8 @@ export function useRoutePlanner() {
   };
 
   // Empty "from" box offers "Current location" back.
-  const suggestions = active === 'from' && !query.from.trim() ? [ORIGIN] : fieldSearch.results;
+  const here = getMapPrefs().location === 'device' ? { ...ORIGIN, sub: 'This device' } : ORIGIN;
+  const suggestions = active === 'from' && !query.from.trim() ? [here] : fieldSearch.results;
 
   return {
     screen, setScreen, go, goStart, applyVoice,
