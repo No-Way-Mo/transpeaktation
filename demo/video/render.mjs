@@ -2,6 +2,7 @@
 // Needs ffmpeg, Google Chrome and footage/ from record.sh. `node render.mjs --from 60 --to 75` renders a slice.
 // `node render.mjs --serve` only serves the page for preview: http://127.0.0.1:8123/demo/video/pitch.html
 // `node render.mjs --stills 12,75,160` writes footage/still-<t>.jpg frames instead of the video.
+// `--short` renders the 2-minute cut (pitch.html?short) to footage/transpeaktation-pitch-short.mp4.
 import { spawn, spawnSync } from 'node:child_process';
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -11,10 +12,11 @@ import { chromium } from 'playwright-core';
 
 const { values: args } = parseArgs({ options: {
   from: { type: 'string', default: '0' }, to: { type: 'string' }, fps: { type: 'string', default: '30' },
-  out: { type: 'string', default: 'footage/transpeaktation-pitch.mp4' }, serve: { type: 'boolean' }, stills: { type: 'string' },
+  out: { type: 'string' }, serve: { type: 'boolean' }, stills: { type: 'string' }, short: { type: 'boolean' },
 } });
 const HERE = new URL('.', import.meta.url).pathname, ROOT = resolve(HERE, '../..'), FPS = +args.fps;
 const at = p => join(HERE, p);
+args.out ??= `footage/transpeaktation-pitch${args.short ? '-short' : ''}.mp4`;
 
 // The simulator recording as a constant-rate, short-GOP mp4: cheap exact seeks in Chrome.
 const mov = at('footage/sim.mov'), mp4 = at('footage/sim.mp4');
@@ -67,7 +69,7 @@ const browser = await chromium.launch({ channel: 'chrome', args: ['--autoplay-po
 const page = await browser.newPage({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1 });
 page.on('pageerror', e => console.error('page error:', e.message));
 await page.addInitScript(virtualTime);
-await page.goto(`${URL_}?render`);
+await page.goto(`${URL_}?render${args.short ? '&short' : ''}`);
 await page.waitForFunction(() => window.pitch?.ready, null, { timeout: 60000 });
 const { total, beats, app } = await page.evaluate(() => ({ total: window.pitch.total, beats: window.pitch.beats, app: window.pitch.app }));
 console.log('scenes', beats, '\napp beats', app);

@@ -10,7 +10,8 @@ needs only `npm install`, Chrome and ffmpeg. `./record.sh` (Mac + Xcode) replace
 cd demo/video && npm install
 ./record.sh        # ~3 min: boots a fresh iPhone simulator on camera, taps through the app → footage/sim.mov + marks.json
 npm run render     # ~4 min: pitch.html frame by frame → footage/transpeaktation-pitch.mp4
-npm run preview    # play it live: http://127.0.0.1:8123/demo/video/pitch.html (Space pauses, arrows seek, ?t=75)
+npm run render:short  # the 2-minute cut (1:52) → footage/transpeaktation-pitch-short.mp4
+npm run preview    # play it live: http://127.0.0.1:8123/demo/video/pitch.html (Space pauses, arrows seek, ?t=75, ?short)
 node render.mjs --stills 75,150   # single frames → footage/still-<t>.jpg; --from 140 --to 160 renders a slice
 ```
 
@@ -64,3 +65,26 @@ Times are for the current take (`npm run render` prints each scene's start, and 
 | 2:39 | The problem (left) | "Because the problem isn't a lack of roads. Every map app sends every driver down the same road, reacts after the jam, and autonomous vehicles will multiply it. And riders can't see what the AI does with their data." |
 | 2:46 | The solution (right): event-aware route selection + load-balanced routing | "transPEAKtation plans trips together, before the jam forms. It knows when the event lets out and steers routes around the crowd, and like a load balancer, it gives each road only the trips it can carry." |
 | 2:57 | End card, with the team | "transPEAKtation, by YoWayMo. More way to go." |
+
+### The 2-minute cut (`?short`, `npm run render:short`)
+
+Same scenes, played tighter (`FAST`, `DEMO_FAST` and the third column of `SCENES` in `pitch.html`): a 3 s title card, the
+demo's gridlock and act 2 fast-forwarded (~28 s), the slow parts of the recording sped up (navigation 4x, data trace 3x),
+and the closing scenes shortened with their animations played faster, not cut off. Use shorter lines from the table above.
+
+| Time | On screen |
+|---|---|
+| 0:00 | Title card, the team |
+| 0:03 | July 4 fireworks → gridlock → 1:00 AM |
+| 0:15 | Rewind → routed together |
+| 0:26 | Side by side |
+| 0:31 | iPhone, app opens |
+| 0:37 | Privacy switches, opt out |
+| 0:45 | Mic → "Go to Chase Center" |
+| 0:51 | Event-aware routes, then Gemini (0:55) |
+| 1:00 | Where your data went |
+| 1:06 | Turn-by-turn → arrived |
+| 1:13 | Adoption |
+| 1:25 | People + autonomous vehicles |
+| 1:34 | Problem; solution from 1:39 |
+| 1:47 | End card, with the team (ends 1:52) |
