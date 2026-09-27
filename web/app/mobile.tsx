@@ -1,6 +1,6 @@
 'use client';
-import { useEffect, useRef, useState, type CSSProperties, type PointerEvent } from 'react';
-import { fmtDist, fmtTime, iosArrival, mins, RECENT, stepText } from '@/lib/route.ts';
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent } from 'react';
+import { fmtDist, fmtTime, fmtWhen, iosArrival, mins, RECENT, stepText, type LatLng } from '@/lib/route.ts';
 import { useRoutePlanner } from '@/lib/use-route-planner.ts';
 import MapView, { type MapHandle } from './map-view.tsx';
 import { AppBar, MapLayers, NavDialogs, useNav } from './menu.tsx';
@@ -67,14 +67,26 @@ export default function Mobile() {
   const map = useRef<MapHandle>(null);
   const [nav, setNav] = useState(false);
   const [step, setStep] = useState(0);
+  const [dirs, setDirs] = useState(false);    // route screen: the full turn list (desktop's "Directions")
+  const [dirStep, setDirStep] = useState(-1); // highlighted turn in that list
   const top = useRef<HTMLDivElement>(null);
   const sheet = useSheet(top);
-  const r = p.selected;
+  const r = p.selected, c = p.selectedCard;
+  const hasRoutes = p.routes.length > 0 && !p.loading;
   const steps = r?.steps ?? [];
-  const next = steps[Math.min(step + 1, steps.length - 1)];
+  const nextIdx = Math.min(step + 1, steps.length - 1), next = steps[nextIdx];
   const rest = steps.slice(step);
-  const remDur = rest.reduce((a, x) => a + x.duration, 0), remDist = rest.reduce((a, x) => a + x.distance, 0);
-  useEffect(() => sheet.setIdx(1), [p.screen]); // each screen opens at half height
+  // Step timings are the provider's; scale them to the picked card so navigation starts at the minutes it showed.
+  const scale = r?.dur && c ? c.dur / r.dur : 1;
+  const remDur = rest.reduce((a, x) => a + x.duration, 0) * scale, remDist = rest.reduce((a, x) => a + x.distance, 0);
+  // Highlighted turn on the map: the upcoming one while navigating, the tapped one in the directions list.
+  const markIdx = nav ? nextIdx : dirs ? dirStep : -1;
+  const marker = useMemo<LatLng | null>(() => {
+    const loc = r?.steps[markIdx]?.maneuver.location;
+    return loc ? [loc[1], loc[0]] : null;
+  }, [r, markIdx]);
+  useEffect(() => { sheet.setIdx(1); setDirs(false); }, [p.screen]); // each screen opens at half height, on its first view
+  useEffect(() => setDirStep(-1), [p.sel, p.routes]);
   // iOS app: while navigating a saved trip, native GPS marks it arrived near the destination. Browser: the button.
   const ios = iosArrival();
   const arrivedRef = useRef(p.arrived);
@@ -92,7 +104,18 @@ export default function Mobile() {
     const loc = steps[i]?.maneuver.location;
     if (loc) map.current?.focus([loc[1], loc[0]]);
   };
-  const close = () => { setNav(false); setStep(0); p.goStart(); };
+  /** Directions list: highlight a turn and bring it into the map left between the from/to card and the sheet. */
+  const pickTurn = (i: number) => {
+    setDirStep(i);
+    const loc = steps[i]?.maneuver.location;
+    if (!loc) return;
+    const idx = Math.min(sheet.idx, 1); // a full-height sheet would hide the map
+    sheet.setIdx(idx);
+    const cardBottom = top.current?.querySelector('.endpoints')?.getBoundingClientRect().bottom ?? 0;
+    map.current?.focus([loc[1], loc[0]], 16, (DETENTS[idx] * innerHeight - cardBottom) / 2);
+  };
+  const closeDirs = () => { setDirs(false); setDirStep(-1); map.current?.fit(); };
+  const close = () => { setNav(false); setStep(0); setDirs(false); p.goStart(); };
   const grabber = (
     <button className="grabber" aria-label={['Expand panel', 'Expand panel', 'Collapse panel'][sheet.idx]} onClick={sheet.cycle} />
   );
@@ -100,12 +123,12 @@ export default function Mobile() {
   return (
     <div className="mob" style={sheet.style}>
       <MapView ref={map} routes={p.routes} sel={p.sel} tp={p.choice.tp} labels={p.mapLabels} from={p.from} to={p.to} events={p.mapEvents} onSelect={p.setSel}
-        pad={{ topLeft: [24, 242], bottomRight: [24, 420] }} />
+        marker={marker} span={p.mapSpan} routeEvents={p.selectedContext?.events} pad={{ topLeft: [24, 242], bottomRight: [24, 420] }} />
       <AppBar n={n} className="mob-bar" />
 
       {p.screen !== 'search' && !nav && (
         <>
-          <Compass movable onPress={() => map.current?.fit()} className={p.screen === 'start' ? 'high' : ''} />
+          <Compass onPress={() => map.current?.fit()} className={p.screen === 'start' ? 'high' : ''} /> {/* fixed: stays centred over the layers button */}
           <MapLayers className={`mob-layers${p.screen === 'start' ? ' high' : ''}`} />
         </>
       )}
@@ -146,14 +169,15 @@ export default function Mobile() {
       {p.screen === 'route' && !nav && (
         <>
           <div className="mob-top" ref={top}>
-            <Endpoints p={p} placeholders={['Starting point', 'Where to?']} />
+            <Endpoints p={p} placeholders={['Starting point', 'Where to?']} onPicked={() => { setDirs(false); setDirStep(-1); }} />
           </div>
 
           <div className={`sheet${sheet.dragging ? ' dragging' : ''}`}>
             <div className="sheet-handle" {...sheet.handle}>
               {grabber}
               <div className="sheet-head">
-                <span className="title ellipsis">Routes to {p.to?.label}</span>
+                {dirs && <button className="close-btn" aria-label="Back to routes" onClick={closeDirs}><Icon name="back" size={16} /></button>}
+                <span className="title ellipsis grow">{dirs ? 'Directions to' : 'Routes to'} {p.to?.label}</span>
                 <button className="close-btn" aria-label="Close" onClick={close}><Icon name="close" size={16} /></button>
               </div>
             </div>
@@ -169,15 +193,37 @@ export default function Mobile() {
                 </div>
               )}
 
-              {p.routes.length > 0 && !p.loading && (
+              {hasRoutes && !dirs && (
                 <>
                   <TripNote note={p.trip.note} />
                   <RouteList p={p} onTrace={() => n.open('settings', 'privacy')} />
                 </>
               )}
+
+              {hasRoutes && dirs && r && c && (
+                <>
+                  <div className="summary">
+                    <div><b className="good">{mins(c.dur)} min</b><span>{c.tp ? 'transPEAKtation' : 'drive time'}</span></div>
+                    <div><b>{fmtWhen(p.when.mode === 'arrive' ? c.leave : c.arrive)}</b><span>{p.when.mode === 'arrive' ? 'leave by' : 'arrival'}</span></div>
+                    <div><b>{fmtDist(r.dist)}</b><span>distance</span></div>
+                  </div>
+                  <div className="steps">
+                    {steps.map((st, i) => (
+                      <button key={i} className={`step${i === dirStep ? ' on' : ''}`} aria-pressed={i === dirStep} onClick={() => pickTurn(i)}>
+                        <span className="arrow"><TurnIcon step={st} /></span>
+                        <span className="stack">
+                          <span className="step-text">{stepText(st, p.to?.label ?? '')}</span>
+                          <span className="sub">{st.distance > 0 ? fmtDist(st.distance) : ''}</span>
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
-            {p.routes.length > 0 && !p.loading && (
+            {hasRoutes && (
               <div className="sheet-foot">
+                {!dirs && <button className="foot-alt" onClick={() => { setDirs(true); setDirStep(-1); }}>Directions</button>}
                 <button className="start" onClick={() => { setNav(true); setStep(0); if (r) map.current?.focus(r.coords[0]); }}>Start</button>
               </div>
             )}
