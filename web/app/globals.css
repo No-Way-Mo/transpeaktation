@@ -544,9 +544,6 @@ input::placeholder { color: var(--muted); }
 .desk-layers { position: absolute; top: 16px; right: 20px; z-index: 6; } /* centred over the 44px zoom column below */
 .mob-layers { position: absolute; right: 18px; top: calc(var(--bar-bottom) + 204px); z-index: 28; } /* centred under the 48px compass */
 .mob-layers.high { top: calc(var(--bar-bottom) + 66px); }
-.mob-zoom { position: absolute; right: 68px; top: calc(var(--bar-bottom) + 146px); z-index: 28; } /* left of the compass, tops aligned */
-.mob-zoom.high { top: calc(var(--bar-bottom) + 8px); }
-.mob-zoom.nav { right: 14px; top: 50%; transform: translateY(-50%); } /* navigating: no compass, mid-right */
 .layers-btn[aria-pressed='true'] { color: var(--action-text); }
 .layers-btn[aria-pressed='false'] { color: var(--muted); }
 .layer-group { display: flex; flex-direction: column; }
