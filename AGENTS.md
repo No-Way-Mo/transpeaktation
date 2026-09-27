@@ -71,7 +71,7 @@ Forecast models need one fixed road list, one unit, and one time step. Raw feeds
 
 ## Run
 <!-- add one line per folder once it runs -->
-- demo: `open demo/index.html` · test: `node demo/check.mjs` · SUMO kit: `python3 demo/sumo/kit.py --help` · offline check: `python3 demo/sumo/check.py` · setup/later execution: `demo/sumo/README.md`
+- demo: `open demo/index.html` · test: `node demo/check.mjs` · light theme: `demo/index.html?theme=light` · pitch video (`demo/video/README.md`): `cd demo/video && npm install && ./record.sh && npm run render` · SUMO kit: `python3 demo/sumo/kit.py --help` · offline check: `python3 demo/sumo/check.py` · setup/later execution: `demo/sumo/README.md`
 - ingest setup: `cd ingest && python -m venv .venv && .venv/Scripts/pip install -e .[osm]` (macOS/Linux: `.venv/bin/`)
 - ingest pull raw data: `cd ingest && .venv/Scripts/python -m pull [static|planned|live|<source>]` · quality report: `.venv/Scripts/python -m pull.check`
 - ingest live polling (Mapbox corridors + traffic tiles, TomTom flow tiles, Muni vehicles, 511 events; keys in `ingest/.env`): `cd ingest && .venv/Scripts/pip install -e .[live] && .venv/Scripts/python -m pull.poll` (`--once`, `--only mapbox|mapbox_tiles|tomtom|muni|events`)

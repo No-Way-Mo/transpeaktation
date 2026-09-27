@@ -1,0 +1,5 @@
+footage/*
+!footage/sim.mov
+!footage/marks.json
+.build/
+ios/*.xcodeproj/
