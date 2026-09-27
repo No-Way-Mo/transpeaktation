@@ -264,6 +264,16 @@ class TestRouteChoiceEnv(unittest.TestCase):
         r = never.select(ctx)
         self.assertEqual(r.policy_version, "adaptive-v1:heuristic")
         self.assertEqual(r.choices, Heuristic().select(ctx).choices)
+        # light tier (off by default): below both light thresholds the batch takes its fastest route
+        from coordination.selectors.forecast_only import ForecastOnly
+        light = Adaptive(env.cfg, stress=2.0, load=1e9, light=2.0, lload=1e9)
+        r = light.select(ctx)
+        self.assertEqual(r.policy_version, "adaptive-v1:fastest")
+        self.assertEqual(r.choices, ForecastOnly().select(ctx).choices)
+        self.assertEqual(r.diagnostics[rid]["_adaptive"]["light_thresholds"], [2.0, 1e9])
+        stressed = Adaptive(env.cfg, stress=-1.0, light=2.0, lload=1e9)   # high stress always wins over light
+        stressed.learned = Learned()
+        self.assertEqual(stressed.select(ctx).policy_version, "adaptive-v1:learned")
         env.close()
 
     def test_keep_outputs_with_and_without_warm_state(self):

@@ -109,7 +109,7 @@ def choose_scenarios(cfg: Config, suite: str, only: list | None = None) -> list[
 
 # ---------------------------------------------------------------- policies
 
-POLICY_KEYS = ("lam", "w", "rep", "stress", "load")
+POLICY_KEYS = ("lam", "w", "rep", "stress", "load", "light", "lload")
 
 
 def parse_policy(spec: str) -> tuple[str, dict]:
@@ -139,7 +139,8 @@ def chooser(cfg: Config, policy: str):
     policy, over = parse_policy(policy)
     if policy == "adaptive":                   # heuristic, learned policy (rl.checkpoint) on predicted stress
         from ..selectors.adaptive import Adaptive
-        return Adaptive(cfg, stress=over.get("stress", 0.5), load=over.get("load", 1.0)).select
+        return Adaptive(cfg, stress=over.get("stress", 0.5), load=over.get("load", 1.0), light=over.get("light"),
+                        lload=over.get("lload", 0.5)).select
     if policy.startswith("rl_"):
         ck = cfg.benchmark.checkpoints.get(policy)
         if not ck:
