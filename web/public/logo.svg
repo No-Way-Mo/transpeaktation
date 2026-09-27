@@ -1,9 +1,0 @@
-<!-- transPEAKtation mark, for dark backgrounds. Red spike: the jam when everyone takes the same road. Routes: more ways, each one flat. -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.6">
-  <path d="M9 24 16 5l7 19" stroke="#FF4D5E" stroke-width="2" opacity=".45"/>
-  <path d="M4 24c4 0 4.5-11 8.5-11h7c4 0 4.5 11 8.5 11" stroke="#16C7B7"/>
-  <path d="M4 24c4 0 4.5-5.5 8.5-5.5h7c4 0 4.5 5.5 8.5 5.5" stroke="#2F6BFF"/>
-  <path d="M4 24h24" stroke="#E7EDF6"/>
-  <circle cx="4" cy="24" r="3" fill="#E7EDF6"/>
-  <circle cx="28" cy="24" r="3" fill="#16C7B7"/>
-</svg>

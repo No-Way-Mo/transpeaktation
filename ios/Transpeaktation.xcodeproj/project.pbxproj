@@ -7,14 +7,12 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		28CBB9775362D71CEAE3C67B /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 897ABA4F15DB2DA7CBDE6B70 /* Assets.xcassets */; };
 		5506FB164BE2DF6F30A74B3B /* TranspeaktationApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = EC77CE000D3F26CC024EA0F3 /* TranspeaktationApp.swift */; };
 		66004E4880825AAD50D7E49B /* WebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C991AE064FD89657E5002C03 /* WebView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		685E46A03FA6FB70DDF588C5 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
-		897ABA4F15DB2DA7CBDE6B70 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B92D5746953D73135037FE83 /* Transpeaktation.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Transpeaktation.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C991AE064FD89657E5002C03 /* WebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebView.swift; sourceTree = "<group>"; };
 		EC77CE000D3F26CC024EA0F3 /* TranspeaktationApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TranspeaktationApp.swift; sourceTree = "<group>"; };
@@ -24,7 +22,6 @@
 		14F2EA0D7F3B3C43F59AE938 /* Transpeaktation */ = {
 			isa = PBXGroup;
 			children = (
-				897ABA4F15DB2DA7CBDE6B70 /* Assets.xcassets */,
 				685E46A03FA6FB70DDF588C5 /* Info.plist */,
 				EC77CE000D3F26CC024EA0F3 /* TranspeaktationApp.swift */,
 				C991AE064FD89657E5002C03 /* WebView.swift */,
@@ -56,7 +53,6 @@
 			buildConfigurationList = 15CE02BF24402BEA209BBC70 /* Build configuration list for PBXNativeTarget "Transpeaktation" */;
 			buildPhases = (
 				16FCB4E8C54D61FA5C03446C /* Sources */,
-				A3D45D0199A1FBD8CFC88AD2 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -98,17 +94,6 @@
 			);
 		};
 /* End PBXProject section */
-
-/* Begin PBXResourcesBuildPhase section */
-		A3D45D0199A1FBD8CFC88AD2 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				28CBB9775362D71CEAE3C67B /* Assets.xcassets in Resources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		16FCB4E8C54D61FA5C03446C /* Sources */ = {
