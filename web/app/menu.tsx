@@ -89,6 +89,7 @@ export function AppBar({ n, className = '' }: { n: NavApi; className?: string })
       <img className="wordmark wordmark-light" src="/wordmark-light.svg" alt="transPEAKtation" />
       <img className="wordmark wordmark-dark" src="/wordmark-dark.svg" alt="transPEAKtation" />
       <img className="wordmark wordmark-pride" src="/wordmark-pride.svg" alt="transPEAKtation" />
+      <a className="about-link" href="/about" target="_blank" rel="noopener">More about us here <Icon name="external" size={16} /></a>
     </header>
   );
 }

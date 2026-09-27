@@ -692,6 +692,13 @@ input::placeholder { color: var(--muted); }
 .logo-btn[aria-expanded='true'] { background: var(--action-tint); color: var(--action-text); }
 /* Logo wordmark, one SVG per theme: navy ink on light, light ink (+ brighter green/blue) on dark, deep rainbow on pride. */
 .wordmark { display: none; height: 28px; width: auto; }
+/* Desktop top bar, right end: link to /about (new tab). Phones keep the bar clear (.mob-bar). */
+.about-link { margin-left: auto; display: inline-flex; align-items: center; gap: 4px; padding: 8px 12px; border-radius: 10px; color: var(--action-text); font-size: 14px; font-weight: 600; text-decoration: none; }
+.about-link:hover { background: var(--action-tint); }
+.about-link svg { transition: transform 0.2s var(--ease-out); }
+.about-link:hover svg { transform: translate(2px, -2px); }
+.mob-bar .about-link { display: none; }
+:root[data-theme='pride'] .app-bar:not(.mob-bar)::after { margin-left: 8px; } /* the Pride pill sits after the link */
 .wordmark-light,
 :root[data-theme='dark'] .wordmark-dark,
 :root[data-theme='pride'] .wordmark-pride { display: block; }
