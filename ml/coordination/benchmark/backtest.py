@@ -8,17 +8,16 @@ Phases (every run a separate, resumable experiment id; see runner.py):
 * dev (validation split, development scenarios x `benchmark.seeds`), one process pool:
   - profile/sanity: one scenario x seed 0: forecast_only twice (repeatability), heuristic@lam=0 (must reproduce
     independent routing), heuristic, batch;
-  - screening at the base participation: forecast_only, heuristic (lam 60, 15, 120), batch (60 s and 15 s windows),
-    heuristic@w=60 (equal-timing control for batch);
-  - adoption: forecast_only / heuristic / batch at 15% and 30% participation;
+  - screening at the base participation: forecast_only, heuristic (lam 60, 15, 120, 500, 2000);
+  - adoption: forecast_only / heuristic / heuristic@lam=500 at 15% and 30% participation;
   - compliance: the same three at 15% participation with 75% and 50% compliance.
 * heldout (test split, one scenario per family, `HELDOUT_SEEDS`), a FIXED matrix declared before any run so it can
   run in parallel with dev on another node: forecast_only + every held-out candidate (`HELDOUT[p]`) at 5% and 30%
   participation.
 * selection (pre-declared here, applied to dev results only, frozen to selection_<id>.json before the held-out
   results are read): best = the eligible held-out candidate (every screening run strictly complete) with the lowest
-  mean paired vehicle-hours vs forecast_only on common complete screening blocks; challenger = the best eligible
-  candidate of the other family (heuristic vs batch). The final report headlines only best and challenger on held-out;
+  mean paired vehicle-hours vs forecast_only on common complete screening blocks; challenger = the next-best
+  eligible candidate. The final report headlines only best and challenger on held-out;
   the other held-out candidates are listed separately and never used to pick a winner.
 * report: reports/load_balancing_backtest_<backtest id>.md with every experiment's report linked.
 
@@ -37,15 +36,17 @@ import pandas as pd
 from ..config import Config
 from . import report, runner
 
-SCREEN = ["forecast_only", "heuristic", "heuristic@lam=15", "heuristic@lam=120", "batch", "batch@w=15",
-          "heuristic@w=60"]
-CORE = ["forecast_only", "heuristic", "batch"]
-PROFILE = ["forecast_only", "forecast_only@rep=1", "heuristic@lam=0", "heuristic", "batch"]
+# The CP-SAT `batch` selector is excluded from every test matrix (user decision 2026-09-27: weakest method in all
+# backtests, mostly its batching wait). The selector stays available for serving.
+SCREEN = ["forecast_only", "heuristic", "heuristic@lam=15", "heuristic@lam=120", "heuristic@lam=500",
+          "heuristic@lam=2000"]
+CORE = ["forecast_only", "heuristic", "heuristic@lam=500"]
+PROFILE = ["forecast_only", "forecast_only@rep=1", "heuristic@lam=0", "heuristic"]
 ADOPTION = [0.15, 0.30]
 COMPLIANCE_AT = 0.15
 COMPLIANCE = [0.75, 0.5]
 HELDOUT_SEEDS = [0, 1, 2]
-CANDIDATES = ["heuristic", "heuristic@lam=120", "batch"]           # policies the selection may choose
+CANDIDATES = ["heuristic", "heuristic@lam=120", "heuristic@lam=500"]   # policies the selection may choose
 HELDOUT = {0.05: ["forecast_only", *CANDIDATES], 0.30: CORE}
 
 
@@ -82,24 +83,23 @@ def select(dev: dict) -> dict:
     note = []
     if rank:
         best = rank[0]["policy"]
-        other = [r["policy"] for r in rank if _family(r["policy"]) != _family(best)]
-        challenger = other[0] if other else next((r["policy"] for r in rank[1:]), None)
+        challenger = next((r["policy"] for r in rank[1:]), None)
     else:
-        best, challenger = "heuristic", "batch"
+        best, challenger = "heuristic", "heuristic@lam=500"
         note.append("no eligible held-out candidate on the screening blocks: default heuristic/batch are headlined "
                     "so the negative result is tested, not hidden")
     adoption = {}
     for name, res in dev.items():
         if name == "screen" or name.startswith("adopt_"):
             pv = report.summarize(res)["paired"]
-            for fam in ("heuristic", "batch"):
+            for fam in [p for p in CORE if p != report.BASE]:
                 r = pv[(pv.policy == fam) & (pv.metric == "vehicle_hours")] if not pv.empty else pv
                 adoption.setdefault(fam, {})[str(res["meta"]["participation"])] = \
                     float(r.mean_rel_pct.iloc[0]) if len(r) else None
     return {"best": best, "challenger": challenger, "candidates": CANDIDATES, "screen_ranking": S["ranking"],
             "eligible": S["eligible"], "dev_adoption_mean_rel_pct": adoption, "notes": note,
             "rule": "best = lowest mean paired vehicle-hours among strictly complete held-out candidates on common "
-                    "complete screening blocks; challenger = best candidate of the other family; decided from dev "
+                    "complete screening blocks; challenger = next-best candidate; decided from dev "
                     "results only",
             "frozen_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
 
@@ -144,7 +144,7 @@ def _mechanism(named: dict) -> list:
         df = report.flatten(res)
         df = df[df.status == "ok"]
         for pol, g in df.groupby("policy"):
-            if pol in ("forecast_only", "heuristic", "heuristic@lam=120", "batch"):
+            if pol == "forecast_only" or pol.startswith("heuristic"):
                 mech.append({"experiment": name, "policy": pol, "participants / in-scope":
                              round(g.participants.mean() / g.in_scope_vehicles.mean(), 4),
                              "single-option share": round(g.trivial.mean() / g.participants.mean(), 3),
@@ -184,10 +184,8 @@ def final_report(cfg: Config, backtest_id: str, dev: dict, sel: dict | None, hel
     if "screen" in dev:
         L += ["## Phase 1: screening at the base participation (validation split)", "",
               report._md(pd.DataFrame(_pv_rows(dev["screen"], [p for p in SCREEN if p != "forecast_only"])),
-                         index=False), "",
-              "`heuristic@w=60` is the equal-timing control for `batch` (same 60 s release groups, sequential "
-              "heuristic): batch minus it isolates joint optimisation from batching delay.", ""]
-    ad = [(dev[k]["meta"]["participation"], dev[k]) for k in ["screen"] + [f"adopt_{round(100 * p)}" for p in ADOPTION]
+                         index=False), ""]
+    ad =[(dev[k]["meta"]["participation"], dev[k]) for k in ["screen"] + [f"adopt_{round(100 * p)}" for p in ADOPTION]
           if k in dev]
     if ad:
         rows = []
@@ -195,13 +193,14 @@ def final_report(cfg: Config, backtest_id: str, dev: dict, sel: dict | None, hel
             mf = cfg.path(cfg.benchmark.out_dir) / res["meta"]["experiment_id"] / "manifest.json"
             cohorts = json.loads(mf.read_text()).get("cohorts", []) if mf.exists() else []
             share = sum(c["participants"] for c in cohorts) / sum(c["in_scope"] for c in cohorts) if cohorts else None
-            for r in _pv_rows(res, ["heuristic", "batch"]):
+            for r in _pv_rows(res, [p for p in CORE if p != report.BASE]):
                 rows.append({"participation (of eligible)": p, "participants / in-scope": share and round(share, 4), **r})
-        L += ["## Phase 2a: adoption (heuristic and batch vs forecast_only)", "", report._md(pd.DataFrame(rows),
+        L += ["## Phase 2a: adoption (heuristic variants vs forecast_only)", "", report._md(pd.DataFrame(rows),
                                                                                              index=False), ""]
     cp = [(dev[k]["meta"]["compliance"], dev[k]) for k in [f"comply_{round(100 * c)}" for c in COMPLIANCE] if k in dev]
     if cp:
-        rows = [{"compliance": c, **r} for c, res in cp for r in _pv_rows(res, ["heuristic", "batch"])]
+        rows = [{"compliance": c, **r} for c, res in cp
+                for r in _pv_rows(res, [p for p in CORE if p != report.BASE])]
         L += [f"## Phase 2b: compliance at {COMPLIANCE_AT:.0%} participation", "",
               report._md(pd.DataFrame(rows), index=False), ""]
     if sel:
@@ -327,7 +326,7 @@ def main(cfg: Config, phase: str = "all", workers: int | None = None, rl: list |
 
 
 # ---------------------------------------------------------------- high-adoption sweep
-SWEEP_POLICIES = ["forecast_only", "heuristic", "heuristic@lam=120", "batch"]
+SWEEP_POLICIES = ["forecast_only", "heuristic", "heuristic@lam=500", "heuristic@lam=2000"]
 
 
 def sweep_experiments(cfg: Config, levels: list, policies: list) -> dict:
@@ -412,3 +411,75 @@ def sweep(cfg: Config, levels: list, policies: list | None = None, run: bool = T
     p = sweep_report(cfg, sid, levels, res, reps)
     log(json.dumps({"sweep_report": str(p), "experiments": len(res), "of": len(E)}))
     return {"sweep_id": sid, "report": str(p)}
+
+
+# ---------------------------------------------------------------- July 4 fireworks demo port (b6_fireworks)
+def fireworks_experiments(cfg: Config) -> dict:
+    """The demo's fireworks exodus on net_v3 (eventsim/fireworks_demo.py): app users only at 100%, everyone at 100%
+    and at 50%. Gridlock leaves cars unfinished at the 01:00 horizon, so results compare the same fixed horizon."""
+    from ..rl import scenario
+    ids = sorted(s.scenario_id for s in scenario.load(cfg, "test"))
+    app, every = [s for s in ids if "_app_" in s], [s for s in ids if "_all_" in s]
+    pols, seeds = list(cfg.benchmark.policies), list(cfg.benchmark.seeds)
+    return {"fw_app_100": runner.prepare(variant(cfg, 1.0), "heldout", pols, app, seeds),
+            "fw_all_100": runner.prepare(variant(cfg, 1.0), "heldout", pols, every, seeds),
+            "fw_all_50": runner.prepare(variant(cfg, 0.5), "heldout", pols, every, seeds)}
+
+
+def fireworks_report(cfg: Config, fid: str, res: dict, reps: dict) -> Path:
+    rows = []
+    for name, r in res.items():
+        df = report.flatten(r)
+        df = df[df.status == "ok"].copy()
+        df["arrived"] = df.in_scope_vehicles - df.unfinished.fillna(0)
+        df["crowd"] = df.scenario.str.extract(r"_n(\d+)_")[0].astype(int)
+        base = df[df.policy == report.BASE].set_index(["scenario", "seed"])
+        for (pol, n), g in df[df.policy != report.BASE].groupby(["policy", "crowd"]):
+            j = g.set_index(["scenario", "seed"]).join(base, rsuffix="_b", how="inner")
+            if j.empty:
+                continue
+            d = j.vehicle_hours - j.vehicle_hours_b
+            rows.append({"experiment": name, "crowd cars": n, "policy": pol, "pairs": len(j),
+                         "vehicle_hours (base)": round(j.vehicle_hours_b.mean(), 1),
+                         "vehicle_hours %": round(100 * (d / j.vehicle_hours_b).mean(), 3),
+                         "better/worse": f"{int((d < 0).sum())}/{int((d > 0).sum())}",
+                         "arrived by 01:00 (base)": round(j.arrived_b.mean()),
+                         "arrived diff": round((j.arrived - j.arrived_b).mean(), 1),
+                         "unfinished (base)": round(j.unfinished_b.mean()),
+                         "congested in-scope %": round(100 * ((j.congested_h_scope - j.congested_h_scope_b)
+                                                             / j.congested_h_scope_b).mean(), 3),
+                         "app trip mean % (completed)": round(100 * ((j.part_trip_s_mean - j.part_trip_s_mean_b)
+                                                                    / j.part_trip_s_mean_b).mean(), 3),
+                         "non-fastest share": round(g.non_fastest_share.mean(), 3)})
+    df = pd.DataFrame(rows).sort_values(["experiment", "crowd cars", "policy"]) if rows else pd.DataFrame()
+    L = [f"# July 4 fireworks exodus on our network `{fid}`", "",
+         "> **Synthetic.** The demo's cohort (`demo/sumo/kit.py` v3, seed 42: 1000 app users) plus N assumed crowd cars "
+         "leaving the seven viewing sites 21:45-22:45, rebuilt on net_v3 (`eventsim/fireworks_demo.py`). Event context: "
+         "PredictHQ 300,000 expected attendance, show 21:30-21:45. No measured July 4 traffic exists.", "",
+         "Everything is compared at the same fixed horizon (01:00): vehicle_hours = time of every vehicle up to 01:00 "
+         "(finished or not), arrived = vehicles that reached their destination by 01:00. Negative % = better; a "
+         "positive `arrived diff` = more cars got home. `fw_app_100`: only the 1000 app users are coordinated (crowd "
+         "cars never use the app); `fw_all_*`: every car may use the app (100% or 50% participation).", "",
+         report._md(df, index=False) if not df.empty else "(no results)", "",
+         "## Experiment reports", ""]
+    L += [f"- {k}: [{Path(v['report']).name}]({Path(v['report']).name})" for k, v in reps.items()] + [""]
+    p = cfg.path("reports") / f"fireworks_demo_{fid}.md"
+    p.write_text("\n".join(L), encoding="utf-8")
+    return p
+
+
+def fireworks(cfg: Config, run: bool = True, workers: int | None = None, only: list | None = None, log=print) -> dict:
+    root = cfg.path(cfg.benchmark.out_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    E = fireworks_experiments(cfg)
+    fid = hashlib.sha256("|".join(e.exp for e in E.values()).encode()).hexdigest()[:10]
+    (root / f"fireworks_{fid}.json").write_text(json.dumps({k: e.exp for k, e in E.items()}, indent=1))
+    todo = {k: e for k, e in E.items() if not only or k in only}
+    if run and todo:
+        log(json.dumps({"running": list(todo)}))
+        runner.run_many(list(todo.values()), workers=workers, log=log)
+    res = _load(root, E)
+    reps = {k: _write_reports(cfg, k, r) for k, r in res.items()}
+    p = fireworks_report(cfg, fid, res, reps)
+    log(json.dumps({"fireworks_report": str(p), "experiments": len(res), "of": len(E)}))
+    return {"fireworks_id": fid, "report": str(p)}

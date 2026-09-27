@@ -32,8 +32,10 @@ every 10 min (ingest-owned; needs a contracts change first). Forecasts are train
 
 `python -m coordination serve --input live|replay`, systemd unit `transpeaktation-coordination`, port 8100 (bearer
 `COORDINATION_API_TOKEN` from `ml/.env`, generated on first deploy; cloud firewall admits only the app droplet and the
-deploying machine). Selector: `heuristic` by default; `batch` (CP-SAT) per request with `"selector": "batch"` or as the
-default via `service.selector` in the config. RL selectors are not deployed.
+deploying machine). Selector: `adaptive` by default (heuristic with the wider candidate search; the PPO v2 checkpoint
+in `rl.checkpoint`, shipped in the bundle, when the fastest route is predicted congested >= 0.5 or over its
+reservation budget; falls back to the heuristic if the checkpoint cannot load). `heuristic` / `batch` (CP-SAT) per
+request with `"selector": ...` or as the default via `service.selector` in the config.
 
 ```sh
 cd ml

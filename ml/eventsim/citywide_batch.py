@@ -261,7 +261,7 @@ def sample_family(rng, event_key: str, window: str, idx: int, batch: str, versio
 
 def plan(batch: str, families_per_event: int, seeds: int, seed: int, events: list[str] | None,
          windows: list[str] | None, version: int = SAMPLER_VERSION, requests: str | None = None,
-         horizon_min: int | None = None) -> dict:
+         horizon_min: int | None = None, demand_scale: float = 1.0) -> dict:
     out = batch_dir(batch)
     if (out / "scenarios.json").exists():
         raise SystemExit(f"{batch} already planned; scenarios are frozen. Use a new batch id.")
@@ -270,6 +270,9 @@ def plan(batch: str, families_per_event: int, seeds: int, seed: int, events: lis
     status = {c["case_num"]: c["status"] for c in review["cases"]}
     pool = EVENT_POOL_V3 if version >= 3 else EVENT_POOL
     bg_range, bg_source = demand_range() if version >= 3 else ((9_000, 16_000), "assumption")
+    if demand_scale != 1.0:   # stress test: every family's background demand range scaled (event demand unchanged)
+        bg_range = (bg_range[0] * demand_scale, bg_range[1] * demand_scale)
+        bg_source = f"{bg_source}; stress test x{demand_scale:g}"
     if version >= 3 and not (ROOT / NET_V3 / "network.json").exists():
         raise SystemExit("sampler v3 needs network v3: run `python -m eventsim.citywide_batch network-v3`")
     rng = np.random.default_rng(seed)
@@ -319,7 +322,7 @@ def plan(batch: str, families_per_event: int, seeds: int, seed: int, events: lis
             "trigger_radius_m": TRIGGER_RADIUS_M if version >= 3 else None,
             "network_corrections": NETWORK_CORRECTIONS + ("; v3 network: parallel edges merged, closure segments never "
                                                           "absorbed, fixed/actuated signals" if version >= 3 else ""), "created_at": datetime.now(timezone.utc).isoformat(),
-            "sampler_seed": seed, "horizon_min": horizon_min, "families": fams, "runs": runs,
+            "sampler_seed": seed, "horizon_min": horizon_min, "demand_scale": demand_scale, "families": fams, "runs": runs,
             "profiles": PROFILES, "event_pool": pool,
             "provenance": "SYNTHETIC. Real network, verified permit closures and event dates; demand, attendance, "
                           "timing and behaviour are assumptions. Not observed traffic and not event ground truth."}
@@ -1109,6 +1112,8 @@ def main():
     p.add_argument("--keep-raw", action="store_true", help="keep edgedata/tripinfo XML (large)")
     p.add_argument("--requests", help="plan: client trip requests (parquet/csv) used as background demand")
     p.add_argument("--horizon-min", type=int, help="plan: long-horizon windows (issue times B-horizon..B+30 min)")
+    p.add_argument("--demand-scale", type=float, default=1.0,
+                   help="plan: multiply the background peak-demand range (stress test; event demand unchanged)")
     p.add_argument("--target-families", type=int, default=100, help="readiness: size of the batch to cost")
     p.add_argument("--target-seeds", type=int, default=2)
     a = p.parse_args()
@@ -1117,7 +1122,7 @@ def main():
         r = network_v3()
     elif a.stage == "plan":
         r = plan(a.batch, a.families_per_event, a.seeds, a.seed, a.events, a.windows, a.sampler_version, a.requests,
-                 a.horizon_min)
+                 a.horizon_min, a.demand_scale)
     elif a.stage == "simulate":
         r = simulate(a.batch, a.workers, a.only, a.keep_raw)
     elif a.stage == "export":

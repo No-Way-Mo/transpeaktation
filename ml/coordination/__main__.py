@@ -262,6 +262,10 @@ def cmd_backtest(cfg, a):
                 cfg.benchmark.checkpoints[name] = ck
             rl.append(name)
     only = [x for x in (a.only or "").split(",") if x] or None
+    if a.phase in ("fireworks", "fireworks-report"):
+        print(json.dumps(backtest.fireworks(cfg, run=a.phase == "fireworks", workers=a.workers, only=only),
+                         indent=1, default=str))
+        return
     if a.phase in ("sweep", "sweep-report"):
         levels = [float(x) for x in (a.levels or "0.8,0.9,1.0").split(",")]
         pols = [x for x in (a.sweep_policies or "").split(",") if x] or None
@@ -381,7 +385,8 @@ def main(argv=None):
     s.add_argument("--no-resume", action="store_true", help="rerun tasks even if this experiment id has results")
     s = add("backtest", help="load-balancing backtest: dev screening/adoption/compliance -> frozen selection -> "
                              "held-out -> report (LOAD_BALANCING_BACKTEST_PLAN.md)")
-    s.add_argument("--phase", default="all", choices=["dev", "heldout", "report", "all", "sweep", "sweep-report"])
+    s.add_argument("--phase", default="all", choices=["dev", "heldout", "report", "all", "sweep", "sweep-report",
+                                                    "fireworks", "fireworks-report"])
     s.add_argument("--levels", help="sweep: participation levels (share of eligible drivers), default 0.8,0.9,1.0")
     s.add_argument("--sweep-policies", help="sweep: policies (default forecast_only,heuristic,heuristic@lam=120,batch)")
     s.add_argument("--workers", type=int)

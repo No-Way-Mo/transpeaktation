@@ -148,18 +148,21 @@ class TestSelectionRule(unittest.TestCase):
         runs = []
         for sc, base in (("s1", 100.0), ("s2", 200.0)):
             runs += [_run("forecast_only", sc, 0, base), _run("heuristic", sc, 0, base - 1),
-                     _run("heuristic@lam=120", sc, 0, base - 3), _run("batch", sc, 0, base - 2),
-                     _run("batch@w=15", sc, 0, base + 1)]
+                     _run("heuristic@lam=120", sc, 0, base - 3), _run("heuristic@lam=500", sc, 0, base - 2),
+                     _run("heuristic@lam=15", sc, 0, base - 4)]
         meta = {"suite": "screening", "scenarios": ["s1", "s2"], "seeds": [0], "participation": 0.05,
-                "policies": ["forecast_only", "heuristic", "heuristic@lam=120", "batch", "batch@w=15"]}
+                "policies": ["forecast_only", "heuristic", "heuristic@lam=120", "heuristic@lam=500",
+                             "heuristic@lam=15"]}
         adopt = {"meta": {**meta, "participation": 0.3, "policies": ["forecast_only", "heuristic", "batch"]},
                  "runs": [_run("forecast_only", "s1", 0, 100.0), _run("heuristic", "s1", 0, 90.0),
                           _run("batch", "s1", 0, 95.0)]}
         sel = backtest.select({"screen": {"meta": meta, "runs": runs}, "adopt_30": adopt})
-        self.assertEqual(sel["best"], "heuristic@lam=120")
-        self.assertEqual(sel["challenger"], "batch")                       # best of the other family
+        self.assertEqual(sel["best"], "heuristic@lam=120")                 # lam=15 wins but is not a candidate
+        self.assertEqual(sel["challenger"], "heuristic@lam=500")           # next-best candidate
         self.assertEqual(sel["dev_adoption_mean_rel_pct"]["heuristic"]["0.3"], -10.0)
-        self.assertNotIn("batch@w=15", sel["candidates"])                  # only pre-declared held-out candidates
+        self.assertNotIn("heuristic@lam=15", sel["candidates"])            # only pre-declared held-out candidates
+        self.assertFalse(any(p.startswith("batch") for p in backtest.SCREEN + backtest.CORE + backtest.PROFILE
+                             + backtest.CANDIDATES + backtest.SWEEP_POLICIES))  # batch dropped from tests
 
     def test_partial_and_full_final_report(self):
         from coordination.benchmark import backtest
@@ -170,10 +173,11 @@ class TestSelectionRule(unittest.TestCase):
             cfg.benchmark.out_dir = str(tmp / "bt")
             cfg.run_root = str(tmp)
             runs = [_run(p, sc, 0, b + d) for sc, b in (("s1", 100.0), ("s2", 200.0))
-                    for p, d in (("forecast_only", 0), ("heuristic", -8), ("heuristic@lam=120", -9), ("batch", -1))]
+                    for p, d in (("forecast_only", 0), ("heuristic", -8), ("heuristic@lam=120", -9),
+                                 ("heuristic@lam=500", -1))]
             meta = {"suite": "screening", "scenarios": ["s1", "s2"], "seeds": [0], "participation": 0.05,
                     "compliance": 1.0, "experiment_id": "x", "policies": ["forecast_only", "heuristic",
-                                                                          "heuristic@lam=120", "batch"]}
+                                                                          "heuristic@lam=120", "heuristic@lam=500"]}
             dev = {"screen": {"meta": meta, "runs": runs}}
             held = {"heldout_5": {"meta": {**meta, "experiment_id": "y"}, "runs": runs}}
             import coordination.benchmark.backtest as bt
@@ -181,7 +185,7 @@ class TestSelectionRule(unittest.TestCase):
             cfg.path = lambda q: tmp / q if q == "reports" else orig(q)
             (tmp / "reports").mkdir()
             sel = bt.select(dev)
-            self.assertEqual((sel["best"], sel["challenger"]), ("heuristic@lam=120", "batch"))
+            self.assertEqual((sel["best"], sel["challenger"]), ("heuristic@lam=120", "heuristic"))
             text = bt.final_report(cfg, "t", {}, None, held, {}).read_text(encoding="utf-8")
             self.assertIn("Partial report", text)
             self.assertNotIn("met the pre-declared", text)                  # nothing headlined without a selection
@@ -225,6 +229,28 @@ class TestSweepReport(unittest.TestCase):
             text = backtest.sweep_report(cfg, "t", [1.0], res, {}).read_text(encoding="utf-8")
             self.assertIn("Best consistent held-out reduction: `heuristic` at 100%", text)
             self.assertIn("| held-out | batch |", text.replace("1 | held-out", "| held-out"))
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+class TestFireworksReport(unittest.TestCase):
+    def test_fixed_horizon_rows(self):
+        from coordination.benchmark import backtest
+        from coordination.config import Config
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            cfg = Config()
+            orig = cfg.path
+            cfg.path = lambda q: tmp / q if q == "reports" else orig(q)
+            (tmp / "reports").mkdir()
+            runs = []
+            for k in (0, 1):
+                for p, vh, unf in (("forecast_only", 1000.0, 50), ("heuristic", 950.0, 30)):
+                    r = _run(p, "b6_fireworks_n6000_app_s0_event", k, vh, 900.0, terminated=False)
+                    r["summary"].update(in_scope_vehicles=7000, unfinished=unf)
+                    runs.append(r)
+            res = {"fw_app_100": {"meta": {"policies": ["forecast_only", "heuristic"]}, "runs": runs}}
+            text = backtest.fireworks_report(cfg, "t", res, {}).read_text(encoding="utf-8")
+            self.assertIn("| fw_app_100 | 6000 | heuristic | 2 | 1000 | -5 | 2/0 | 6950 | 20 | 50 |", text)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
 
