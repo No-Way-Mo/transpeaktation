@@ -72,22 +72,23 @@ export default function About() {
         <section className="about-hero">
           <p className="about-eyebrow">Event-aware routing · San Francisco</p>
           <h1>Beat the crowd <span>before</span> it forms.</h1>
-          <p className="about-lead">When the July 4 fireworks let out, every car takes its own fastest route and they all pick
-            the same few streets. transPEAKtation spreads trips across the city before the gridlock starts.</p>
+          <p className="about-lead">When the fireworks end, every car wants the same fast route home.{' '}
+            <b className="about-hi">transPEAKtation spreads the trips across the city before the gridlock starts.</b></p>
         </section>
 
         <section id="story" className="about-sec">
           <h2>The story in under a minute</h2>
-          <p className="sub">A simulation of July 4 on San Francisco’s real street network: first everyone takes the fastest route, then transPEAKtation routes the crowd together.</p>
+          <p className="sub">A simulation of July 4 on San Francisco’s real street network: first everyone takes the fastest route,
+            then <b className="about-hi">transPEAKtation routes the crowd together</b>.</p>
           <Player title="transPEAKtation demo" />
         </section>
 
         <section id="crowd" className="about-sec">
           <h2>It routes the crowd, not just your car.</h2>
           <p className="about-sec-lead">Map apps plan each trip on its own, so when 100 people leave the same place for the same
-            destination, all 100 get the same fastest route and jam it. transPEAKtation knows where its riders are headed, so
-            it spreads them across several good routes. Nobody gets sent far out of their way, and no single street takes
-            the whole crowd.</p>
+            destination, all 100 get the same fastest route and jam it.</p>
+          <p className="about-sec-lead about-hi">transPEAKtation knows where its riders are headed, so it spreads them across
+            several good routes. Nobody gets sent far out of their way, and no single street takes the whole crowd.</p>
           <div className="splits"><Split kind="alone" /><Split kind="crowd" /></div>
           <p className="sub about-note">Illustration: 100 riders from A to B. Minutes are example travel times with that many riders on each route.</p>
         </section>
@@ -97,7 +98,7 @@ export default function About() {
         </ul>
 
         <section id="live" className="about-sec">
-          <h2>The product, running live</h2>
+          <h2>Try it live</h2>
           <p className="sub">This is the real app, not a recording. Search a destination and compare routes.</p>
           <Framed src="/" title="transPEAKtation app" className="app" />
         </section>
