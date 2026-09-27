@@ -875,9 +875,10 @@ input::placeholder { color: var(--muted); }
 .about-hero h1 { margin: 0; font-size: clamp(34px, 6vw, 60px); line-height: 1.04; letter-spacing: -0.03em; font-weight: 750; text-wrap: balance; }
 .about-hero h1 span { color: var(--brand-text); box-shadow: inset 0 -0.18em 0 var(--brand-tint); }
 .about-lead { margin: 20px 0 0; font-size: 18px; line-height: 1.55; color: var(--muted); text-wrap: pretty; }
-.about-sec { padding: 32px 0; scroll-margin-top: 64px; }
-.about-sec h2 { margin: 0 0 4px; font-size: 24px; letter-spacing: -0.02em; }
-.about-sec > .sub { margin: 0 0 16px; font-size: 14px; }
+.about-hi { color: var(--ink); font-weight: 700; }
+.about-sec { padding: 52px 0; scroll-margin-top: 64px; }
+.about-sec h2 { margin: 0 0 10px; font-size: clamp(24px, 3vw, 32px); letter-spacing: -0.025em; font-weight: 750; }
+.about-sec > .sub { margin: 0 0 22px; font-size: 15px; line-height: 1.5; }
 .about-points { list-style: none; margin: 8px 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
 .about-points li { padding: 18px 20px; border-radius: 16px; background: var(--brand-tint); border: 1px solid var(--brand-edge); }
 .about-points b { font-size: 15px; color: var(--brand-text); }
@@ -896,6 +897,9 @@ input::placeholder { color: var(--muted); }
   .about-hero { padding: 40px 0 24px; }
   .about-lead { font-size: 16px; }
   .framed .btn.ghost { display: none; }
+}
+@media (max-width: 480px) {
+  .about-bar .wordmark { display: none !important; } /* logo + "Open the app" alone still fit; add wordmark and it overflows */
 }
 
 /* /about demo player (app/about/player.tsx): a video-style overlay on the demo iframe. */
@@ -918,7 +922,8 @@ input::placeholder { color: var(--muted); }
 .player-seek::-moz-range-thumb { width: 14px; height: 14px; border: 0; border-radius: 50%; background: #fff; }
 
 /* /about "routes the crowd" comparison (app/about/page.tsx Split) */
-.about-sec-lead { margin: 8px 0 20px; max-width: 760px; font-size: 16px; line-height: 1.6; color: var(--muted); text-wrap: pretty; }
+.about-sec-lead { margin: 8px 0 20px; font-size: 16px; line-height: 1.6; color: var(--muted); text-wrap: pretty; }
+.about-sec-lead.about-hi { margin-top: -8px; color: var(--ink); font-weight: 700; }
 .splits { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 12px; }
 .split { margin: 0; padding: 18px 20px; border-radius: 18px; background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow-sm); }
 .split.crowd { background: var(--brand-tint); border-color: var(--brand-edge); }
@@ -936,7 +941,7 @@ input::placeholder { color: var(--muted); }
 .split .end { fill: var(--ink); }
 .split text.end-t { fill: var(--panel); stroke: none; font-size: 10px; font-weight: 700; }
 .split p { margin: 0; font-size: 14px; line-height: 1.5; }
-.about-note { margin: 10px 0 0; }
+.sub.about-note { margin: 40px 0 0; font-size: 13px; font-style: italic; text-align: center; }
 @media (max-width: 760px) {
   .player-big { width: 52px; height: 52px; }
   .player-big svg { width: 24px; height: 24px; }
