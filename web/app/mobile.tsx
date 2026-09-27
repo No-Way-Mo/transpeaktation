@@ -95,6 +95,12 @@ function useSheet(ceiling: { current: HTMLElement | null }, initial = 1) {
   };
 }
 
+/** "10:55 PM" / "0.8 mi": the unit after the last space in smaller type, so the numbers carry the nav bar. */
+const withUnit = (s: string) => {
+  const i = s.lastIndexOf(' ');
+  return i < 0 ? s : <>{s.slice(0, i)}<small>{s.slice(i)}</small></>;
+};
+
 export default function Mobile() {
   const p = useRoutePlanner();
   const n = useNav(false);
@@ -312,14 +318,14 @@ export default function Mobile() {
               <span className="sub">{navArrived || !steps[step] ? '' : `In ${fmtDist(prog ? prog.toNext : steps[step].distance)}`}</span>
               <span className="turn-text">{next ? stepText(next, p.to?.label ?? '') : ''}</span>
             </span>
-            {demo && <span className="hint">Tap for next</span>}
+            {demo && <span className="hint">Next</span>}
           </TurnBox>
           <div className={`nav-bar${p.earned || p.reward ? ' two-row' : ''}`}>
             {!navArrived && (
               <div className="nav-stats">
                 <div><b className="good">{mins(remDur)}</b><span>min left</span></div>
-                <div><b>{fmtTime(remDur)}</b><span>arrival</span></div>
-                <div><b>{fmtDist(remDist)}</b><span>remaining</span></div>
+                <div><b>{withUnit(fmtTime(remDur))}</b><span>arrival</span></div>
+                <div><b>{withUnit(fmtDist(remDist))}</b><span>remaining</span></div>
               </div>
             )}
             {(p.earned || p.reward) && <RewardPanel p={p} />}

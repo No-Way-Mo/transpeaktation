@@ -2,7 +2,7 @@
 // any of them replaces whatever was open. Plain TS so `node --test` can run it; the React side is app/menu.tsx.
 
 export type Page = 'saved' | 'history' | 'help' | 'about';
-export type Section = 'appearance' | 'map' | 'privacy' | 'notifications';
+export type Section = 'appearance' | 'map' | 'privacy' | 'wallet' | 'notifications';
 export type Panel = 'menu' | 'settings' | Page;
 /** `section` = the open Settings section; null on a phone means the section list (stacked navigation). */
 export type Nav = { panel: Panel | null; section: Section | null };
@@ -12,6 +12,7 @@ export const SECTIONS: { id: Section; label: string }[] = [
   { id: 'appearance', label: 'Appearance' },
   { id: 'map', label: 'Map & Routing' },
   { id: 'privacy', label: 'AI & Privacy' },
+  { id: 'wallet', label: 'Rewards Wallet' }, // iOS app only (app/menu.tsx)
   { id: 'notifications', label: 'Notifications' },
 ];
 

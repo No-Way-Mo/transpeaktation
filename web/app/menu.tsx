@@ -4,10 +4,12 @@ import { createPortal } from 'react-dom';
 import { CLOSED, MENU, open, PAGE_TITLES, SECTIONS, toggle, type Nav, type Page, type Panel, type Section } from '@/lib/nav.ts';
 import { LOCATION_MODES } from '@/lib/location.ts';
 import { LAYERS, layerOn, overlaysOn, STYLES } from '@/lib/map-prefs.ts';
+import { inIosApp } from '@/lib/route.ts';
 import type { ThemePref } from '@/lib/theme.ts';
 import type { useRoutePlanner } from '@/lib/use-route-planner.ts';
 import { useMapPrefs } from '@/lib/use-map-prefs.ts';
 import { useTheme } from '@/lib/use-theme.ts';
+import { forgetWallet, isSolanaAddress, savedWallet, saveWallet, shortAddress } from '@/lib/wallet.ts';
 import { AiPrivacy, EventKey, Icon, Logo, Toggle, type IconName } from './parts.tsx';
 
 // Logo menu, Map layers button, Settings and the menu's pages. Shared by desktop (centred dialogs) and mobile
@@ -80,11 +82,13 @@ export function AppBar({ n, className = '' }: { n: NavApi; className?: string })
       <div className="nav-wrap" ref={wrap}>
         <button className="logo-btn" data-nav-home aria-label="Main menu" title="Menu" aria-expanded={on} aria-haspopup="dialog"
           onClick={() => n.toggle('menu')}>
-          <Logo size={26} />
+          <Logo size={44} />
         </button>
         {on && <Popover label="Main menu" className="menu-pop"><MenuList n={n} /></Popover>}
       </div>
-      <span className="wordmark">transPEAKtation</span>
+      <img className="wordmark wordmark-light" src="/wordmark-light.svg" alt="transPEAKtation" />
+      <img className="wordmark wordmark-dark" src="/wordmark-dark.svg" alt="transPEAKtation" />
+      <img className="wordmark wordmark-pride" src="/wordmark-pride.svg" alt="transPEAKtation" />
     </header>
   );
 }
@@ -213,15 +217,16 @@ export function NavDialogs({ n, p, wide }: { n: NavApi; p: Planner; wide: boolea
   return null;
 }
 
-const SECTION_ICONS: Record<Section, IconName> = { appearance: 'sun', map: 'layers', privacy: 'shield', notifications: 'bell' };
+const SECTION_ICONS: Record<Section, IconName> = { appearance: 'sun', map: 'layers', privacy: 'shield', wallet: 'wallet', notifications: 'bell' };
 
 /** Desktop: section list on the left, the section on the right. Phone: the list, then one section with Back. */
 function Settings({ n, p, wide, section }: { n: NavApi; p: Planner; wide: boolean; section: Section | null }) {
-  const current = SECTIONS.find(s => s.id === section);
+  const sections = SECTIONS.filter(s => s.id !== 'wallet' || inIosApp()); // Rewards Wallet: iOS app only
+  const current = sections.find(s => s.id === section);
   const heading = current && (current.id === 'privacy' ? 'AI & privacy' : current.label); // the panel's own title, kept
   const tabs = (
     <nav className="settings-nav" aria-label="Settings sections">
-      {SECTIONS.map(s => (
+      {sections.map(s => (
         <button key={s.id} className="settings-tab" aria-current={s.id === section ? 'page' : undefined} onClick={() => n.section(s.id)}>
           <Icon name={SECTION_ICONS[s.id]} size={18} className="lead" /><span className="grow">{s.label}</span>
           {!wide && <Icon name="chevron" size={14} rotate={-90} className="lead" />}
@@ -253,6 +258,7 @@ function SectionBody({ s, p }: { s: Section; p: Planner }) {
   if (s === 'appearance') return <Appearance />;
   if (s === 'map') return <MapDefaults />;
   if (s === 'privacy') return <AiPrivacy p={p} />;
+  if (s === 'wallet') return <RewardsWallet />;
   return <Notifications />;
 }
 
@@ -324,6 +330,44 @@ function MapDefaults() {
       </section>
       <p className="sub set-foot">The layers button on the map turns these on or off together. Remembered in this browser.
  Event Activity and Road Disruptions aren’t available yet.</p>
+    </div>
+  );
+}
+
+/** iOS app: save the rider's Solana address once, so a route reward is sent there on arrival without a Claim step
+ *  (app/reward.tsx). Receiving only: nothing is signed or spent. */
+function RewardsWallet() {
+  const [saved, setSaved] = useState(savedWallet);
+  const [draft, setDraft] = useState('');
+  const [error, setError] = useState('');
+  const save = () => {
+    const v = draft.trim();
+    if (!isSolanaAddress(v)) { setError('That isn’t a Solana address: 32–44 letters and digits (no 0, O, I or l).'); return; }
+    saveWallet(v); setSaved(v); setDraft(''); setError('');
+  };
+  return (
+    <div className="set-stack">
+      {saved ? (
+        <div className="soon-row">
+          <Icon name="wallet" size={18} className="lead" />
+          <span className="stack grow">
+            <span className="name wallet-addr">{shortAddress(saved)}</span>
+            <span className="sub">Route rewards go here automatically when you arrive.</span>
+          </span>
+          <button className="pill-btn" onClick={() => { forgetWallet(); setSaved(''); }}>Remove</button>
+        </div>
+      ) : (
+        <div className="set-stack wallet-form">
+          <form className="reward-form" onSubmit={e => { e.preventDefault(); save(); }}>
+            <input aria-label="Solana wallet address" placeholder="Solana wallet address" value={draft} spellCheck={false}
+              autoCapitalize="off" autoCorrect="off" onChange={e => { setDraft(e.target.value); setError(''); }} />
+            <button className="pill-btn" disabled={!draft.trim()}>Save</button>
+          </form>
+          {error && <span className="reward-error" role="alert">{error}</span>}
+        </div>
+      )}
+      <p className="sub set-foot">Saved on this device only. When you arrive on the recommended route, its devnet SOL reward
+ is sent to this address, and the address is stored with that trip to pay you. Payments are public on Solana.</p>
     </div>
   );
 }

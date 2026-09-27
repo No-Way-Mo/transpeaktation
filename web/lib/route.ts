@@ -134,6 +134,8 @@ export async function fetchPlan(from: Place, to: Place, when: When = { mode: 'no
  *  null to stop; the app fires a `tp-arrived` window event when the rider gets there. Undefined in a browser. */
 export const iosArrival = () => (globalThis as { webkit?: { messageHandlers?: { arrival?: { postMessage(m: unknown): void } } } })
   .webkit?.messageHandlers?.arrival;
+/** Running inside the iOS app (not Safari or a desktop browser). */
+export const inIosApp = () => !!iosArrival();
 
 /** POST /trips/{id}/start: the rider set off. On the transPEAKtation route (coordinated) its road reservation is
  *  confirmed, so the load balancer steers later riders around it; on a normal route the reservation is released. */
