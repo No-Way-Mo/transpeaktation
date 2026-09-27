@@ -8,13 +8,16 @@ import type { MapStyle } from '@/lib/map-prefs.ts';
 import type { Theme } from '@/lib/theme.ts';
 import { useMapPrefs } from '@/lib/use-map-prefs.ts';
 import { useTheme } from '@/lib/use-theme.ts';
+import { SF_BOUNDS } from '@/lib/snapmap.ts';
 import { SnapMapLayers } from './snapmap-layers.ts';
 
 // Experiment boundary: with 'snapmap' the event layer below is replaced by snapmap-layers.ts (heat + progressive pins);
 // routes, labels and endpoints are drawn exactly as before.
 const SNAP = MAP_EXPERIMENT === 'snapmap';
+const START_REL = 1.25; // start view vs the all-of-SF zoom: where a 1440px desktop lands at zoom 14
 
-export type MapHandle = { fit(): void; focus(p: LatLng, zoom?: number): void; zoomIn(): void; zoomOut(): void };
+/** `focus` dy: show the point this many px above the map's centre (to clear a bottom sheet). */
+export type MapHandle = { fit(): void; focus(p: LatLng, zoom?: number, dy?: number): void; zoomIn(): void; zoomOut(): void };
 
 type Props = {
   ref?: Ref<MapHandle>;
@@ -60,14 +63,20 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
     if (pts.length > 1) map.current.fitBounds(pts, { paddingTopLeft: pad.topLeft, paddingBottomRight: pad.bottomRight });
     else if (pts.length) {
       // One point (start screen): centre it in the space the overlays leave, not behind the sheet.
-      map.current.setView(pts[0], 14, { animate: false });
+      // snapmap: street level on a desktop, but no closer than the same zoom relative to all of SF on a narrower
+      // screen, so a phone opens with the heat and pins a desktop shows (lib/snapmap.ts zoom tiers).
+      const zoom = SNAP ? Math.min(14, map.current.getBoundsZoom(SF_BOUNDS) + START_REL) : 14;
+      map.current.setView(pts[0], zoom, { animate: false });
       map.current.panBy([(pad.bottomRight[0] - pad.topLeft[0]) / 2, (pad.bottomRight[1] - pad.topLeft[1]) / 2], { animate: false });
     }
   };
 
   useImperativeHandle(ref, () => ({
     fit,
-    focus: (p, zoom = 16) => map.current?.setView(p, zoom),
+    focus: (p, zoom = 16, dy = 0) => {
+      const m = map.current;
+      if (m) m.setView(dy ? m.unproject(m.project(p, zoom).add([0, dy]), zoom) : p, zoom);
+    },
     zoomIn: () => map.current?.zoomIn(),
     zoomOut: () => map.current?.zoomOut(),
   }));

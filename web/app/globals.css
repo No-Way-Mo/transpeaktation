@@ -137,6 +137,8 @@
 html, body { margin: 0; height: 100%; background: var(--canvas); color: var(--ink); font-family: var(--sans); -webkit-font-smoothing: antialiased; font-variant-numeric: tabular-nums; -webkit-tap-highlight-color: transparent; }
 button, input { font: inherit; color: inherit; }
 button { border: none; background: transparent; cursor: pointer; }
+/* iOS WebKit pads buttons ~1em a side (Chrome: 6px): in a small icon button that squeezed the icon to a few px. */
+svg { flex-shrink: 0; }
 input { caret-color: var(--action); }
 input::placeholder { color: var(--muted); }
 ::selection { background: var(--action-tint); }
@@ -357,6 +359,19 @@ input::placeholder { color: var(--muted); }
 .sheet .arrive b { font-size: 16px; }
 .close-btn { flex: none; width: 30px; height: 30px; border-radius: 50%; background: var(--fill); color: var(--muted); display: flex; align-items: center; justify-content: center; }
 .start { width: 100%; height: 52px; border-radius: 14px; background: var(--action); color: var(--on-action); font-size: 17px; font-weight: 650; }
+/* Route sheet footer: Directions (turn list) beside Start. */
+.sheet-foot { display: flex; gap: 10px; }
+.sheet-foot .start { flex: 1; width: auto; }
+.foot-alt { flex: none; height: 52px; padding: 0 20px; border-radius: 14px; background: var(--fill); color: var(--action-text); font-size: 17px; font-weight: 650; }
+@media (hover: hover) { .foot-alt:hover { background: var(--fill-2); } }
+/* Directions list in the sheet: desktop's summary + steps at touch sizes. */
+.sheet .summary { padding: 14px; }
+.sheet .summary b { font-size: 20px; }
+.sheet .summary span { font-size: 13px; }
+.sheet .step { min-height: 52px; padding: 10px 6px; align-items: center; }
+.sheet .step .arrow { width: 34px; height: 34px; border-radius: 10px; }
+.sheet .step-text { font-size: 16px; }
+.sheet .step .sub { font-size: 13px; }
 
 .turn { position: absolute; top: calc(var(--bar-bottom) + 8px); left: 12px; right: 12px; z-index: 30; display: flex; align-items: center; gap: 14px; padding: 16px 18px; border-radius: 20px; background: var(--action); color: var(--on-action); box-shadow: var(--shadow); text-align: left; }
 .turn-arrow { flex: none; width: 52px; height: 52px; border-radius: 14px; background: rgba(255, 255, 255, 0.2); display: flex; align-items: center; justify-content: center; }
