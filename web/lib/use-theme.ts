@@ -1,12 +1,12 @@
 'use client';
 import { useLayoutEffect, useSyncExternalStore } from 'react';
-import { applyThemePref, readTheme, readThemePref, resolveTheme, SYSTEM_DARK, THEME_KEY, type Theme, type ThemePref } from './theme.ts';
+import { applyThemePref, parseTheme, readTheme, readThemePref, resolveTheme, SYSTEM_DARK, THEME_KEY, type Theme, type ThemePref } from './theme.ts';
 
 // The source of truth is <html data-theme>, set before paint by THEME_SCRIPT (app/layout.tsx); React only reads it.
-// The pick (System / Light / Dark) is the saved key, which the attribute alone can't tell apart (System on a dark OS
+// The pick (System / Light / Dark / Pride) is the saved key, which the attribute alone can't tell apart (System on a dark OS
 // looks like Dark), so picks also ping `picked`.
 const root = () => document.documentElement;
-const current = (): Theme => (root().getAttribute('data-theme') === 'dark' ? 'dark' : 'light');
+const current = (): Theme => parseTheme(root().getAttribute('data-theme')) ?? 'light';
 const storage = () => { try { return localStorage; } catch { return undefined; } };
 const systemDark = () => matchMedia(SYSTEM_DARK).matches;
 const resolved = () => resolveTheme(readTheme(storage()), systemDark());

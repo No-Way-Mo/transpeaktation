@@ -116,6 +116,7 @@ test('longerThanItLooks: normal routes warn when api/ estimates a minute or more
   assert.equal(longerThanItLooks(pred(40)), null);   // under a minute: not worth a warning
   assert.equal(longerThanItLooks(undefined), null);  // no plan yet
   assert.equal(longerThanItLooks(pred(1200, true)), 'Closure ahead');
+  assert.equal(longerThanItLooks({ blocked: false, estimate: { dur: 490, delay: 130, why: [] } } as unknown as Prediction), '+2 min predicted'); // forecast only
 });
 
 test('voice errors and silence say what to do', () => {

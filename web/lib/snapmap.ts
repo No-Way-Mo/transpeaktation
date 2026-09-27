@@ -140,14 +140,15 @@ export function heatOpacity(rel: number, routeActive: boolean): number {
   if (!routeActive) return base;
   return rel >= 1.75 ? 0 : base * 0.35;
 }
-export const LEGEND_MIN_OPACITY = 0.08; // legend fades out with the layer
-export const legendOpacity = (rel: number, routeActive: boolean): number => {
-  const o = heatOpacity(rel, routeActive);
-  return o < LEGEND_MIN_OPACITY ? 0 : Math.min(1, o * 1.5);
-};
+export const LEGEND_MIN_OPACITY = 0.15; // below this the heat is too faint to need a key
+/** Legend is fully shown or hidden (CSS fades between): a half-transparent key over the map reads as broken. */
+export const legendOpacity = (rel: number, routeActive: boolean): number =>
+  heatOpacity(rel, routeActive) < LEGEND_MIN_OPACITY ? 0 : 1;
 
 // Our palette, low -> very high. Deliberately no red / amber: this is event activity, not traffic.
 export const ACTIVITY_PALETTE = ['#d9ed92', '#b5e48c', '#99d98c', '#76c893', '#52b69a', '#34a0a4', '#168aad', '#1a759f', '#1e6091', '#184e77'] as const;
+/** Pride theme: the flag, low -> high (violet at the quiet edges, red at the busiest core). */
+export const PRIDE_ACTIVITY_PALETTE = ['#732982', '#24408e', '#008026', '#ffed00', '#ff8c00', '#e40303'] as const;
 
 /** Where the camera goes when a pin is clicked (relative zoom): close enough that its neighbours show, never out. */
 export const focusRel = (rel: number): number => Math.max(rel, 2);

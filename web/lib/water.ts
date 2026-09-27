@@ -2,10 +2,12 @@
 // fill (the same at every zoom we fetch, 11-16), so water is picked out of the provider's own pixels and repainted in
 // --map-water. Nothing is drawn by hand: no polygons, no coastline. Plain TS so `node --test` can run it.
 
+import type { Base } from './theme.ts';
+
 export type RGB = [number, number, number];
 
 /** Esri's water fill per theme: Canvas World_Light_Gray_Base / World_Dark_Gray_Base. */
-export const ESRI_WATER: Record<'light' | 'dark', RGB> = { light: [0xD0, 0xCF, 0xD4], dark: [0x23, 0x22, 0x27] };
+export const ESRI_WATER: Record<Base, RGB> = { light: [0xD0, 0xCF, 0xD4], dark: [0x23, 0x22, 0x27] };
 
 const ramp = (v: number, lo: number, hi: number) => (v <= lo ? 0 : v >= hi ? 1 : (v - lo) / (hi - lo));
 

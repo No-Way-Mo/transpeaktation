@@ -245,7 +245,7 @@ const MANUAL_THEMES: { id: ThemePref; label: string; icon: IconName }[] = [
   { id: 'dark', label: 'Dark', icon: 'moon' },
 ];
 
-/** System on its own row, then Light / Dark side by side. One radio group, so arrow keys move through all three. */
+/** System on its own row, then Light / Dark side by side, then Pride across the full width. One radio group, so arrow keys move through all four. */
 function Appearance() {
   const { pref, setPref } = useTheme();
   const name = useId();
@@ -267,6 +267,10 @@ function Appearance() {
             <Icon name={t.icon} size={18} /><span>{t.label}</span>
           </label>
         ))}
+        <label className="theme-opt pride">
+          {radio('pride')}
+          <span className="pride-flag" aria-hidden="true" /><span>Pride</span>
+        </label>
       </div>
       <p className="sub set-foot">Remembered in this browser.</p>
     </fieldset>
