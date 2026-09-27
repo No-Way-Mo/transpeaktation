@@ -1,7 +1,7 @@
 'use client';
 import { useSyncExternalStore } from 'react';
 import type { Place } from './route.ts';
-import { HISTORY_KEY, readHistory, withSearch, writeHistory } from './search-history.ts';
+import { HISTORY_KEY, readHistory, withoutSearch, withSearch, writeHistory } from './search-history.ts';
 
 // Same pattern as lib/use-map-prefs.ts: one copy in memory (so it still works when storage is blocked), mirrored to
 // localStorage.
@@ -20,6 +20,9 @@ function set(h: Place[]) {
 
 /** The rider picked `place` (search result, recent, voice): it goes to the top of Recent. */
 export const addSearchHistoryItem = (place: Place) => set(withSearch(getSearchHistory(), place));
+/** The rider deleted one recent search (× on its row). */
+export const removeSearchHistoryItem = (place: Place) => set(withoutSearch(getSearchHistory(), place));
+/** The rider cleared all recent searches. */
 export const clearSearchHistory = () => set([]);
 
 function subscribe(cb: () => void) {

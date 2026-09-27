@@ -342,6 +342,13 @@ input::placeholder { color: var(--muted); }
 
 .place { display: flex; align-items: center; gap: 12px; padding: 8px; border-radius: 12px; text-align: left; }
 .place .name { font-size: 15px; }
+/* Recent searches: the row plans it, × (and Clear by the label) deletes it. */
+.label-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.label-btn { flex: none; padding: 0 8px; font-size: 13px; font-weight: 600; color: var(--action-text); }
+.recent-row { display: flex; align-items: center; }
+.recent-row .place { flex: 1; min-width: 0; }
+.recent-del { flex: none; width: 36px; height: 36px; border-radius: 50%; color: var(--muted); display: flex; align-items: center; justify-content: center; }
+.recent-del:hover { background: var(--fill); color: var(--ink); }
 .badge { flex: none; width: 34px; height: 34px; border-radius: 50%; background: var(--fill); color: var(--muted); display: flex; align-items: center; justify-content: center; }
 .badge.plain { background: var(--action-tint); color: var(--action-text); }
 

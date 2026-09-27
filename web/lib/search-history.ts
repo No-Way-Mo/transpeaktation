@@ -38,6 +38,9 @@ export function withSearch(history: Place[], place: Place): Place[] {
   return [clean(place), ...history.filter(p => !same(p, place))].slice(0, HISTORY_MAX);
 }
 
+/** `place` deleted from history (any entry for the same place). */
+export const withoutSearch = (history: Place[], place: Place): Place[] => history.filter(p => !same(p, place));
+
 export function readHistory(storage: Store | undefined): Place[] {
   try { return parseHistory(storage?.getItem(HISTORY_KEY)); } catch { return []; }
 }
