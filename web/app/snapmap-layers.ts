@@ -65,9 +65,19 @@ export class SnapMapLayers {
     map.on('moveend', this.refresh, this);
     map.on('zoomanim', this.animateZoom, this);
     map.on('popupclose', this.onPopupClose, this);
+    // iOS can drop a canvas's pixels while the app is in the background (and a 2D context can be lost / restored).
+    // Nothing else repaints the heat until the map moves, so repaint when the page is shown again.
+    document.addEventListener('visibilitychange', this.onShow);
+    addEventListener('pageshow', this.onShow);
+    this.canvas.addEventListener('contextrestored', this.onShow);
   }
 
+  private onShow = () => { if (document.visibilityState === 'visible') this.redraw(); };
+
   destroy() {
+    document.removeEventListener('visibilitychange', this.onShow);
+    removeEventListener('pageshow', this.onShow);
+    this.canvas.removeEventListener('contextrestored', this.onShow);
     this.map.off('zoom viewreset resize', this.redraw, this);
     this.map.off('moveend', this.refresh, this);
     this.map.off('zoomanim', this.animateZoom, this);
@@ -92,7 +102,8 @@ export class SnapMapLayers {
     this.drawHeat();
     this.drawPins();
     const s = this.state;
-    if (s) this.legend.style.opacity = String(legendOpacity(this.rel(), s.routeActive));
+    // No events to show (layers off, or none in the window): no key for an empty layer.
+    if (s) this.legend.style.opacity = this.points.length ? String(legendOpacity(this.rel(), s.routeActive)) : '0';
   }
 
   /** Zoom relative to the one that fits all of SF in this map's current size (lib/snapmap.ts). */

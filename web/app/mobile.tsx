@@ -128,7 +128,7 @@ export default function Mobile() {
 
       {p.screen !== 'search' && !nav && (
         <>
-          <Compass movable onPress={() => map.current?.fit()} className={p.screen === 'start' ? 'high' : ''} />
+          <Compass onPress={() => map.current?.fit()} className={p.screen === 'start' ? 'high' : ''} /> {/* fixed: stays centred over the layers button */}
           <MapLayers className={`mob-layers${p.screen === 'start' ? ' high' : ''}`} />
         </>
       )}
