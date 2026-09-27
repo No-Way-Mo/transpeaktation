@@ -72,7 +72,7 @@ function trapTab(e: React.KeyboardEvent<HTMLElement>) {
 
 // ---------- ☰ main menu ----------
 
-/** The menu bar across the top of the page: the app icon is the menu button, the menu drops down under it. */
+/** The menu bar across the top of the page: ☰ then the wordmark; the ☰ opens the menu, which drops down under it. */
 export function AppBar({ n, className = '' }: { n: NavApi; className?: string }) {
   const wrap = useRef<HTMLDivElement>(null);
   const on = n.nav.panel === 'menu';
@@ -80,9 +80,9 @@ export function AppBar({ n, className = '' }: { n: NavApi; className?: string })
   return (
     <header className={`app-bar ${className}`}>
       <div className="nav-wrap" ref={wrap}>
-        <button className="logo-btn" data-nav-home aria-label="Main menu" title="Menu" aria-expanded={on} aria-haspopup="dialog"
+        <button className="logo-btn" data-nav-home aria-label="Open menu" title="Menu" aria-expanded={on} aria-haspopup="dialog"
           onClick={() => n.toggle('menu')}>
-          <Logo size={44} />
+          <Icon name="menu" size={26} />
         </button>
         {on && <Popover label="Main menu" className="menu-pop"><MenuList n={n} /></Popover>}
       </div>
@@ -90,23 +90,6 @@ export function AppBar({ n, className = '' }: { n: NavApi; className?: string })
       <img className="wordmark wordmark-dark" src="/wordmark-dark.svg" alt="transPEAKtation" />
       <img className="wordmark wordmark-pride" src="/wordmark-pride.svg" alt="transPEAKtation" />
     </header>
-  );
-}
-
-/** Phone: no menu bar, the map runs to the top edge. The same ☰ menu (state, popover, outside press / Esc, focus
- *  return) from a floating round button top-left, styled like the map controls on the right. */
-export function MenuButton({ n }: { n: NavApi }) {
-  const wrap = useRef<HTMLDivElement>(null);
-  const on = n.nav.panel === 'menu';
-  useOutside(wrap, n.close, on);
-  return (
-    <div className="nav-wrap mob-menu" ref={wrap}>
-      <button className="layers-btn" data-nav-home aria-label="Open menu" title="Menu" aria-expanded={on} aria-haspopup="dialog"
-        onClick={() => n.toggle('menu')}>
-        <Icon name="menu" size={18} />
-      </button>
-      {on && <Popover label="Main menu" className="menu-pop"><MenuList n={n} /></Popover>}
-    </div>
   );
 }
 
