@@ -1,6 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
-import { Logo } from '../parts.tsx';
+import { Icon, Logo } from '../parts.tsx';
 import { Framed } from './framed.tsx';
 import { Player } from './player.tsx';
 
@@ -104,7 +104,11 @@ export default function About() {
         </section>
       </main>
 
-      <footer className="about-foot sub">transPEAKtation by <b>YoWayMo</b> · Built at ShellHacks 2026 · Maps: Esri, OpenStreetMap · Data: DataSF, PredictHQ, Mapbox, TomTom, 511.org</footer>
+      <footer className="about-foot sub">transPEAKtation by <b>YoWayMo</b> ·{' '}
+        <a href="https://github.com/No-Way-Mo/transpeaktation" target="_blank" rel="noopener" className="about-repo">
+          GitHub <Icon name="external" size={12} />
+        </a>{' '}
+        · Built at ShellHacks 2026 · Maps: Esri, OpenStreetMap · Data: DataSF, PredictHQ, Mapbox, TomTom, 511.org</footer>
     </div>
   );
 }
