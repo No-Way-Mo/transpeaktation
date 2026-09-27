@@ -133,6 +133,14 @@ export default function Mobile() {
         </>
       )}
 
+      {/* Zoom buttons (pinch and double-tap still work): beside the compass, or mid-right while navigating. */}
+      {p.screen !== 'search' && (
+        <div className={`zoom mob-zoom${nav ? ' nav' : p.screen === 'start' ? ' high' : ''}`}>
+          <button title="Zoom in" aria-label="Zoom in" onClick={() => map.current?.zoomIn()}><Icon name="plus" /></button>
+          <button title="Zoom out" aria-label="Zoom out" onClick={() => map.current?.zoomOut()}><Icon name="minus" /></button>
+        </div>
+      )}
+
       {p.screen === 'start' && (
         <div className={`sheet${sheet.dragging ? ' dragging' : ''}`}>
           <div className="sheet-handle" {...sheet.handle}>
