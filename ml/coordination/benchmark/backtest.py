@@ -414,13 +414,16 @@ def sweep(cfg: Config, levels: list, policies: list | None = None, run: bool = T
 
 
 # ---------------------------------------------------------------- July 4 fireworks demo port (b6_fireworks)
-def fireworks_experiments(cfg: Config) -> dict:
+def fireworks_experiments(cfg: Config, levels: list | None = None) -> dict:
     """The demo's fireworks exodus on net_v3 (eventsim/fireworks_demo.py): app users only at 100%, everyone at 100%
-    and at 50%. Gridlock leaves cars unfinished at the 01:00 horizon, so results compare the same fixed horizon."""
+    and at 50%. Gridlock leaves cars unfinished at the 01:00 horizon, so results compare the same fixed horizon.
+    With `levels`: everyone-may-use-the-app runs (`_all_`) at each participation level instead (fw_all_<pct>)."""
     from ..rl import scenario
     ids = sorted(s.scenario_id for s in scenario.load(cfg, "test"))
     app, every = [s for s in ids if "_app_" in s], [s for s in ids if "_all_" in s]
     pols, seeds = list(cfg.benchmark.policies), list(cfg.benchmark.seeds)
+    if levels:
+        return {f"fw_all_{round(100 * p)}": runner.prepare(variant(cfg, p), "heldout", pols, every, seeds) for p in levels}
     return {"fw_app_100": runner.prepare(variant(cfg, 1.0), "heldout", pols, app, seeds),
             "fw_all_100": runner.prepare(variant(cfg, 1.0), "heldout", pols, every, seeds),
             "fw_all_50": runner.prepare(variant(cfg, 0.5), "heldout", pols, every, seeds)}
@@ -450,7 +453,8 @@ def fireworks_report(cfg: Config, fid: str, res: dict, reps: dict) -> Path:
                                                              / j.congested_h_scope_b).mean(), 3),
                          "app trip mean % (completed)": round(100 * ((j.part_trip_s_mean - j.part_trip_s_mean_b)
                                                                     / j.part_trip_s_mean_b).mean(), 3),
-                         "non-fastest share": round(g.non_fastest_share.mean(), 3)})
+                         "non-fastest share": round(g.non_fastest_share.mean(), 3),
+                         "teleports (policy/base)": f"{int(j.teleports.sum())}/{int(j.teleports_b.sum())}"})
     df = pd.DataFrame(rows).sort_values(["experiment", "crowd cars", "policy"]) if rows else pd.DataFrame()
     L = [f"# July 4 fireworks exodus on our network `{fid}`", "",
          "> **Synthetic.** The demo's cohort (`demo/sumo/kit.py` v3, seed 42: 1000 app users) plus N assumed crowd cars "
@@ -459,7 +463,9 @@ def fireworks_report(cfg: Config, fid: str, res: dict, reps: dict) -> Path:
          "Everything is compared at the same fixed horizon (01:00): vehicle_hours = time of every vehicle up to 01:00 "
          "(finished or not), arrived = vehicles that reached their destination by 01:00. Negative % = better; a "
          "positive `arrived diff` = more cars got home. `fw_app_100`: only the 1000 app users are coordinated (crowd "
-         "cars never use the app); `fw_all_*`: every car may use the app (100% or 50% participation).", "",
+         "cars never use the app); `fw_all_<pct>`: every car may use the app, <pct>% of them do (participation).", "",
+         f"SUMO time-to-teleport: {cfg.env.time_to_teleport_s} s ({'no teleporting, Rule 0' if cfg.env.time_to_teleport_s < 0 else 'teleporting ON: not Rule-0 compliant'}); "
+         "teleport counts per arm are in the last column and must be 0 under Rule 0.", "",
          report._md(df, index=False) if not df.empty else "(no results)", "",
          "## Experiment reports", ""]
     L += [f"- {k}: [{Path(v['report']).name}]({Path(v['report']).name})" for k, v in reps.items()] + [""]
@@ -468,10 +474,11 @@ def fireworks_report(cfg: Config, fid: str, res: dict, reps: dict) -> Path:
     return p
 
 
-def fireworks(cfg: Config, run: bool = True, workers: int | None = None, only: list | None = None, log=print) -> dict:
+def fireworks(cfg: Config, run: bool = True, workers: int | None = None, only: list | None = None, log=print,
+              levels: list | None = None) -> dict:
     root = cfg.path(cfg.benchmark.out_dir)
     root.mkdir(parents=True, exist_ok=True)
-    E = fireworks_experiments(cfg)
+    E = fireworks_experiments(cfg, levels)
     fid = hashlib.sha256("|".join(e.exp for e in E.values()).encode()).hexdigest()[:10]
     (root / f"fireworks_{fid}.json").write_text(json.dumps({k: e.exp for k, e in E.items()}, indent=1))
     todo = {k: e for k, e in E.items() if not only or k in only}

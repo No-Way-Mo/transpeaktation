@@ -11,6 +11,12 @@ allocation budget, the RL feature `load_ratio_mean`). A batch goes to the learne
 congestion >= `stress` or load ratio >= `load`. Defaults 0.5 (speed <= 50% of free flow, the backtest's
 "congested" definition) and 1.0 (route reserved over its budget): starting values, not tuned. If the checkpoint is
 missing or incompatible the heuristic decides and the fallback is recorded; a request is never refused for it.
+
+Optional light tier (`light`, `lload`; off by default, so `adaptive` is unchanged): when EVERY request of a batch has
+congestion < `light` and load ratio < `lload`, the batch takes its fastest route (forecast_only). Rule 0 fireworks
+runs (2026-09-27, ml/reports/rule0/) showed coordination only pays off from ~6,000 crowd cars upward and at >= 50%
+participation; below that the fastest route was as good or better. The thresholds that correspond to that load
+are NOT calibrated yet: set them on development scenarios (standard rule 6) before relying on them.
 """
 from __future__ import annotations
 
@@ -18,6 +24,7 @@ import numpy as np
 
 from ..schemas import SelectionContext, SelectionResult
 from .base import Selector, SelectorUnavailable, valid_indices
+from .forecast_only import ForecastOnly
 from .heuristic import Heuristic
 from .rl import RL
 
@@ -45,29 +52,38 @@ class Adaptive(Selector):
     name = "adaptive"
     version = "adaptive-v1"
 
-    def __init__(self, cfg=None, stress: float = 0.5, load: float = 1.0, checkpoint: str | None = None):
+    def __init__(self, cfg=None, stress: float = 0.5, load: float = 1.0, checkpoint: str | None = None,
+                 light: float | None = None, lload: float = 0.5):
         self.cfg, self.stress, self.load = cfg, float(stress), float(load)
+        self.light, self.lload = (None if light is None else float(light)), float(lload)
         self.heuristic = Heuristic()
+        self.fastest = ForecastOnly()
         self.learned = RL(cfg, checkpoint=checkpoint)
-        self.counts = {"heuristic": 0, "learned": 0, "learned_unavailable": 0}
+        self.counts = {"fastest": 0, "heuristic": 0, "learned": 0, "learned_unavailable": 0}
 
     def select(self, ctx: SelectionContext) -> SelectionResult:
         levels = [route_stress(ctx, it) for it in ctx.items]
         high = any(cg >= self.stress or lr >= self.load for cg, lr in levels)
+        light = self.light is not None and all(cg < self.light and lr < self.lload for cg, lr in levels)
         mode, why = "heuristic", None
-        if high:
+        if light and not high:
+            mode = "fastest"
+        elif high:
             try:
                 res = self.learned.select(ctx)
                 mode = "learned"
             except SelectorUnavailable as e:        # never refuse a request because the learned policy is missing
                 why = str(e)[:200]
                 mode = "learned_unavailable"
-        if mode != "learned":
+        if mode == "fastest":
+            res = self.fastest.select(ctx)
+        elif mode != "learned":
             res = self.heuristic.select(ctx)
         self.counts[mode] += 1
         res.policy, res.policy_version = self.name, f"{self.version}:{mode}"
         diag = {"adaptive_mode": mode, "stress": [round(cg, 3) for cg, _ in levels],
-                "load_ratio": [round(lr, 3) for _, lr in levels], "thresholds": [self.stress, self.load]}
+                "load_ratio": [round(lr, 3) for _, lr in levels], "thresholds": [self.stress, self.load],
+                "light_thresholds": [self.light, self.lload]}
         if why:
             diag["learned_unavailable"] = why
         for rid in res.choices:                     # own key: the per-request dict is keyed by candidate id

@@ -263,7 +263,8 @@ def cmd_backtest(cfg, a):
             rl.append(name)
     only = [x for x in (a.only or "").split(",") if x] or None
     if a.phase in ("fireworks", "fireworks-report"):
-        print(json.dumps(backtest.fireworks(cfg, run=a.phase == "fireworks", workers=a.workers, only=only),
+        lv = [float(x) for x in a.levels.split(",")] if a.levels else None
+        print(json.dumps(backtest.fireworks(cfg, run=a.phase == "fireworks", workers=a.workers, only=only, levels=lv),
                          indent=1, default=str))
         return
     if a.phase in ("sweep", "sweep-report"):
