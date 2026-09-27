@@ -80,11 +80,13 @@ export function AppBar({ n, className = '' }: { n: NavApi; className?: string })
       <div className="nav-wrap" ref={wrap}>
         <button className="logo-btn" data-nav-home aria-label="Main menu" title="Menu" aria-expanded={on} aria-haspopup="dialog"
           onClick={() => n.toggle('menu')}>
-          <Logo size={26} />
+          <Logo size={44} />
         </button>
         {on && <Popover label="Main menu" className="menu-pop"><MenuList n={n} /></Popover>}
       </div>
-      <span className="wordmark">transPEAKtation</span>
+      <img className="wordmark wordmark-light" src="/wordmark-light.svg" alt="transPEAKtation" />
+      <img className="wordmark wordmark-dark" src="/wordmark-dark.svg" alt="transPEAKtation" />
+      <img className="wordmark wordmark-pride" src="/wordmark-pride.svg" alt="transPEAKtation" />
     </header>
   );
 }
