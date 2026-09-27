@@ -1,0 +1,506 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SUMO Baseline Replay</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<style>
+/* Tokens: web/app/globals.css dark theme (Meadow Green). Moving/waiting pair validated for CVD on --canvas. */
+:root {
+  color-scheme: dark;
+  --canvas: #0B1C2A; --panel: rgba(15, 34, 51, 0.92); --panel-solid: #0F2233; --raised: #16304A;
+  --ink: #EAF4EC; --muted: #9DB4C4; --line: rgba(168, 210, 230, 0.13); --line-strong: rgba(168, 210, 230, 0.26);
+  --brand: #99D98C; --action-text: #6CC4E0;
+  --moving: #2F97C6; --waiting: #E8475A; --enter: #6B8196; --arrived: #C9D6DF;
+  --road-1: #E9B949; --road-2: #F28A3C; --road-3: #C62E45; /* SUMO speedRelative 50-75%, 25-50%, <25% */
+  --map-tint: sepia(0.5) hue-rotate(168deg) saturate(1.7) brightness(0.92);
+  --shadow: 0 2px 10px rgba(0, 0, 0, 0.35), 0 10px 32px rgba(0, 0, 0, 0.4);
+  --sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
+  --gap: 16px;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: var(--canvas); color: var(--ink); font: 14px/1.4 var(--sans);
+  -webkit-font-smoothing: antialiased; font-variant-numeric: tabular-nums; overflow: hidden; }
+button { font: inherit; color: inherit; }
+#map { position: fixed; inset: 0; background: var(--canvas); }
+.leaflet-container { background: var(--canvas); font-family: var(--sans); }
+.leaflet-tile-pane { filter: var(--map-tint); }
+.leaflet-control-attribution { background: var(--panel) !important; color: var(--muted) !important; font-size: 10px !important; }
+.leaflet-control-attribution a { color: var(--muted) !important; }
+.leaflet-control-zoom a { background: var(--panel) !important; color: var(--ink) !important; border-color: var(--line) !important; }
+
+.card { position: fixed; z-index: 1000; background: var(--panel); border: 1px solid var(--line); border-radius: 16px;
+  box-shadow: var(--shadow); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+.muted { color: var(--muted); }
+
+#head { top: var(--gap); left: var(--gap); width: 420px; padding: 16px 18px; }
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 650; letter-spacing: -0.01em; }
+.brand svg { width: 20px; height: 20px; }
+#head h1 { margin: 10px 0 4px; font-size: 22px; line-height: 1.15; font-weight: 650; letter-spacing: -0.02em; }
+#head p { margin: 0; font-size: 13px; }
+.seg { display: inline-flex; margin-top: 12px; padding: 3px; gap: 2px; border-radius: 10px; background: rgba(168, 210, 230, 0.08); }
+.seg button { border: 0; background: none; padding: 6px 12px; border-radius: 8px; font-size: 13px; font-weight: 600; cursor: pointer; color: var(--muted); }
+.seg button[aria-pressed="true"] { background: var(--raised); color: var(--ink); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4); }
+.seg button:disabled { cursor: not-allowed; opacity: 0.6; }
+.seg button:focus-visible, .play:focus-visible, #tl:focus-visible { outline: 2px solid var(--action-text); outline-offset: 2px; }
+
+#side { top: var(--gap); right: var(--gap); bottom: var(--gap); width: 372px; padding: 18px; overflow-y: auto; }
+.clock { font-size: 40px; font-weight: 600; letter-spacing: -0.03em; line-height: 1; }
+.date { margin-top: 6px; font-size: 13px; }
+h2 { margin: 22px 0 10px; font-size: 12px; font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.live { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.stat { padding: 10px 12px; border-radius: 12px; background: rgba(168, 210, 230, 0.06); }
+.stat b { display: flex; align-items: center; gap: 7px; font-size: 24px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.1; }
+.stat > span { display: block; margin-top: 2px; font-size: 12px; color: var(--muted); }
+.dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+.dot.moving { background: var(--moving); } .dot.waiting { background: var(--waiting); } .dot.enter { background: var(--enter); }
+.dot.arrived { background: var(--arrived); } .dot.later { background: none; box-shadow: inset 0 0 0 1.5px var(--muted); }
+.bdbar { display: flex; height: 10px; margin: 4px 0 10px; border-radius: 5px; overflow: hidden; background: rgba(168, 210, 230, 0.06); }
+.bdbar i { display: block; height: 100%; flex: none; box-shadow: inset -2px 0 0 var(--panel-solid); }
+.bdrows { display: grid; grid-template-columns: auto 1fr auto; gap: 5px 8px; align-items: center; font-size: 13px; }
+.bdrows span { color: var(--muted); } .bdrows b { font-weight: 600; text-align: right; font-size: 15px; }
+.bdrows .total { border-top: 1px solid var(--line); padding-top: 5px; }
+.legend .road { width: 16px; height: 4px; border-radius: 2px; }
+.sofar { margin-top: 10px; font-size: 12px; color: var(--muted); }
+.sofar b { color: var(--ink); font-weight: 600; }
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th, td { padding: 7px 0 7px 14px; text-align: right; border-bottom: 1px solid var(--line); vertical-align: top; }
+th:first-child, td:first-child { padding-left: 0; text-align: left; color: var(--muted); font-weight: 400; }
+thead th { font-size: 12px; font-weight: 650; color: var(--muted); }
+td small { display: block; color: var(--muted); font-size: 11px; }
+td.pending { color: var(--muted); }
+.note { margin: 10px 0 0; font-size: 12px; color: var(--muted); }
+details { margin-top: 18px; font-size: 12px; color: var(--muted); }
+summary { cursor: pointer; color: var(--ink); font-weight: 600; font-size: 13px; }
+details dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 10px 0; }
+details dt { color: var(--muted); } details dd { margin: 0; color: var(--ink); overflow-wrap: anywhere; }
+details ul { margin: 8px 0 0; padding-left: 18px; } details li { margin-bottom: 4px; }
+
+#dock { left: var(--gap); right: calc(372px + 2 * var(--gap)); bottom: var(--gap); padding: 12px 16px 10px; }
+.bar { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.play { width: 36px; height: 36px; border-radius: 50%; border: 0; background: var(--ink); color: var(--canvas); cursor: pointer;
+  display: grid; place-items: center; flex: none; }
+.play svg { width: 14px; height: 14px; }
+.legend { display: flex; gap: 14px; margin-left: auto; font-size: 12px; color: var(--muted); align-items: center; flex-wrap: wrap; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.chart-note { font-size: 12px; color: var(--muted); }
+.legend .sig { width: 5px; height: 5px; border-radius: 50%; background: #C9D6DF; opacity: 0.7; }
+.tlwrap { position: relative; margin-top: 8px; }
+#tl { display: block; width: 100%; height: 150px; cursor: pointer; touch-action: none; }
+.tip { position: absolute; pointer-events: none; padding: 8px 10px; border-radius: 10px; background: var(--raised);
+  border: 1px solid var(--line-strong); box-shadow: var(--shadow); font-size: 12px; white-space: nowrap; opacity: 0; transition: opacity .12s; z-index: 1001; }
+.tip.on { opacity: 1; }
+.tip b { font-weight: 600; }
+.tip div { display: flex; align-items: center; gap: 6px; }
+
+.pin { display: flex; align-items: center; gap: 6px; white-space: nowrap; transform: translate(-6px, -6px); }
+.pin i { width: 12px; height: 12px; border-radius: 50%; border: 2.5px solid var(--brand); background: var(--canvas); flex: none; }
+.pin b { font-size: 12px; font-weight: 650; text-transform: capitalize; color: var(--ink);
+  text-shadow: 0 0 3px var(--canvas), 0 0 6px var(--canvas), 0 0 10px var(--canvas); }
+
+@media (max-width: 1100px) {
+  #head { width: auto; right: calc(372px + 2 * var(--gap)); }
+}
+@media (max-width: 760px) {
+  html, body { overflow: auto; }
+  #map { position: relative; height: 58vh; }
+  .card { position: static; margin: 12px; backdrop-filter: none; }
+  #head, #side, #dock { width: auto; }
+  #side { overflow: visible; }
+  .clock { font-size: 32px; }
+}
+</style>
+</head>
+<body>
+<div id="map" aria-label="Map of San Francisco with SUMO vehicle positions and road speeds"></div>
+
+<header id="head" class="card">
+  <div class="brand">
+    <svg viewBox="0 0 32 32" fill="none" stroke-linecap="round" stroke-width="2.6" aria-hidden="true">
+      <path d="M16 29v-9" stroke="#EAF4EC"/><path d="M16 20c0-7-9-7-9-15" stroke="#99D98C"/>
+      <path d="M16 20V5" stroke="#EAF4EC"/><path d="M16 20c0-7 9-7 9-15" stroke="#6CC4E0"/>
+    </svg>
+    transPEAKtation
+  </div>
+  <h1 id="title">Before ML: SUMO baseline replay</h1>
+  <p class="muted" id="sub"></p>
+  <div class="seg" role="group" aria-label="Routing" id="variants"></div>
+</header>
+
+<aside id="side" class="card">
+  <div class="clock" id="clock">9:00:00 PM</div>
+  <div class="date muted" id="date"></div>
+
+  <h2 id="all-h">All cars right now</h2>
+  <div id="all"></div>
+  <p class="sofar" id="s-sofar"></p>
+  <p class="sofar">"Can't pull out yet" = the car wants to leave, but the street next to it is too jammed to enter.</p>
+
+  <h2 id="res-h">Trip results</h2>
+  <table>
+    <thead><tr><th></th><th>Before ML</th><th>After ML</th></tr></thead>
+    <tbody id="results"></tbody>
+  </table>
+  <p class="note" id="results-note"></p>
+
+  <details>
+    <summary>Provenance and limits</summary>
+    <dl id="prov"></dl>
+    <ul id="limits"></ul>
+  </details>
+</aside>
+
+<section id="dock" class="card" aria-label="Playback">
+  <div class="bar">
+    <button class="play" id="play" aria-label="Pause"></button>
+    <div class="seg" role="group" aria-label="Playback speed" id="speeds" style="margin-top:0"></div>
+    <div class="legend">
+      <span><i class="dot moving"></i>Moving</span>
+      <span><i class="dot waiting"></i>Stopped</span>
+      <span><i class="dot enter"></i>Can't pull out yet</span>
+      <span>Road speed vs limit <i class="road" style="background:var(--road-1)"></i>50–75% <i class="road" style="background:var(--road-2)"></i>25–50% <i class="road" style="background:var(--road-3)"></i>&lt;25%</span>
+    </div>
+  </div>
+  <div class="tlwrap">
+    <canvas id="tl" tabindex="0" role="slider" aria-label="Simulation time" aria-valuemin="0"></canvas>
+    <div class="tip" id="tl-tip"></div>
+  </div>
+  <div class="chart-note" id="chart-note"></div>
+</section>
+<div class="tip" id="car-tip"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="baseline.data.js"></script>
+
+<script src="replay.js"></script>
+
+<script>
+(() => {
+  const D = window.BASELINE, { decode, series, waited, bins, allAt } = REPLAY;
+  const V = {};
+  for (const [k, v] of Object.entries(D.variants)) { const cars = decode(v.vehicles); const cum = a => a.reduce((o, x, i) => (o[i + 1] = o[i] + x, o), new Float64Array(a.length + 1));
+    V[k] = { ...v, cars, runSum: cum(v.totals.running), haltSum: cum(v.totals.halting) }; }
+  const LABEL = { baseline: 'Before ML', ml: 'After ML' };
+  let variant = 'baseline';
+
+  const $ = id => document.getElementById(id);
+  const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const COL = Object.fromEntries(['moving', 'waiting', 'enter', 'ink', 'muted', 'line', 'canvas', 'road-1', 'road-2', 'road-3'].map(k => [k, css(`--${k}`)]));
+  const T0 = Date.parse(D.start), TZ = 'America/Los_Angeles';
+  const fmtClock = new Intl.DateTimeFormat('en-US', { timeZone: TZ, hour: 'numeric', minute: '2-digit', second: '2-digit' });
+  const fmtTick = new Intl.DateTimeFormat('en-US', { timeZone: TZ, hour: 'numeric', minute: '2-digit' });
+  const fmtDate = new Intl.DateTimeFormat('en-US', { timeZone: TZ, weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+  const clock = s => fmtClock.format(T0 + s * 1000);
+  const tick = s => fmtTick.format(T0 + s * 1000).replace(':00', '');
+  const MPH = 0.1 * 2.236936; // speed unit (0.1 m/s) -> mph
+  const place = name => name.replace(/_/g, ' '); // scenario location ids, e.g. union_square
+  const num = x => Math.round(x).toLocaleString('en-US');
+
+  // ---------- static text, all from the data file ----------
+  const n = D.users, C = D.crowd, E = D.event, ALL = n + (C ? C.count : 0);
+  const eventAt = E ? (Date.parse(E.start) - T0) / 1000 : null;
+  const reqs = D.variants.baseline.vehicles.map(r => r[1]);
+  if (C && E) {  // version 3: trips before the show go to a viewing site, all later ones leave one
+    const going = reqs.filter(t => t < eventAt), leaving = [...reqs.filter(t => t >= eventAt), C.first_depart, C.last_depart];
+    $('sub').textContent = `${num(ALL)} cars on ${fmtDate.format(T0)}: ${num(going.length)} drive to the fireworks viewing sites ${tick(Math.min(...going))}–${tick(Math.max(...going))}, `
+      + `then ${num(ALL - going.length)} leave them ${tick(Math.min(...leaving))}–${tick(Math.max(...leaving))}. Every car takes its fastest route on OpenStreetMap roads.`;
+  } else $('sub').textContent = `${num(n)} cars request trips ${clock(0)}–${clock(D.admission)} on ${fmtDate.format(T0)}. Every car takes its fastest route on OpenStreetMap roads.`;
+  $('all-h').textContent = `All ${num(ALL)} cars right now`;
+  const GROUPS = [['moving', 'Moving'], ['stopped', 'Stopped in traffic'], ['enter', "Can't pull out yet"], ['arrived', 'Arrived'], ['later', 'Not leaving yet']];
+  const BAR = { moving: 'var(--moving)', stopped: 'var(--waiting)', enter: 'var(--enter)', arrived: 'var(--arrived)', later: 'transparent' };
+  const DOT = { moving: 'moving', stopped: 'waiting', enter: 'enter', arrived: 'arrived', later: 'later' };
+  for (const [id, total] of [['all', ALL]]) {
+    $(id).innerHTML = `<div class="bdbar" aria-hidden="true">${GROUPS.map(([k]) => `<i id="${id}-bar-${k}" style="background:${BAR[k]}"></i>`).join('')}</div>`
+      + `<div class="bdrows">${GROUPS.map(([k, label]) => `<i class="dot ${DOT[k]}"></i><span>${label}</span><b id="${id}-${k}">0</b>`).join('')}`
+      + `<i></i><span class="total">Total</span><b class="total">${num(total)}</b></div>`;
+  }
+  $('tl').setAttribute('aria-valuemax', D.end);
+
+  const limits = [
+    `Every count, trip result and road speed on this page is read from SUMO output: all-car totals every second, road speeds every minute, and the positions of ${num(n)} of the cars (the map dots) every second. Nothing is interpolated or estimated.`,
+    'Trips are synthetic, between the pinned SF places. SUMO models every trip as the same passenger car, whether the person drives or rides.',
+    C ? `The number of cars is an assumption${E ? ` (${num(ALL)} cars, about ${(ALL / E.phq_attendance * 100).toFixed(1)}% of ${E.source}'s ${num(E.phq_attendance)} predicted attendance for "${E.title}")` : ''}. No measured count of cars that night exists in our data.`
+      : 'The scenario trips are the only cars.',
+    'Traffic signals are guessed from OSM by SUMO. Crowd road closures and the Golden Gate Bridge closure are not modeled.',
+    'The July 4 date and fireworks time are real; the traffic is simulated, not a replay of measured July 4 speeds.',
+  ];
+  $('limits').innerHTML = limits.map(t => `<li>${t}</li>`).join('');
+
+  const variantsEl = $('variants');
+  for (const k of ['baseline', 'ml']) {
+    const b = document.createElement('button');
+    b.textContent = V[k] ? LABEL[k] : `${LABEL[k]} · pending`;
+    b.disabled = !V[k];
+    if (!V[k]) b.title = 'No ML routes have been simulated yet';
+    b.onclick = () => { variant = k; syncVariant(); };
+    b.dataset.k = k; variantsEl.append(b);
+  }
+  function syncVariant() {
+    variantsEl.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', b.dataset.k === variant));
+    $('title').textContent = `${LABEL[variant]}: ${E ? 'fireworks exodus' : 'SUMO baseline replay'}`;
+    drawTimelineBase(); roadKey = null;
+  }
+
+  const min = s => `${(s / 60).toFixed(1)} min`, mi = m => `${(m / 1609.34).toFixed(1)} mi`;
+  const ROWS = [['Travel time', 'duration', min], ['Waiting', 'waitingTime', min], ['Time lost vs free flow', 'timeLoss', min],
+    ['Distance', 'routeLength', mi], ['Departure delay', 'departDelay', min]];
+  const col = (k, f) => V[k] ? f(V[k]) : '<td class="pending">pending</td>';
+  $('results').innerHTML =
+    `<tr><th>Arrived</th>${['baseline', 'ml'].map(k => col(k, ({ all: v }) => `<td>${num(v.counts.completed)} of ${num(ALL)}<small>${[[v.counts.unfinished, 'still on the road'], [v.counts.not_departed, "couldn't pull out"], [v.counts.failed, 'failed'], [v.counts.missing, 'missing']].filter(([c]) => c).map(([c, t]) => `${num(c)} ${t}`).join(' · ')}</small></td>`)).join('')}</tr>`
+    + ROWS.map(([label, key, f]) => `<tr><th>${label}</th>${['baseline', 'ml'].map(k => col(k, ({ all: v }) => v.metrics[key] ? `<td>${f(v.metrics[key].mean)}<small>p95 ${f(v.metrics[key].p95)}</small></td>` : '<td>–</td>')).join('')}</tr>`).join('');
+  $('res-h').textContent = `Trip results at ${tick(D.end)}`;
+  $('results-note').textContent = `All ${num(ALL)} cars when the simulation stops at ${tick(D.end)}, from SUMO tripinfo. Times cover arrived trips only (mean, with nearest-rank p95); trips still on the road are counted above, never as short trips.`
+    + (V.ml ? '' : ' After ML stays empty until ML-chosen routes are simulated with the same cars, network, signals, seed and horizon.');
+  const prov = [['Run', D.run], ['Replay', `${D.replay} (same command, adds outputs)`], ['SUMO', D.sumo],
+    ['Scenario', `${D.scenario_sha256.slice(0, 16)} · ${D.description}`], ['Network', `OSM ${D.osm_snapshot.slice(0, 10)} · ${D.network_sha256.slice(0, 16)}`],
+    ['Seed', D.seed], ['Horizon', `${clock(D.end)} (${D.end} s)`], ['Endpoint snap', `${D.radius} m`],
+    ['Cars', C ? `${num(n)} scenario trips + ${num(C.count)} leaving viewing sites ${clock(C.first_depart)}–${clock(C.last_depart)} (assumed)` : num(n)],
+    ['Event', E ? `${E.title}, ${E.source}, starts ${clock(eventAt)}, ${num(E.phq_attendance)} predicted attendance` : '–'],
+    ['Routes', 'fixed fastest route, no rerouting or teleporting']];
+  $('prov').innerHTML = prov.map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join('');
+
+  // ---------- map: the web app's Esri basemap, SUMO data drawn on canvases in one pane ----------
+  const map = L.map('map', { zoomControl: false });
+  L.control.zoom({ position: 'bottomleft' }).addTo(map);
+  map.attributionControl.setPrefix(false);
+  L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+    { attribution: 'Tiles © Esri · Traffic: Eclipse SUMO on OpenStreetMap', maxNativeZoom: 16, maxZoom: 18 }).addTo(map);
+  // Open on the 10 places with the most trips starting or ending there; zoom out for the rest of the city.
+  const pts = [...D.pins].sort((a, b) => b.from + b.to - a.from - a.to).slice(0, 10).map(p => [p.lonlat[1], p.lonlat[0]]);
+  map.fitBounds(pts, { paddingTopLeft: [460, 120], paddingBottomRight: [420, 220] });
+  if (innerWidth <= 760) map.fitBounds(pts, { padding: [16, 16] });
+  for (const p of D.pins) {
+    L.marker([p.lonlat[1], p.lonlat[0]], { icon: L.divIcon({ className: '', html: `<div class="pin"><i></i><b>${place(p.name)}</b></div>`, iconSize: [0, 0] }), keyboard: false })
+      .addTo(map);
+  }
+
+  // Web Mercator in world pixels, as Leaflet's EPSG:3857 (x/y in 0..1, times 256 * 2^zoom), precomputed so a frame
+  // is a multiply and subtract per point.
+  const merc = (lat, lon) => [0.5 + lon / 360, 0.5 - Math.log(Math.tan(Math.PI / 4 + lat * Math.PI / 360)) / (2 * Math.PI)];
+  for (const v of Object.values(V)) for (const c of v.cars) {
+    c.mx = new Float64Array(c.lon.length); c.my = new Float64Array(c.lon.length);
+    for (let i = 0; i < c.lon.length; i++) [c.mx[i], c.my[i]] = merc(c.lat[i], c.lon[i]);
+  }
+  const roadXY = D.road_shapes.map(f => { const xy = new Float64Array(f.length); for (let i = 0, x = 0, y = 0; i < f.length; i += 2) { x += f[i]; y += f[i + 1]; [xy[i], xy[i + 1]] = merc(y / 1e5, x / 1e5); } return xy; });
+
+  const pane = map.createPane('sumo'); pane.style.zIndex = 450; pane.style.pointerEvents = 'none';
+  const sigCv = document.createElement('canvas'), roadCv = document.createElement('canvas'), cv = document.createElement('canvas');
+  pane.append(sigCv, roadCv, cv);
+  const sctx = sigCv.getContext('2d'), rctx = roadCv.getContext('2d'), ctx = cv.getContext('2d');
+  let DPR = 1, W = 0, H = 0, roadKey = null;
+  const fitCanvas = c => { c.width = W * DPR; c.height = H * DPR; c.style.width = `${W}px`; c.style.height = `${H}px`; L.DomUtil.setPosition(c, map.containerPointToLayerPoint([0, 0])); };
+  const view = () => ({ k: 256 * 2 ** map.getZoom(), o: map.getPixelBounds().min });
+  function drawStatic() { // signals: once per view
+    const r = map.getSize(); W = r.x; H = r.y; DPR = devicePixelRatio || 1;
+    [sigCv, roadCv, cv].forEach(fitCanvas); roadKey = null;
+    if (map.getZoom() < 14) return;
+    const { k, o } = view();
+    sctx.setTransform(DPR, 0, 0, DPR, 0, 0); sctx.fillStyle = 'rgba(201,214,223,0.4)'; sctx.beginPath();
+    for (let i = 0; i < D.signals.length; i += 2) {
+      const [mx, my] = merc(D.signals[i + 1] / 1e5, D.signals[i] / 1e5), x = mx * k - o.x, y = my * k - o.y;
+      if (x > -4 && y > -4 && x < W + 4 && y < H + 4) { sctx.moveTo(x + 1.6, y); sctx.arc(x, y, 1.6, 0, 7); }
+    }
+    sctx.fill();
+  }
+  map.on('zoomstart', () => { pane.style.visibility = 'hidden'; });
+  map.on('zoomend moveend resize', () => { pane.style.visibility = ''; drawStatic(); });
+
+  function drawRoads(s) { // SUMO edgeData for this minute; redrawn only when the minute or view changes
+    const f = Math.min(V[variant].roads.length - 1, Math.floor(s / D.period));
+    if (roadKey === f) return;
+    roadKey = f;
+    rctx.setTransform(DPR, 0, 0, DPR, 0, 0); rctx.clearRect(0, 0, W, H);
+    const { k, o } = view(), frame = V[variant].roads[f] || [];
+    rctx.lineCap = rctx.lineJoin = 'round'; rctx.lineWidth = map.getZoom() >= 15 ? 5 : 3.5;
+    for (const [band, lo, hi] of [['road-1', 10, 15], ['road-2', 5, 10], ['road-3', 0, 5]]) { // speedRelative x20
+      rctx.beginPath();
+      for (let i = 0; i < frame.length; i += 3) {
+        if (frame[i + 1] < lo || frame[i + 1] >= hi) continue;
+        const xy = roadXY[frame[i]];
+        rctx.moveTo(xy[0] * k - o.x, xy[1] * k - o.y);
+        for (let j = 2; j < xy.length; j += 2) rctx.lineTo(xy[j] * k - o.x, xy[j + 1] * k - o.y);
+      }
+      rctx.strokeStyle = COL[band]; rctx.stroke();
+    }
+  }
+
+  const TRAIL = 30; // seconds of each car's own past samples drawn behind it
+  let drawn = []; // [x, y, car, i] of cars on screen, for hover
+  function drawCars(s) {
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0); ctx.clearRect(0, 0, W, H);
+    const { k, o } = view();
+    const on = V[variant].cars.filter(c => s >= c.t0 && s < c.t1);
+    ctx.beginPath();
+    for (const c of on) {
+      const i = s - c.t0, a = Math.max(0, i - TRAIL);
+      ctx.moveTo(c.mx[a] * k - o.x, c.my[a] * k - o.y);
+      for (let j = a + 1; j <= i; j++) ctx.lineTo(c.mx[j] * k - o.x, c.my[j] * k - o.y);
+    }
+    ctx.lineWidth = 2; ctx.lineCap = ctx.lineJoin = 'round'; ctx.strokeStyle = 'rgba(47,151,198,0.35)'; ctx.stroke();
+    drawn = [];
+    for (const halted of [0, 1]) { // stopped cars on top
+      ctx.beginPath();
+      for (const c of on) {
+        const i = s - c.t0;
+        if (c.halt[i] !== halted) continue;
+        const x = c.mx[i] * k - o.x, y = c.my[i] * k - o.y;
+        drawn.push([x, y, c, i]);
+        ctx.moveTo(x + 4, y); ctx.arc(x, y, 4, 0, 7);
+      }
+      ctx.fillStyle = halted ? COL.waiting : COL.moving; ctx.fill();
+      ctx.lineWidth = 1.5; ctx.strokeStyle = COL.canvas; ctx.stroke();
+    }
+  }
+
+  const carTip = $('car-tip');
+  map.on('mousemove', e => {
+    const { x, y } = e.containerPoint;
+    let best = null, bd = 100;
+    for (const d of drawn) { const dd = (d[0] - x) ** 2 + (d[1] - y) ** 2; if (dd < bd) { bd = dd; best = d; } }
+    carTip.classList.toggle('on', !!best);
+    if (!best) return;
+    const [, , c, i] = best;
+    carTip.innerHTML = `<b>${c.id}</b><div class="muted" style="text-transform:capitalize">${place(c.from)} → ${place(c.to)}</div>`
+      + `<div>${waited(c, i) ? 'Stopped in traffic' : `${(c.spd[i] * MPH).toFixed(0)} mph`}</div><div class="muted">Requested ${clock(c.req)} · on the road ${Math.floor(i / 60)} min ${i % 60} s</div>`;
+    carTip.style.left = `${e.originalEvent.clientX + 14}px`; carTip.style.top = `${e.originalEvent.clientY + 14}px`;
+  });
+  map.on('mouseout', () => carTip.classList.remove('on'));
+
+  // ---------- timeline: every car, one step per screen pixel, stacked stopped / moving / can't pull out ----------
+  const tl = $('tl'), tctx = tl.getContext('2d'), tlTip = $('tl-tip');
+  const PAD = { l: 44, r: 8, t: 8, b: 20 };
+  let base = null, TW = 0, TH = 0, yMax = 1;
+  const xOf = t => PAD.l + (t / D.end) * (TW - PAD.l - PAD.r), tOf = x => Math.round(Math.min(D.end - 1, Math.max(0, (x - PAD.l) / (TW - PAD.l - PAD.r) * D.end)));
+  const yOf = v => TH - PAD.b - (v / yMax) * (TH - PAD.t - PAD.b);
+  const niceStep = v => { const p = 10 ** Math.floor(Math.log10(v / 4)); return [1, 2, 2.5, 5, 10].map(x => x * p).find(x => v / x <= 5); };
+  function drawTimelineBase() {
+    const r = tl.getBoundingClientRect(); TW = r.width; TH = r.height;
+    const k = devicePixelRatio || 1;
+    base = document.createElement('canvas'); base.width = TW * k; base.height = TH * k;
+    const c = base.getContext('2d'); c.scale(k, k);
+    // One step per plot pixel (about 15 s on a laptop screen), so traffic-signal waves stay visible.
+    const m = bins(V[variant].totals, D.end, Math.max(1, Math.ceil(D.end / (TW - PAD.l - PAD.r)))), top = m.moving.map((v, i) => v + m.stopped[i] + m.enter[i]);
+    $('chart-note').textContent = `All ${num(ALL)} cars, averaged every ${m.size} simulated seconds; hover for the exact count at any second, click or drag to jump. `
+      + (ALL > n ? `Map dots follow ${num(n)} of the cars every second; road colours use all ${num(ALL)}.` : '');
+    const peak = Math.max(...top), step = niceStep(peak);
+    yMax = Math.ceil(peak / step) * step;
+    c.font = '11px ' + css('--sans'); c.fillStyle = COL.muted; c.strokeStyle = COL.line; c.lineWidth = 1;
+    c.textAlign = 'right'; c.textBaseline = 'middle';
+    for (let v = 0; v <= yMax; v += step) { const y = Math.round(yOf(v)) + 0.5; c.beginPath(); c.moveTo(PAD.l, y); c.lineTo(TW - PAD.r, y); c.stroke(); c.fillText(num(v), PAD.l - 6, y); }
+    c.textAlign = 'center'; c.textBaseline = 'alphabetic';
+    for (let t = 0; t <= D.end; t += 1800) c.fillText(tick(t), Math.min(TW - 22, Math.max(PAD.l + 14, xOf(t))), TH - 5);
+    const xm = i => xOf(Math.min(D.end, (i + 0.5) * m.size));
+    const layers = [['moving', COL.moving, 'Moving'], ['stopped', COL.waiting, 'Stopped'], ['enter', COL.enter, "Can't pull out yet"]];
+    let lo = new Float64Array(top.length);
+    const bands = [];
+    for (const [key, color, label] of layers) {
+      const hi = lo.map((v, i) => v + m[key][i]);
+      c.beginPath(); c.moveTo(xm(0), yOf(hi[0]));
+      for (let i = 1; i < hi.length; i++) c.lineTo(xm(i), yOf(hi[i]));
+      for (let i = lo.length - 1; i >= 0; i--) c.lineTo(xm(i), yOf(lo[i]));
+      c.closePath(); c.fillStyle = color; c.fill();
+      c.beginPath(); hi.forEach((v, i) => i ? c.lineTo(xm(i), yOf(v)) : c.moveTo(xm(i), yOf(v)));
+      c.strokeStyle = COL.canvas; c.lineWidth = 1.5; c.stroke(); // surface gap between stacked fills
+      bands.push([lo, hi, label, m[key]]); lo = hi;
+    }
+    c.font = '600 12px ' + css('--sans'); c.fillStyle = '#fff'; c.textBaseline = 'middle';
+    for (const [lo, hi, label, own] of bands) { // direct label where each band is thickest
+      const i = own.indexOf(Math.max(...own));
+      const y = Math.max(PAD.t + 26, (yOf(lo[i]) + yOf(hi[i])) / 2); // clear of the marker labels along the top
+      if (yOf(lo[i]) - yOf(hi[i]) > 16 && y < yOf(lo[i]) - 6) { c.textAlign = 'center'; c.fillText(label, Math.min(TW - 50, Math.max(PAD.l + 50, xm(i))), y); }
+    }
+    c.setLineDash([3, 4]); c.strokeStyle = 'rgba(234,244,236,0.4)'; c.lineWidth = 1; c.font = '11px ' + css('--sans'); c.fillStyle = COL.muted; c.textBaseline = 'alphabetic';
+    const marks = [[D.admission, `Requests end ${tick(D.admission)}`]];
+    if (E) marks.unshift([eventAt, `Fireworks ${tick(eventAt)}`]);
+    for (const [t, label] of marks) {
+      const x = Math.round(xOf(t)) + 0.5; c.beginPath(); c.moveTo(x, PAD.t); c.lineTo(x, TH - PAD.b); c.stroke();
+      c.save(); c.setLineDash([]); c.strokeStyle = css('--panel-solid'); c.lineWidth = 3; c.lineJoin = 'round';
+      c.textAlign = 'right'; c.strokeText(label, x - 5, PAD.t + 9); c.restore(); c.fillText(label, x - 5, PAD.t + 9);
+    }
+    c.setLineDash([]);
+  }
+  function drawTimeline(t, hover) {
+    const k = devicePixelRatio || 1;
+    if (tl.width !== Math.round(TW * k)) { tl.width = TW * k; tl.height = TH * k; }
+    tctx.setTransform(1, 0, 0, 1, 0, 0); tctx.clearRect(0, 0, tl.width, tl.height); tctx.drawImage(base, 0, 0);
+    tctx.setTransform(k, 0, 0, k, 0, 0);
+    for (const [tt, a] of [[hover, 0.45], [t, 1]]) {
+      if (tt == null) continue;
+      const x = Math.round(xOf(tt)) + 0.5;
+      tctx.globalAlpha = a; tctx.strokeStyle = COL.ink; tctx.lineWidth = 1.5;
+      tctx.beginPath(); tctx.moveTo(x, PAD.t); tctx.lineTo(x, TH - PAD.b); tctx.stroke();
+    }
+    tctx.globalAlpha = 1;
+  }
+
+  // ---------- playback ----------
+  const SPEEDS = [120, 300, 600];
+  const q = new URLSearchParams(location.search);
+  let T = Math.min(D.end - 1, +q.get('t') || 0), speed = 300, last = null, hoverT = null;
+  let playing = !matchMedia('(prefers-reduced-motion: reduce)').matches && !q.has('paused');
+  const stopAt = () => { // the last second any car is on the road or still trying to enter it
+    const tt = V[variant].totals; let t = D.end - 1;
+    while (t > 0 && !tt.running[t] && !tt.waiting[t]) t--;
+    return Math.min(D.end - 1, t + 1);
+  };
+  const speedsEl = $('speeds');
+  for (const v of SPEEDS) {
+    const b = document.createElement('button'); b.textContent = `${v}×`; b.dataset.v = v;
+    b.setAttribute('aria-label', `${v} simulated seconds per second`);
+    b.onclick = () => { speed = v; syncSpeed(); }; speedsEl.append(b);
+  }
+  const syncSpeed = () => speedsEl.querySelectorAll('button').forEach(b => b.setAttribute('aria-pressed', +b.dataset.v === speed));
+  const PLAY = '<svg viewBox="0 0 14 14"><path d="M3 1.5v11l9.5-5.5z" fill="currentColor"/></svg>';
+  const PAUSE = '<svg viewBox="0 0 14 14"><path d="M3 1.5h3v11H3zM8 1.5h3v11H8z" fill="currentColor"/></svg>';
+  const syncPlay = () => { $('play').innerHTML = playing ? PAUSE : PLAY; $('play').setAttribute('aria-label', playing ? 'Pause' : 'Play'); };
+  $('play').onclick = () => { if (!playing && T >= stopAt()) T = 0; playing = !playing; syncPlay(); };
+
+  const seekFrom = e => { const r = tl.getBoundingClientRect(); return tOf(e.clientX - r.left); };
+  let dragging = false;
+  tl.addEventListener('pointerdown', e => { dragging = true; tl.setPointerCapture(e.pointerId); T = seekFrom(e); });
+  tl.addEventListener('pointerup', () => { dragging = false; });
+  tl.addEventListener('pointermove', e => {
+    hoverT = seekFrom(e); if (dragging) T = hoverT;
+    const a = allAt(V[variant].totals, hoverT, ALL), r = tl.getBoundingClientRect(), road = a.moving + a.stopped;
+    tlTip.innerHTML = `<b>${clock(hoverT)}</b> <span class="muted">all ${num(ALL)} cars</span>`
+      + `<div><i class="dot moving"></i>${num(a.moving)} moving</div><div><i class="dot waiting"></i>${num(a.stopped)} stopped</div>`
+      + `<div><i class="dot enter"></i>${num(a.enter)} can't pull out yet</div><div><i class="dot arrived"></i>${num(a.arrived)} arrived</div>`
+      + `<div class="muted">${road ? `${Math.round(a.stopped / road * 100)}% of cars on the road stopped` : 'no cars on the road'}</div>`;
+    tlTip.classList.add('on');
+    tlTip.style.left = `${Math.min(r.width - 220, Math.max(0, e.clientX - r.left + 12))}px`; tlTip.style.top = `-124px`;
+  });
+  tl.addEventListener('pointerleave', () => { hoverT = null; tlTip.classList.remove('on'); });
+  addEventListener('keydown', e => {
+    if (e.target.closest('button')) return;
+    if (e.key === ' ') { e.preventDefault(); $('play').click(); }
+    else if (e.key === 'ArrowRight') T = Math.min(D.end - 1, T + 60);
+    else if (e.key === 'ArrowLeft') T = Math.max(0, T - 60);
+  });
+
+  const shown = {};
+  const put = (id, v, html) => { if (shown[id] !== v) { shown[id] = v; html ? ($(id).innerHTML = v) : ($(id).textContent = v); } };
+  function frame(now) {
+    if (playing && last !== null) { T = Math.min(stopAt(), T + (now - last) / 1000 * speed); if (T >= stopAt()) { playing = false; syncPlay(); } }
+    last = now;
+    const s = Math.min(D.end - 1, Math.floor(T)), Vv = V[variant], tt = Vv.totals;
+    drawRoads(s);
+    drawCars(s);
+    drawTimeline(s, hoverT);
+    put('clock', clock(s)); put('date', `${fmtDate.format(T0 + s * 1000)} · PDT · simulated`);
+    for (const [id, g, total] of [['all', allAt(tt, s, ALL), ALL]]) {
+      for (const [k] of GROUPS) { put(`${id}-${k}`, num(g[k])); $(`${id}-bar-${k}`).style.width = `${g[k] / total * 100}%`; }
+    }
+    put('s-sofar', `So far: <b>${num(Vv.runSum[s + 1] / 3600)} car-hours</b> on the road, <b>${num(Vv.haltSum[s + 1] / 3600)}</b> of them stopped.`, true);
+    tl.setAttribute('aria-valuenow', s); tl.setAttribute('aria-valuetext', clock(s));
+    requestAnimationFrame(frame);
+  }
+
+  addEventListener('resize', () => { map.invalidateSize(); drawStatic(); drawTimelineBase(); });
+  drawStatic(); syncVariant(); syncSpeed(); syncPlay();
+  window.seek = t => { T = t; playing = false; syncPlay(); };   // for scripted captures
+  requestAnimationFrame(frame);
+})();
+</script>
+</body>
+</html>
