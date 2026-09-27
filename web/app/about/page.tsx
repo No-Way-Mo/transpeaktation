@@ -64,6 +64,9 @@ export default function About() {
           <a href="#story">Story</a>
           <a href="#crowd">How it’s different</a>
           <a href="#live">Live app</a>
+          <a href="https://github.com/No-Way-Mo/transpeaktation" target="_blank" rel="noopener" className="about-repo">
+            GitHub <Icon name="external" size={12} />
+          </a>
         </nav>
         <Link href="/" className="btn">Open the app</Link>
       </header>
