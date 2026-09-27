@@ -6,7 +6,7 @@ import type { Card, useRoutePlanner } from '@/lib/use-route-planner.ts';
 import { useVoice } from '@/lib/use-voice.ts';
 import { dataPath, planStale, type Privacy, type Stop } from '@/lib/privacy.ts';
 import { usePrivacy } from '@/lib/use-privacy.ts';
-import { useSearchHistory } from '@/lib/use-search-history.ts';
+import { clearSearchHistory, removeSearchHistoryItem, useSearchHistory } from '@/lib/use-search-history.ts';
 import { solText } from './reward.tsx';
 
 type Planner = ReturnType<typeof useRoutePlanner>;
@@ -161,13 +161,23 @@ export function Compass({ onPress, movable, className = '' }: { onPress(): void;
   );
 }
 
-/** This browser's recent searches (lib/search-history.ts), newest first. A pick plans it like a search result. */
+/** This browser's recent searches (lib/search-history.ts), newest first. A pick plans it like a search result;
+ *  × deletes one, Clear deletes them all. */
 export function RecentPlaces({ p }: { p: Planner }) {
   const recent = useSearchHistory();
   return (
     <div className="list">
-      <div className="label">Recent</div>
-      {recent.map(pl => <PlaceRow key={`${pl.lat},${pl.lon}`} place={pl} onPick={() => p.go(pl)} />)}
+      <div className="label-row">
+        <div className="label">Recent</div>
+        {!!recent.length && <button className="label-btn" onClick={clearSearchHistory}>Clear</button>}
+      </div>
+      {recent.map(pl => (
+        <div className="recent-row" key={`${pl.lat},${pl.lon}`}>
+          <PlaceRow place={pl} onPick={() => p.go(pl)} />
+          <button className="recent-del" aria-label={`Remove ${pl.label} from recent searches`} title="Remove"
+            onClick={() => removeSearchHistoryItem(pl)}><Icon name="close" size={16} /></button>
+        </div>
+      ))}
       {!recent.length && <div className="status">No recent searches</div>}
     </div>
   );

@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { HISTORY_KEY, HISTORY_MAX, parseHistory, readHistory, withSearch, writeHistory } from './search-history.ts';
+import { HISTORY_KEY, HISTORY_MAX, parseHistory, readHistory, withoutSearch, withSearch, writeHistory } from './search-history.ts';
 import type { Place } from './route.ts';
 
 function store(init: Record<string, string> = {}) {
@@ -46,6 +46,18 @@ test('same place again moves to the top with its fresh data, no duplicate row', 
   assert.equal(moved[0].lat, chase.lat + 0.001);
 });
 
+test('deleting one search removes it (matched like a re-search) and persists; the rest keep their order', () => {
+  const s = store(), dave = place('Dave St', 37.75);
+  const h = withSearch(withSearch(withSearch([], oracle), chase), dave);
+  const del = withoutSearch(h, { ...chase, label: 'CHASE CENTER', lat: chase.lat + 0.001 });
+  assert.deepEqual(del.map(p => p.label), ['Dave St', 'Oracle Park']);
+  assert.deepEqual(withoutSearch(del, place('Nowhere', 1, 1)), del);  // not there: unchanged
+  writeHistory(del, s);
+  assert.deepEqual(readHistory(s), [dave, oracle]);
+  writeHistory(withoutSearch(withoutSearch(del, dave), oracle), s);  // last one gone: the key goes away
+  assert.ok(!s.m.has(HISTORY_KEY));
+});
+
 test(`keeps the ${HISTORY_MAX} most recent`, () => {
   let h: Place[] = [];
   for (let i = 0; i < HISTORY_MAX + 5; i++) h = withSearch(h, place(`P${i}`, 37.7 + i * 0.01));
@@ -82,8 +94,18 @@ test('no hardcoded recents; both Recent lists are the stored history', () => {
 });
 
 test('a recent row plans it exactly like a search result: p.go with the stored place', () => {
-  assert.match(parts, /recent\.map\(pl => <PlaceRow [^>]*onPick=\{\(\) => p\.go\(pl\)\} \/>\)/);
+  assert.match(parts, /recent\.map\(pl => \([\s\S]*?<PlaceRow place=\{pl\} onPick=\{\(\) => p\.go\(pl\)\} \/>/);
   assert.match(parts, /results\.map\(pl => <PlaceRow [^>]*onPick=\{\(\) => p\.go\(pl\)\} plain \/>\)/);
+});
+
+test('delete: × per row removes that place, Clear (only when there is history) removes all', () => {
+  const hook = src('./use-search-history.ts');
+  assert.match(hook, /removeSearchHistoryItem = \(place: Place\) => set\(withoutSearch\(getSearchHistory\(\), place\)\)/);
+  assert.match(hook, /clearSearchHistory = \(\) => set\(\[\]\)/);
+  assert.match(parts, /aria-label=\{`Remove \$\{pl\.label\} from recent searches`\}[\s\S]*?onClick=\{\(\) => removeSearchHistoryItem\(pl\)\}/);
+  assert.match(parts, /\{!!recent\.length && <button className="label-btn" onClick=\{clearSearchHistory\}>Clear<\/button>\}/);
+  // the × is its own button beside the row, never inside PlaceRow's <button>
+  assert.match(parts, /<PlaceRow place=\{pl\} onPick=\{\(\) => p\.go\(pl\)\} \/>\s*<button className="recent-del"/);
 });
 
 test('picks are saved: search results / recents (go), route-screen suggestions (pick), voice destination', () => {
