@@ -34,9 +34,9 @@ Try it at **[yowaymo.us](https://yowaymo.us)**, or watch the one-minute simulati
 ## How it works
 
 ```
-data inputs ──▶ ingest/ ──▶ MongoDB + Tiger Data ──▶ ml/ ──▶ api/ ──▶ web/ ──▶ ios/
-(events, roads,   normalize,   entities + time series   forecast,   routes,   app      iPhone
- traffic, maps)   geocode                                balance     /plan              shell
+data inputs     ──▶  ingest/     ──▶  MongoDB +   ──▶  ml/        ──▶  api/     ──▶  web/     ──▶  ios/
+events, roads,       normalize,       Tiger Data       forecast,       routes,       the app       iPhone
+traffic, maps        geocode          (stored)         balance         /plan                       shell
 ```
 
 | Folder | What it is | Stack |
