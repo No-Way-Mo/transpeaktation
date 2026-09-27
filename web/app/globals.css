@@ -51,23 +51,27 @@
   --marker-ring: #FFFFFF;
   /* Event kinds on the map: off the route blues, brand greens and traffic amber/red, so a pin never reads as traffic.
      Block parties + "other" are a quiet slate: they're most of the pins and the smallest draws. */
+  /* Event kinds (lib/context.ts eventKind): pins, legend, impact areas and popup tags all read these. Saturated hues
+     are for event data and routes only; the basemap stays grey-green-blue. */
   --ev-music: #7048E8;
-  --ev-sports: #3B5BDB;
-  --ev-parade: #A0522D;
-  --ev-festival: #D6409F;
-  --ev-conference: #0B7285;
-  --ev-market: #5C940D;
-  --ev-community: #718396;
-  --ev-other: #718396;
+  --ev-sports: #E03E3E;
+  --ev-parade: #D6336C;
+  --ev-festival: #E8590C;
+  --ev-conference: #3B5BDB;
+  --ev-market: #2F9E44;
+  --ev-community: #1098AD;
+  --ev-other: #7A848E;
   --compass-n: #D9454F;
   /* Esri light-grey basemap, washed toward the meadow end so roads/water pick up the palette. */
-  --map-tint: sepia(0.28) hue-rotate(58deg) saturate(1.25) brightness(1.01);
-  /* Water, repainted over the basemap on its own untinted pane (app/map-view.tsx, lib/water.ts). */
+  --map-tint: sepia(0.28) hue-rotate(58deg) saturate(1.25) brightness(0.985) contrast(1.06);
+  /* Water and parks, repainted over the basemap on their own untinted pane (app/map-view.tsx, lib/water.ts). */
   --map-water: #9DD5E5;
+  --map-park: #C0DDA6;
 
   --shadow: 0 2px 10px rgba(16, 41, 61, 0.08), 0 8px 28px rgba(16, 41, 61, 0.1);
   --shadow-sm: 0 1px 3px rgba(16, 41, 61, 0.1), 0 4px 12px rgba(16, 41, 61, 0.08);
-  --sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
+  /* Inter, self-hosted by next/font (app/layout.tsx sets --font-inter); system fonts only while it loads. */
+  --sans: var(--font-inter), -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   /* Mobile overlay offsets: notch-aware on iPhone, plain 12px in a narrow browser. */
   --safe-top: max(calc(env(safe-area-inset-top) + 4px), 12px);
   --bar-bottom: calc(env(safe-area-inset-top) + 52px); /* phone menu bar: overlays start 8px under it */
@@ -114,23 +118,24 @@
   --bad-fill: #D9454F;
 
   --route: #3FA9D0;
-  --route-alt: #2A5673;
+  --route-alt: #3D7CA0;
   --route-casing: #07131D;
   --route-casing-sel: #07131D;
   --traffic-moderate: #E9B949;
   --dest: #D9ED92;
   --marker-ring: #0F2233;
   --ev-music: #845EF7;
-  --ev-sports: #4C6EF5;
-  --ev-parade: #B8683A;
-  --ev-festival: #E64FAB;
-  --ev-conference: #1098AD;
-  --ev-market: #74B816;
-  --ev-community: #6B8196;
-  --ev-other: #6B8196;
-  /* Esri dark-grey basemap pushed toward #184e77 navy. */
-  --map-tint: sepia(0.5) hue-rotate(168deg) saturate(1.7) brightness(0.92);
+  --ev-sports: #F25555;
+  --ev-parade: #E64980;
+  --ev-festival: #F76707;
+  --ev-conference: #4C6EF5;
+  --ev-market: #37B24D;
+  --ev-community: #15AABF;
+  --ev-other: #7C8894;
+  /* Esri dark-grey basemap pushed toward #184e77 navy; contrast lifts the lighter road strokes off the land. */
+  --map-tint: sepia(0.5) hue-rotate(168deg) saturate(1.7) brightness(0.92) contrast(1.18);
   --map-water: #184E77;
+  --map-park: #284A33;
 
   --shadow: 0 2px 10px rgba(0, 0, 0, 0.35), 0 10px 32px rgba(0, 0, 0, 0.4);
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4), 0 4px 14px rgba(0, 0, 0, 0.35);
@@ -543,6 +548,17 @@ input::placeholder { color: var(--muted); }
 .layers-btn::before { content: ''; position: absolute; inset: -6px; border-radius: 50%; } /* 48px tap target around the small circle */
 .desk-layers { position: absolute; top: 16px; right: 20px; z-index: 6; } /* centred over the 44px zoom column below */
 .mob-layers { position: absolute; right: 18px; top: calc(var(--bar-bottom) + 204px); z-index: 28; } /* centred under the 48px compass */
+/* Layers button + event-type key button: a column on desktop (over the zoom column); a row on a phone, the key to
+   the left, so the right-edge stack doesn't grow down into the sheet. The key opens to the left, top-aligned. */
+.layers-wrap { display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.mob-layers { flex-direction: row-reverse; }
+.key-btn[aria-expanded='true'] { color: var(--action-text); background: var(--action-tint); }
+.key-pop { position: absolute; top: 0; right: calc(100% + 10px); z-index: 1; width: max-content; padding: 10px 12px 12px; border-radius: 12px;
+  background: var(--pop); box-shadow: var(--shadow); color: var(--ink); }
+.key-pop .eyebrow { margin-bottom: 8px; }
+.event-key { margin: 0; padding: 0; list-style: none; display: grid; grid-template-columns: repeat(2, auto); gap: 7px 16px; font-size: 13px; font-weight: 500; }
+.event-key li { display: flex; align-items: center; gap: 8px; }
+.event-key .event-pin { width: 20px; height: 20px; flex: none; border-width: 1.5px; box-shadow: none; opacity: 1; }
 .mob-layers.high { top: calc(var(--bar-bottom) + 66px); }
 .layers-btn[aria-pressed='true'] { color: var(--action-text); }
 .layers-btn[aria-pressed='false'] { color: var(--muted); }
@@ -623,15 +639,15 @@ input::placeholder { color: var(--muted); }
 .snap-heat { position: absolute; left: 0; top: 0; pointer-events: none; transition: opacity 0.3s ease; }
 .snap-pin-icon { background: none; border: none; }
 .snap-pin { position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px; box-sizing: border-box; border-radius: 50%;
-  background: #1A759F; border: 2px solid #FFFFFF; box-shadow: 0 1px 3px rgba(24, 78, 119, 0.4), 0 3px 10px rgba(24, 78, 119, 0.22);
+  background: var(--k, var(--ev-other)); border: 2px solid #FFFFFF; box-shadow: 0 1px 2px rgba(16, 41, 61, 0.35), 0 2px 6px rgba(16, 41, 61, 0.18);
   display: flex; align-items: center; justify-content: center; cursor: pointer;
-  opacity: var(--o); transform: scale(var(--s)); transition: opacity 0.28s ease, transform 0.28s var(--ease-out), background-color 0.2s; }
-.snap-pin svg { width: 13px; height: 13px; fill: none; stroke: #FFFFFF; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  opacity: var(--o); transform: scale(var(--s)); transition: opacity 0.28s ease, transform 0.28s var(--ease-out), filter 0.2s; }
+.snap-pin svg { width: 13px; height: 13px; fill: none; stroke: #FFFFFF; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
 .snap-pin.off { pointer-events: none; }
-.snap-pin.on { background: #184E77; box-shadow: 0 0 0 5px rgba(26, 117, 159, 0.3), 0 3px 10px rgba(24, 78, 119, 0.35); }
-:root[data-theme='dark'] .snap-pin { border-color: #EAF4EC; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5), 0 3px 10px rgba(0, 0, 0, 0.4); }
-:root[data-theme='dark'] .snap-pin.on { box-shadow: 0 0 0 5px rgba(108, 196, 224, 0.35), 0 3px 10px rgba(0, 0, 0, 0.45); }
-@media (hover: hover) { .snap-pin:not(.off):hover { background: #1E6091; } }
+.snap-pin.on { box-shadow: 0 0 0 4px color-mix(in srgb, var(--k) 35%, transparent), 0 2px 8px rgba(16, 41, 61, 0.3); }
+:root[data-theme='dark'] .snap-pin { border-color: #EAF4EC; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.35); }
+:root[data-theme='dark'] .snap-pin.on { box-shadow: 0 0 0 4px color-mix(in srgb, var(--k) 45%, transparent), 0 2px 8px rgba(0, 0, 0, 0.45); }
+@media (hover: hover) { .snap-pin:not(.off):hover { filter: brightness(1.1); } }
 .event-pop .cat { align-self: flex-start; width: fit-content; margin-bottom: 2px; padding: 1px 7px; border-radius: 6px; font-size: 11px; font-weight: 650; color: var(--action-text); background: var(--action-tint); }
 .event-pop .src { font-size: 11px; opacity: 0.85; }
 .activity-legend { position: absolute; left: 16px; bottom: 28px; z-index: 800; pointer-events: none; display: flex; flex-direction: column; gap: 5px;
@@ -641,5 +657,10 @@ input::placeholder { color: var(--muted); }
 .activity-legend .ramp b { font-weight: 550; }
 .activity-legend .ramp i { width: 88px; height: 6px; border-radius: 3px;
   background: linear-gradient(90deg, #D9ED92, #B5E48C, #99D98C, #76C893, #52B69A, #34A0A4, #168AAD, #1A759F, #1E6091, #184E77); }
-.mob .activity-legend { left: 12px; bottom: calc(var(--sheet-h, 22dvh) + 12px); }
+.mob .activity-legend { left: 12px; bottom: calc(var(--sheet-h, 22dvh) + 12px); gap: 4px; padding: 6px 10px; font-size: 11px; }
+.mob .activity-legend .ramp { font-size: 10px; }
+.mob .activity-legend .ramp i { width: 64px; }
+/* Navigating: the bar below is taller than the sheet it replaces (two rows with a reward) and the map follows at street
+   zoom, where the layer has already faded out, so the key steps aside instead of landing on the bar. */
+.mob:has(.nav-bar) .activity-legend { display: none; }
 @media (prefers-reduced-motion: reduce) { .snap-pin, .snap-heat, .activity-legend { transition: none; } }

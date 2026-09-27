@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ESRI_WATER, hexRgb, paintWater, waterAlpha, type RGB } from './water.ts';
+import { ESRI_PARK, ESRI_WATER, hexRgb, paintBasemap, paintWater, parkAlpha, waterAlpha, type RGB } from './water.ts';
 
 const hex = (h: string) => hexRgb(h)!;
 const alpha = (h: string, w: RGB) => waterAlpha(...hex(h), w);
@@ -30,4 +30,25 @@ test('paintWater: water pixels take the target colour, everything else goes tran
 test('hexRgb', () => {
   assert.deepEqual(hexRgb(' #9dd5e5 '), [157, 213, 229]);
   assert.equal(hexRgb('blue'), null);
+});
+
+test('parks: the flat green-cast fill is park, neutral land / roads / buildings are not', () => {
+  assert.ok(parkAlpha(0xE1, 0xE7, 0xE1, 6, 'light') > 0.9);
+  assert.ok(parkAlpha(0x48, 0x4B, 0x48, 3, 'dark') > 0.9);
+  assert.equal(parkAlpha(0xED, 0xED, 0xED, 0, 'light'), 0);   // land
+  assert.equal(parkAlpha(0xE1, 0xE7, 0xE1, 1, 'light'), 0);   // a lone greenish JPEG pixel among grey
+  assert.equal(parkAlpha(0x45, 0x45, 0x48, -1.5, 'dark'), 0); // land
+  assert.equal(parkAlpha(0x66, 0x66, 0x66, 0, 'dark'), 0);    // road
+});
+
+test('paintBasemap: water and park pixels take their colours, the rest goes transparent', () => {
+  const w = 16, px = new Uint8ClampedArray(w * w * 4); // rows 0-2 water, 3-11 park, 12-15 land
+  for (let i = 0; i < w * w; i++) {
+    const row = Math.floor(i / w), c = row < 3 ? ESRI_WATER.light : row < 12 ? ESRI_PARK.light : [0xED, 0xED, 0xED];
+    px.set([...c, 255], i * 4);
+  }
+  paintBasemap(px, w, 'light', hex('#9DD5E5'), hex('#C9E4B4'));
+  assert.deepEqual([...px.slice(0, 4)], [0x9D, 0xD5, 0xE5, 255]);
+  assert.deepEqual([...px.slice(7 * 64, 7 * 64 + 4)], [0xC9, 0xE4, 0xB4, 255]);
+  assert.equal(px[w * w * 4 - 1], 0);
 });

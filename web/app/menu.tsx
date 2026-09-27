@@ -8,7 +8,7 @@ import type { ThemePref } from '@/lib/theme.ts';
 import type { useRoutePlanner } from '@/lib/use-route-planner.ts';
 import { useMapPrefs } from '@/lib/use-map-prefs.ts';
 import { useTheme } from '@/lib/use-theme.ts';
-import { AiPrivacy, Icon, Logo, Toggle, type IconName } from './parts.tsx';
+import { AiPrivacy, EventKey, Icon, Logo, Toggle, type IconName } from './parts.tsx';
 
 // Logo menu, Map layers button, Settings and the menu's pages. Shared by desktop (centred dialogs) and mobile
 // (full-screen pages). Which one is open lives in lib/nav.ts: one at a time, Esc or a click outside closes it.
@@ -110,16 +110,35 @@ function MenuList({ n }: { n: NavApi }) {
 // ---------- map layers ----------
 
 /** Floating layers button on the map's right edge: one tap shows or hides the map's layers (event pins + route
- *  traffic). The map style and each layer on its own are in Settings → Map & Routing. */
+ *  traffic). The map style and each layer on its own are in Settings → Map & Routing. While event pins show, a small
+ *  key button beside it opens what the pin colours / glyphs mean; an outside tap or Escape closes it. */
 export function MapLayers({ className = '' }: { className?: string }) {
   const { prefs, setOverlays } = useMapPrefs();
   const on = overlaysOn(prefs);
+  const [keyOpen, setKeyOpen] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null), popId = useId();
+  const showKey = keyOpen && prefs.eventPins;
+  useEffect(() => {
+    if (!showKey) return;
+    const close = (e: Event) => {
+      if (e instanceof KeyboardEvent ? e.key === 'Escape' : !wrap.current?.contains(e.target as Node)) setKeyOpen(false);
+    };
+    addEventListener('pointerdown', close); addEventListener('keydown', close);
+    return () => { removeEventListener('pointerdown', close); removeEventListener('keydown', close); };
+  }, [showKey]);
   return (
-    <div className={`layers-wrap ${className}`}>
+    <div ref={wrap} className={`layers-wrap ${className}`}>
       <button className="layers-btn" aria-label="Map layers" aria-pressed={on} title={on ? 'Hide map layers' : 'Show map layers'}
         onClick={() => setOverlays(!on)}>
         <Icon name={on ? 'layers' : 'layersOff'} size={18} />
       </button>
+      {prefs.eventPins && (
+        <button className="layers-btn key-btn" aria-label="Event types" aria-expanded={showKey} aria-controls={popId} title="Event types"
+          onClick={() => setKeyOpen(o => !o)}>
+          <Icon name="info" size={18} />
+        </button>
+      )}
+      {showKey && <div id={popId} className="key-pop" role="group" aria-label="Event types"><h4 className="eyebrow">Event types</h4><EventKey /></div>}
     </div>
   );
 }
@@ -277,6 +296,10 @@ function MapDefaults() {
         <div className="aip-switches">
           {LAYERS.filter(l => l.key).map(l => <Toggle key={l.id} label={l.label} detail={l.detail} on={layerOn(prefs, l)} onChange={() => toggle(l.id)} />)}
         </div>
+      </section>
+      <section className="layer-group" aria-label="Event types">
+        <h4 className="eyebrow">Event types</h4>
+        <EventKey />
       </section>
       <p className="sub set-foot">The layers button on the map turns these on or off together. Remembered in this browser.
  Event Activity and Road Disruptions aren’t available yet.</p>
