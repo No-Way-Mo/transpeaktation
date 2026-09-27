@@ -129,6 +129,10 @@ export async function markArrived(tripId: string): Promise<void> {
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
 }
 
+/** GET /events: today's events for the search suggestions (demo events until ingest fills Mongo). */
+export async function fetchEvents(signal?: AbortSignal): Promise<EventInfo[]> {
+  return (await api<{ events: EventInfo[] }>('/events', signal)).events;
+}
 
 /** POST /voice: what the user said, parsed into a trip. Places are already resolved (place = null if not found). */
 export type VoiceIntent = {

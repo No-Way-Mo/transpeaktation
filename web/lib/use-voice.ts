@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { iosArrival, sendVoice, voiceError, voiceNote, type VoiceIntent } from './route.ts';
+import { sendVoice, voiceError, voiceNote, type VoiceIntent } from './route.ts';
 
 const MAX_MS = 10_000; // a trip request is a few seconds; stop runaway recordings
 
@@ -23,9 +23,7 @@ export function useVoice(onIntent: (v: VoiceIntent) => boolean) {
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
     } catch {
-      return setNote(iosArrival() // inside the iOS app (ios/), not a browser
-        ? 'Microphone blocked. Turn it on in Settings > transPEAKtation.'
-        : 'Microphone blocked. Allow it in your browser settings.');
+      return setNote('Microphone blocked. Allow it in your browser settings.');
     }
     const r = (rec.current = new MediaRecorder(stream));
     const chunks: Blob[] = [];
