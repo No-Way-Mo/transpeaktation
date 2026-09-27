@@ -25,7 +25,7 @@ test('menu entries, in order, with the two dividers', () => {
 });
 
 test('settings sections and where Settings opens', () => {
-  assert.deepEqual(SECTIONS.map(s => s.label), ['Appearance', 'Map & Routing', 'AI & Privacy', 'Notifications']);
+  assert.deepEqual(SECTIONS.map(s => s.label), ['Appearance', 'Map & Routing', 'AI & Privacy', 'Rewards Wallet', 'Notifications']);
   assert.deepEqual(open('settings'), { panel: 'settings', section: 'appearance' });           // desktop: first section
   assert.deepEqual(open('settings', null, false), { panel: 'settings', section: null });       // phone: the section list
   assert.deepEqual(open('settings', 'privacy', false), { panel: 'settings', section: 'privacy' }); // route card's trace strip

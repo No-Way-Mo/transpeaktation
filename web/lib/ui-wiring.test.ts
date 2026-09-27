@@ -92,7 +92,7 @@ test('the demo start is defined once', () => {
 test('device mode: the maneuver banner is not a button, only demo taps advance', () => {
   assert.match(mobile, /const TurnBox = demo \? 'button' : 'div';/);
   assert.match(mobile, /<TurnBox className="turn" onClick=\{demo \? \(\) => setDemoStep\(/);
-  assert.match(mobile, /\{demo && <span className="hint">Tap for next<\/span>\}/);
+  assert.match(mobile, /\{demo && <span className="hint">Next<\/span>\}/);
   assert.doesNotMatch(mobile, /goTo\(/);                                   // the old device-mode turn preview is gone
   assert.equal(count(mobile, /setStep\(g\.step\)|setStep\(Math\.max\(0, steps\.length - 1\)\)/g), 2); // only progress/arrival set the turn
 });

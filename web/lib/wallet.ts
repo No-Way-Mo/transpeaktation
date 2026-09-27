@@ -32,3 +32,6 @@ export function savedWallet(): string {
 export function saveWallet(v: string) {
   try { localStorage.setItem(KEY, v); } catch { /* private mode: just don't remember */ }
 }
+export function forgetWallet() {
+  try { localStorage.removeItem(KEY); } catch { /* nothing saved */ }
+}

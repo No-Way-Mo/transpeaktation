@@ -8,8 +8,9 @@ export const metadata: Metadata = {
   description: 'Event-aware routing for San Francisco.',
   appleWebApp: { capable: true, title: 'transPEAKtation', statusBarStyle: 'default' },
 };
-// viewportFit=cover lets the page draw under the notch; CSS pads with env(safe-area-inset-*).
-export const viewport: Viewport = { width: 'device-width', initialScale: 1, viewportFit: 'cover', themeColor: [
+// viewportFit=cover lets the page draw under the notch; CSS pads with env(safe-area-inset-*). maximumScale 1: iOS
+// otherwise zooms the whole page on input focus / double-tap and leaves it stuck zoomed (the map has its own pinch zoom).
+export const viewport: Viewport = { width: 'device-width', initialScale: 1, maximumScale: 1, viewportFit: 'cover', themeColor: [
   { media: '(prefers-color-scheme: light)', color: '#FFFFFF' },
   { media: '(prefers-color-scheme: dark)', color: '#0F2233' },
 ] };
