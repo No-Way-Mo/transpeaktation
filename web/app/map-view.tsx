@@ -8,6 +8,7 @@ import type { MapStyle } from '@/lib/map-prefs.ts';
 import type { Theme } from '@/lib/theme.ts';
 import { useMapPrefs } from '@/lib/use-map-prefs.ts';
 import { useTheme } from '@/lib/use-theme.ts';
+import { ESRI_WATER, hexRgb, paintWater } from '@/lib/water.ts';
 import { SF_BOUNDS } from '@/lib/snapmap.ts';
 import { SnapMapLayers } from './snapmap-layers.ts';
 
@@ -35,19 +36,50 @@ type Props = {
   pad: { topLeft: [number, number]; bottomRight: [number, number] }; // room left for overlays when fitting
 };
 
-// Esri's own light / dark grey basemaps, tinted toward the palette by --map-tint (globals.css); satellite is Esri's
-// World Imagery from the same keyless tile server, left untinted.
+// Esri's own light / dark grey basemaps, tinted toward the palette by --map-tint (globals.css), with their water
+// repainted --map-water (lib/water.ts); satellite is Esri's World Imagery from the same keyless tile server, left as is.
 const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services';
-const baseLayer = (l: typeof Leaflet, t: Theme, s: MapStyle) => s === 'satellite'
+const canvasUrl = (t: Theme) => `${ESRI}/Canvas/World_${t === 'dark' ? 'Dark' : 'Light'}_Gray_Base/MapServer/tile/{z}/{y}/{x}`;
+// crossOrigin on both layers: one CORS request per tile, shared by the basemap and the water layer that reads its pixels.
+const baseLayer = (l: typeof Leaflet, t: Theme, s: MapStyle, water: string): Leaflet.Layer => s === 'satellite'
   ? l.tileLayer(`${ESRI}/World_Imagery/MapServer/tile/{z}/{y}/{x}`, { attribution: 'Tiles © Esri, Maxar, Earthstar Geographics', maxNativeZoom: 18, maxZoom: 18 })
-  : l.tileLayer(`${ESRI}/Canvas/World_${t === 'dark' ? 'Dark' : 'Light'}_Gray_Base/MapServer/tile/{z}/{y}/{x}`, { attribution: 'Tiles © Esri', maxNativeZoom: 16, maxZoom: 18 });
+  : l.layerGroup([
+    l.tileLayer(canvasUrl(t), { attribution: 'Tiles © Esri', maxNativeZoom: 16, maxZoom: 18, crossOrigin: 'anonymous' }),
+    waterLayer(l, t, water),
+  ]);
+
+/** The basemap's water only, in `color`, on the 'water' pane: above the (tinted) tiles, so the blue is exact, and
+ *  under routes and pins. A tile that fails to load just draws no water; the basemap under it is unchanged. */
+function waterLayer(l: typeof Leaflet, t: Theme, color: string): Leaflet.Layer {
+  const to = hexRgb(color) ?? [0x9D, 0xD5, 0xE5], from = ESRI_WATER[t];
+  const Water = l.GridLayer.extend({
+    createTile(c: Leaflet.Coords, done: (err: Error | undefined, tile: HTMLElement) => void) {
+      const tile = document.createElement('canvas');
+      tile.width = tile.height = 256;
+      const img = new Image();
+      img.crossOrigin = 'anonymous';
+      img.onload = () => {
+        const g = tile.getContext('2d', { willReadFrequently: true })!;
+        g.drawImage(img, 0, 0);
+        const d = g.getImageData(0, 0, 256, 256);
+        paintWater(d.data, from, to);
+        g.putImageData(d, 0, 0);
+        done(undefined, tile);
+      };
+      img.onerror = () => done(undefined, tile);
+      img.src = l.Util.template(canvasUrl(t), c);
+      return tile;
+    },
+  });
+  return new (Water as new (o: Leaflet.GridLayerOptions) => Leaflet.GridLayer)({ pane: 'water', maxNativeZoom: 16, maxZoom: 18 });
+}
 
 export default function MapView({ ref, routes, sel, tp, labels, from, to, marker, events, span, routeEvents, onSelect, pad }: Props) {
   const el = useRef<HTMLDivElement>(null);
   const L = useRef<typeof Leaflet>(null);
   const map = useRef<Leaflet.Map>(null);
   const layer = useRef<Leaflet.LayerGroup>(null);
-  const base = useRef<Leaflet.TileLayer>(null);
+  const base = useRef<Leaflet.Layer>(null); // basemap: a tile layer, or tiles + water in a group (lib/water.ts)
   const snap = useRef<SnapMapLayers>(null);
   const { theme } = useTheme();
   const { prefs } = useMapPrefs(); // map style + layers (Map layers button / Settings → Map & Routing)
@@ -80,6 +112,9 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
     zoomIn: () => map.current?.zoomIn(),
     zoomOut: () => map.current?.zoomOut(),
   }));
+
+  // --map-water for the theme showing right now (<html data-theme> flips before React re-renders).
+  const waterColor = () => (el.current ? getComputedStyle(el.current).getPropertyValue('--map-water').trim() : '');
 
   const draw = () => {
     const l = L.current, g = layer.current;
@@ -147,7 +182,10 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
       // snapmap: quarter-level zoom steps, so pins and heat change gradually as you wheel / pinch.
       const m = (map.current = l.map(el.current, { zoomControl: false, ...(SNAP ? { zoomSnap: 0.25, zoomDelta: 0.5, wheelPxPerZoomLevel: 100 } : {}) }).setView([37.788, -122.4075], 14));
       m.attributionControl.setPrefix(false);
-      base.current = baseLayer(l, look.current.theme, look.current.prefs.style).addTo(m);
+      const water = m.createPane('water'); // between the tile pane (200) and the routes / pins (400+)
+      water.style.zIndex = '250';
+      water.style.pointerEvents = 'none';
+      base.current = baseLayer(l, look.current.theme, look.current.prefs.style, waterColor()).addTo(m);
       layer.current = l.layerGroup().addTo(m);
       if (SNAP) snap.current = new SnapMapLayers(l, m);
       draw();
@@ -162,7 +200,7 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
   // lines and markers in the new theme's colours. The first run just repeats what the map was created with.
   useEffect(() => {
     const l = L.current, m = map.current;
-    if (l && m && base.current) { base.current.remove(); base.current = baseLayer(l, theme, prefs.style).addTo(m); }
+    if (l && m && base.current) { base.current.remove(); base.current = baseLayer(l, theme, prefs.style, waterColor()).addTo(m); }
     draw();
   }, [theme, prefs.style]);
   // Event Pins / Traffic switched: redraw with or without them.
