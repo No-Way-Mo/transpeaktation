@@ -1,4 +1,5 @@
-# Deployed coordinator (ml/deploy/coordination_do.sh): heuristic load balancer, batch (CP-SAT) selectable per request.
+# Deployed coordinator (ml/deploy/coordination_do.sh): adaptive load balancer (heuristic + PPO under predicted
+# congestion, wider candidate search); heuristic / batch (CP-SAT) selectable per request.
 # Input is REPLAY: the forecast service on the same droplet forecasts one held-out recorded synthetic run
 # (b3_main portola, test split of the served model) under a replay clock. Not live traffic.
 # Settings are the POC starting values (coordinated_routing_v2.yaml), not tuned optima.
@@ -17,9 +18,9 @@ forecast:
   max_issue_age_min: 20
 candidates:
   k: 5
-  max_searches: 12
-  detour_abs_s: 180
-  detour_rel: 0.15
+  max_searches: 20              # wider search (fireworks backtests: +4-17 points for every policy under load)
+  detour_abs_s: 300
+  detour_rel: 0.25
 ledger:
   bin_min: 5
   spread: [1.0]
@@ -30,11 +31,15 @@ batch:
   max_requests: 32
   max_wait_ms: 250
   solve_ms: 250
+rl:
+  k: 5
+  checkpoint: data/coordination/rl/runs_async/appo_async_s0/latest   # PPO v2 (async, 500k decisions)
+  device: cpu
 service:
   host: 0.0.0.0                     # token required (COORDINATION_API_TOKEN); firewall limits who can connect
   port: 8100
-  selector: heuristic
-  allowed_selectors: [forecast_only, heuristic, batch]
+  selector: adaptive            # heuristic; PPO (rl.checkpoint) when the fastest route is predicted congested
+  allowed_selectors: [forecast_only, heuristic, adaptive, batch]
 replay:
   run: data/coordination/replay/b3_main_portola_full_f025_s0_event.parquet
   context: data/coordination/replay/b3_main_portola_full_f025_s0_event.context.json

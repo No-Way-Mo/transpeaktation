@@ -1,0 +1,51 @@
+# Fireworks demo port: DDQN + PPO v2 (async, 500k decisions) with the wider candidate search (detour min(300 s, 25%),
+# 20 searches, K 5). forecast_only is the paired baseline. No CP-SAT batch.
+name: coordinated_routing_fireworks_rl_wide
+seed: 0
+network:
+  segments: data/sf_citywide/batches/b3_main/export/segments.parquet
+forecast:
+  path: data/forecast/exports/b3_main_snapshot.parquet
+env:
+  batch: b6_fireworks
+  splits: data/coordination/fireworks/splits.json
+  history_s: 3600
+  decision_window_s: 6300
+  max_drain_s: 8100
+  participation: 1.0
+  max_participants: 100000
+  compliance: 1.0
+  forecast_mode: model
+  forecast_checkpoint: data/forecast/experiments/event_patch_v2_main/best.pt
+  forecast_device: cpu
+  warm_state_cache: true
+  time_to_teleport_s: 300
+  out_dir: data/coordination/fireworks_rl_wide/episodes
+  keep_outputs: true
+rl:
+  k: 5
+  checkpoint: data/coordination/rl/runs_main/ppo_s0/best
+  device: cpu
+benchmark:
+  policies:
+  - forecast_only
+  - rl_ddqn
+  - rl_ppo
+  checkpoints:
+    rl_ddqn: data/coordination/rl/runs_async/ddqn_async_s0/latest
+    rl_ppo: data/coordination/rl/runs_async/appo_async_s0/latest
+  screening_split: val
+  screening_scenarios: 3
+  heldout_split: test
+  heldout_scenarios: 6
+  seeds:
+  - 0
+  - 1
+  - 2
+  batch_window_s: 60
+  workers: 1
+  out_dir: data/coordination/fireworks_rl_wide
+candidates:
+  detour_abs_s: 300.0
+  detour_rel: 0.25
+  max_searches: 20

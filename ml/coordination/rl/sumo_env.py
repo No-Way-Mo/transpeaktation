@@ -289,7 +289,17 @@ class RouteChoiceEnv(gym.Env):
             ed.write_text('<additional><edgeData id="tp_edges" period="300" file="edgedata.xml.gz" '
                           'excludeEmpty="true"/></additional>')
             adds.append(str(ed))
-            extra = ["--vehroute-output", str(edir / "vehroutes.xml.gz"), "--vehroute-output.exit-times", "true"]
+            extra = ["--vehroute-output", str(edir / "vehroutes.xml.gz"), "--vehroute-output.exit-times", "true",
+                     "--summary-output", str(edir / "sumo_summary.xml.gz")]
+            fcd = float(os.environ.get("TP_FCD_PERIOD_S", "0") or 0)
+            if fcd > 0:                         # vehicle positions for replays (large): opt-in per node
+                extra += ["--fcd-output", str(edir / "fcd.xml.gz"), "--fcd-output.geo", "true",
+                          "--device.fcd.period", str(fcd), "--fcd-output.attributes", "x,y,speed,waiting"]
+                pre = os.environ.get("TP_FCD_PREFIX", "")
+                if pre:                         # only these vehicles (e.g. the demo's app users "user-")
+                    ids = sorted(t.id for t in spec.get_trips() if t.id.startswith(pre))
+                    if ids:
+                        extra += ["--device.fcd.explicit", ",".join(ids)]
         cmd = [sumo_binary(), "-n", str(spec.net_file), "-r", str(rou), "-a", ",".join(adds), *extra,
                "--begin", str(int(begin)), "--end", str(int(end)), "--seed", str((spec.run_seed + seed_off) % 2**31),
                "--tripinfo-output", str(edir / "tripinfo.xml"), "--tripinfo-output.write-unfinished", "true",
@@ -593,6 +603,9 @@ class RouteChoiceEnv(gym.Env):
              "dropped_trips": len(self.stats.get("fallback_errors", [])), "congestion": self.expo.summary(),
              "identity": self.identity, "time_to_teleport_s": self.cfg.env.time_to_teleport_s,
              "sumo_backend": self.sim.backend,
+             "outputs": {"keep_outputs": self.cfg.env.keep_outputs,
+                         "fcd_period_s": float(os.environ.get("TP_FCD_PERIOD_S", "0") or 0)
+                         if self.cfg.env.keep_outputs else 0.0},
              "decisions_per_sim_min": self.stats["decisions"] / sim_min,
              "participant_mean_duration_s": float(np.mean(dur)) if dur else None,
              "participant_mean_time_loss_s": float(np.mean(loss)) if loss else None,

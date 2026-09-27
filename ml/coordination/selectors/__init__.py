@@ -1,10 +1,11 @@
+from .adaptive import Adaptive
 from .base import Selector, SelectorUnavailable
 from .batch import Batch
 from .forecast_only import ForecastOnly
 from .heuristic import Heuristic
 from .rl import RL
 
-NAMES = ("forecast_only", "heuristic", "batch", "rl")
+NAMES = ("forecast_only", "heuristic", "batch", "rl", "adaptive")
 
 
 def make(name: str, cfg) -> Selector:
@@ -14,6 +15,8 @@ def make(name: str, cfg) -> Selector:
         return Heuristic()
     if name == "batch":
         return Batch(cfg.batch)
+    if name == "adaptive":
+        return Adaptive(cfg)
     if name == "rl":
         return RL(cfg)
     raise ValueError(f"unknown selector {name!r}; choose from {NAMES}")

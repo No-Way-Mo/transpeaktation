@@ -1,0 +1,48 @@
+# Normal-traffic (b3_main) check of the adaptive default with the wider candidate search. No CP-SAT batch.
+name: coordinated_routing_backtest_adaptive
+seed: 0
+network:
+  segments: data/sf_citywide/batches/b3_main/export/segments.parquet
+forecast:
+  path: data/forecast/exports/b3_main_snapshot.parquet
+env:
+  batch: b3_main
+  splits: data/forecast/datasets/b3_main_v3net_ep2/splits.json
+  history_s: 3600
+  decision_window_s: 1800
+  max_drain_s: 3600
+  participation: 0.05
+  max_participants: 100000
+  compliance: 1.0
+  forecast_mode: model
+  forecast_checkpoint: data/forecast/experiments/event_patch_v2_main/best.pt
+  forecast_device: cpu
+  warm_state_cache: true
+  time_to_teleport_s: 300
+  out_dir: data/coordination/backtest_adaptive/episodes
+rl:
+  k: 5
+  checkpoint: data/coordination/rl/runs_async/appo_async_s0/latest
+  device: cpu
+benchmark:
+  policies:
+  - forecast_only
+  - heuristic
+  - heuristic@lam=500
+  checkpoints:
+    rl_ppo: data/coordination/rl/runs_main/ppo_s0/best
+    rl_ddqn: data/coordination/rl/runs_main/ddqn_s0/best
+  screening_split: val
+  screening_scenarios: 3
+  heldout_split: test
+  heldout_scenarios: 6
+  seeds:
+  - 0
+  - 1
+  batch_window_s: 60
+  workers: 1
+  out_dir: data/coordination/backtest_adaptive
+candidates:
+  detour_abs_s: 300.0
+  detour_rel: 0.25
+  max_searches: 20

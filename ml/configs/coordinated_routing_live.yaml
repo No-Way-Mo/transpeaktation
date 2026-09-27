@@ -1,6 +1,7 @@
 # Deployed coordinator, LIVE input (ml/deploy/coordination_do.sh): customer requests pull the congestion map the
 # forecaster writes to Tiger prediction_metrics (+ Mongo forecast_runs) from Tiger traffic_metrics and Mongo
-# closures/events (forecast/live.py, coordination/live.py). Heuristic load balancer; batch (CP-SAT) per request.
+# closures/events (forecast/live.py, coordination/live.py). Adaptive load balancer (heuristic + PPO under predicted
+# congestion, wider candidate search); heuristic / batch (CP-SAT) per request.
 # The forecaster was trained on synthetic SUMO traffic only. Settings are POC starting values, not tuned optima.
 name: coordinated_routing_live
 seed: 0
@@ -17,9 +18,9 @@ forecast:
   max_issue_age_min: 45            # ingest lags ~10-25 min; the map is issued at the newest complete bucket
 candidates:
   k: 5
-  max_searches: 12
-  detour_abs_s: 180
-  detour_rel: 0.15
+  max_searches: 20              # wider search (fireworks backtests: +4-17 points for every policy under load)
+  detour_abs_s: 300
+  detour_rel: 0.25
 ledger:
   bin_min: 5
   spread: [1.0]
@@ -30,11 +31,15 @@ batch:
   max_requests: 32
   max_wait_ms: 250
   solve_ms: 250
+rl:
+  k: 5
+  checkpoint: data/coordination/rl/runs_async/appo_async_s0/latest   # PPO v2 (async, 500k decisions)
+  device: cpu
 service:
   host: 0.0.0.0                     # token required (COORDINATION_API_TOKEN); firewall limits who can connect
   port: 8100
-  selector: heuristic
-  allowed_selectors: [forecast_only, heuristic, batch]
+  selector: adaptive            # heuristic; PPO (rl.checkpoint) when the fastest route is predicted congested
+  allowed_selectors: [forecast_only, heuristic, adaptive, batch]
 live:
   forecast_url: http://127.0.0.1:8200
   state_dir: /var/lib/transpeaktation/coordination
