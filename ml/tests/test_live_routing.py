@@ -88,6 +88,7 @@ class TestLiveInputs(unittest.TestCase):
         self.assertNotIn("street_closures:1", keep)                  # steady for days: closure table only
         self.assertIn("street_closures:2", keep)
         self.assertIn("caltrans_lane_closures:3", keep)
+        self.assertEqual(flive.event_case_nums(list(cases.values()), lo, hi, max_cases=1), ["street_closures:2"])
 
 
 class FakeForecaster:

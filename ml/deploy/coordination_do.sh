@@ -112,6 +112,8 @@ User=coordination
 WorkingDirectory=/opt/transpeaktation/coord
 EnvironmentFile=/etc/transpeaktation/coordination.env
 Environment=PYTHONPATH=/opt/transpeaktation/coord OMP_NUM_THREADS=1
+# ProtectHome hides ~/.postgresql: libpq would fail on "permission denied" instead of skipping the client cert
+Environment=PGSSLCERT=/nonexistent/postgresql.crt PGSSLKEY=/nonexistent/postgresql.key
 ExecStart=\$V -m coordination serve --config $CONFIG --input $INPUT
 StateDirectory=transpeaktation/coordination
 Restart=always

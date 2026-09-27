@@ -153,18 +153,26 @@ def build_cases(incidents: list[dict], events: list[dict], issue: float, lo: flo
     return cases
 
 
-def event_case_nums(cases: list[dict], lo: float, hi: float, margin_s: float = 3600.0) -> list[str]:
-    """Cases for the model's event context: public events, and closures that begin or end within `margin_s` of the
-    history + horizon window. A closure active throughout (e.g. weeks of construction) is already in the observed
-    traffic, the `closed` flags and the closure-cover input; as event context its time features would be clipped
-    constants, and hundreds of them (training runs had ~10 cases) cost ~35 s per forecast. Every case still reaches
-    the closure table (availability, routing legality)."""
-    keep = []
+MAX_EVENT_CASES = 24
+
+
+def event_case_nums(cases: list[dict], lo: float, hi: float, margin_s: float = 3600.0,
+                    max_cases: int = MAX_EVENT_CASES) -> list[str]:
+    """Cases for the model's event context: public events and closures that begin or end within `margin_s` of the
+    history + horizon window, at most `max_cases` (public events first, then the closest in time to the window).
+    A closure active throughout (e.g. weeks of construction) is already in the observed traffic, the `closed` flags
+    and the closure-cover input; as event context its time features would be clipped constants. Each case expands
+    to every road within 3 km: training runs had ~10 cases, a Friday night in SF has ~150 candidates (~1M
+    case-road pairs, > 3.5 GB in the model, 35 s). Every case still reaches the closure table (availability,
+    routing legality)."""
+    ranked = []
     for c in cases:
         edges = [_epoch(x) for r in c["restrictions"] for x in (r["begin"], r["end"])]
-        if c["kind"] == "public_event" or any(lo - margin_s <= t <= hi + margin_s for t in edges):
-            keep.append(c["case_num"])
-    return keep
+        edges += [_epoch(c[k]) for k in ("public_start", "public_end") if c.get(k)]
+        gap = min((0.0 if lo <= t <= hi else min(abs(t - lo), abs(t - hi)) for t in edges), default=float("inf"))
+        if c["kind"] == "public_event" or gap <= margin_s:
+            ranked.append((c["kind"] != "public_event", gap, c["case_num"]))
+    return [n for _, _, n in sorted(ranked)[:max_cases]]
 
 
 def mark_closed(hist: pd.DataFrame, cases: list[dict], model_ids, starts: np.ndarray) -> pd.DataFrame:
