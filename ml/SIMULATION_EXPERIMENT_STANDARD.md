@@ -136,3 +136,53 @@ this standard before any number is quoted as a result.** The configs in `ml/conf
 
 Expect longer runtimes and unfinished cars without teleports: gridlock can persist to the horizon, which is what
 the fixed-horizon metrics are for.
+
+## 10. The demo experiment (`demo/index.html`, act 2)
+
+The exact experiment behind the demo video's second half, so it can be reproduced or re-run under this standard.
+
+> **Not yet compliant with Rule 0**: it was run with `time_to_teleport_s: 300`. Re-run with `-1` (both arms)
+> before quoting its numbers as a result, and re-export the demo data.
+
+**Scenario** (`eventsim/fireworks_demo.py build`, batch `b6_fireworks`, run `b6_fireworks_n6000_all_s0_event`,
+`trips.rou.xml` sha256 `e68d0e68f2c2936c…`):
+
+| | |
+|---|---|
+| Date / clock | Saturday 2026-07-04, America/Los_Angeles. SUMO from 20:00 (history hour, empty network), decisions 21:00-22:45, horizon 01:00 (drain 8,100 s) |
+| App users | 1,000, `demo/sumo/kit.py scenario --version 3 --seed 42` reproduced exactly: 25% drive home -> one of 7 viewing sites 21:00-21:30, 75% leave a site 21:45-22:45 for one of 10 home areas |
+| Crowd | 6,000 cars (assumed size), same `exodus` draw sequence (seed 42): parked on open non-freeway streets <= 400 m from the 7 sites (56-164 streets per site on net_v3), leaving 21:45-22:45 for the 10 home areas |
+| Everyone on the app | `_all` run: crowd cars are vType `car`, so all 7,000 cars are participants (participation 1.0, compliance 1.0) |
+| Other traffic / closures | none (as in the demo's original run); Golden Gate Bridge closure not modelled |
+| Event context | PredictHQ "Fourth of July fireworks on Golden Gate Bridge", 300,000 expected attendance, show 21:30-21:45 |
+| Network / forecaster | `net_v3` (`net_c90.net.xml`, network version `net_v3-eb5d68e9cb9b`), `event_patch_v2_main` (sha256 `45e075b4befa7d5e…`) |
+| SUMO | 1.27.1, libsumo, step 1 s, simulation seed offset 0, background rerouting off, **teleport 300 s (non-compliant)** |
+
+**Arms** (candidate search **wide**: detour <= min(300 s, 25%), 20 searches, K = 5):
+
+| Arm | Config | Experiment id (3-seed backtest) | Seed-0 replay episode | Vehicle-hours | Home by 01:00 | On road at 01:00 | Teleports |
+|---|---|---|---|---|---|---|---|
+| Baseline `forecast_only` (fastest route for everyone) | `configs/coordinated_routing_fireworks_wide.yaml` | `heldout_coordinated_routing_fireworks_wide_p100_c100_4f97bf41ea` | `…fireworks_wide_p100_c100_forecast_only/…_ep0_3533` | 7,367.3 | 6,480 | 520 | 2,025 |
+| `rl_ppo` = PPO v2 (`appo_async_s0/latest`, `appo.pt` sha256 `32d09bb8546f0e7d…`) | `configs/coordinated_routing_fireworks_rl_wide.yaml` | `heldout_coordinated_routing_fireworks_rl_wide_p100_c100_e06fd00c01` | `…fireworks_rl_wide_p100_c100_rl_ppo/…_ep0_3529` | 3,295.0 (-55.3%) | 6,881 | 119 | 324 |
+
+3-seed means for the same scenario (6,000 crowd, everyone on the app): PPO wide -54.6% vehicle-hours vs baseline;
+heuristic lam 500 wide -36.4%; adaptive -36.9% (`reports/fireworks_*`).
+
+**Replay and export** (demo data made on 2026-09-27):
+
+1. Replays of the seed-0 episodes with `keep_outputs: true`, `TP_FCD_PERIOD_S=1`, `TP_FCD_PREFIX=user-`, from the
+   saved warm state (`simcache`-style cache of `fireworks_wide`); both reproduced their saved runs exactly
+   (vehicle-hours, unfinished, teleports). S3: `results/b6_fireworks/replay/episodes/`.
+2. `python -m coordination.demo_replay --baseline <forecast_only episode> --coordinated <rl_ppo episode> --label ml:ppo_v2_wide --out ours.js`
+3. Act 1 is **not** ours: it is the demo's original run `fireworks-exodus-6k-placeholder-20260927T020939Z` (the
+   demo's own OSM network, no teleports, 2,504 of 7,000 home by 01:00), kept byte for byte.
+   `python -m coordination.demo_combine <original demo/baseline.data.js> ours.js demo/baseline.data.js` keeps it as
+   the `baseline` variant, adds our PPO run as `ml`, our same-setup baseline as `ml_reference` (used by act 2's
+   captions, dashed chart line and footnote), appends our road shapes and repeats our 5-min road frames per minute.
+   Result: `demo/baseline.data.js` sha256 `0984e14507f3a624…`, 15.5 MB.
+4. `node demo/check.mjs` (waiting totals/p95 allow <= 1 s per rider: FCD `waiting` vs tripinfo `waitingTime`
+   differ by one second per stop for TraCI-inserted or teleported cars) and a headless-browser check.
+
+**What the demo may claim**: under the act-2 setup, the fastest route for everyone gets 6,480 of 7,000 cars home by
+01:00 and PPO v2 with the wider search 6,881 (average trip 54 -> 26 min). It may **not** claim 2,504 -> 6,881 (act 1
+is a different simulation setup). Numbers become results only after the Rule 0 re-run.
