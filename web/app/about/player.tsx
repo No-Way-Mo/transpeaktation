@@ -6,7 +6,6 @@ import { Icon } from '../parts.tsx';
 // It is a live canvas animation, not a video file, so this drives the `window.player` hooks it exposes (same origin).
 type Demo = { ready: boolean; total: number; t: number; paused: boolean; play(): void; pause(): void; seek(t: number): void };
 const POSTER = 57; // the end card: logo, "by YoWayMo", tagline
-// &v=2 skips copies browsers cached under the route's old 1-hour max-age (before window.player.ready existed).
 const clock = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
 
 export function Player({ title }: { title: string }) {
@@ -52,7 +51,7 @@ export function Player({ title }: { title: string }) {
   return (
     <figure className="framed wide">
       <div className={`framed-box player${started ? '' : ' poster'}${playing ? ' playing' : ''}`} ref={box}>
-        <iframe ref={frame} src={`/demo/index.html?t=${POSTER}&paused&v=2`} title={title} tabIndex={-1} />
+        <iframe ref={frame} src={`/about/demo/index.html?t=${POSTER}&paused`} title={title} tabIndex={-1} />
         <button className="player-hit" onClick={toggle} aria-label={waiting ? 'Loading' : playing ? 'Pause' : 'Play'} aria-busy={waiting}>
           {!playing && <span className={`player-big${waiting ? ' loading' : ''}`}><Icon name="play" size={34} /></span>}
         </button>

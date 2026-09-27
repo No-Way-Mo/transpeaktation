@@ -1,7 +1,8 @@
 import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 
-// Serves the standalone demo (../demo) so /about can embed it without a copy in public/.
+// Serves the standalone demo (../demo) at /about/demo/* so /about can embed it without a copy in public/.
+// Not /demo/*: the droplet's Caddy serves a hand-copied (stale) demo there, ahead of Next.
 // Only these files: the rest of demo/ (SUMO kit, notes) stays private.
 const FILES: Record<string, string> = {
   'index.html': 'text/html; charset=utf-8',
@@ -10,7 +11,7 @@ const FILES: Record<string, string> = {
 };
 
 // no-cache + ETag: the browser revalidates every load (a 304 when unchanged), so an edited demo is never stale.
-export async function GET(req: Request, ctx: RouteContext<'/demo/[file]'>) {
+export async function GET(req: Request, ctx: RouteContext<'/about/demo/[file]'>) {
   const { file } = await ctx.params;
   const type = FILES[file];
   if (!type) return new Response('Not found', { status: 404 });
