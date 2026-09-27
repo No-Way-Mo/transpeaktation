@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyTheme, applyThemePref, otherTheme, parseTheme, readTheme, readThemePref, resolveTheme, THEME_KEY, THEME_SCRIPT, type Theme } from './theme.ts';
+import { applyTheme, applyThemePref, baseOf, otherTheme, parseTheme, readTheme, readThemePref, resolveTheme, THEME_KEY, THEME_SCRIPT, type Theme } from './theme.ts';
 
 /** In-memory localStorage; `broken` throws like a blocked / private-mode store. */
 function store(init: Record<string, string> = {}, broken = false) {
@@ -95,4 +95,17 @@ test('System with blocked storage: applies the OS theme and does not throw', () 
   assert.doesNotThrow(() => applyThemePref('system', html, s, true));
   assert.equal(html.theme, 'dark');
   assert.equal(readThemePref(s), 'system');
+});
+
+test('Pride: a saved pick like Light / Dark, applied before paint, on the light basemap', () => {
+  const s = { ...store(), removeItem(k: string) { s.m.delete(k); } }, html = root();
+  assert.equal(parseTheme('pride'), 'pride');
+  applyThemePref('pride', html, s, true);            // beats a dark OS
+  assert.equal(html.theme, 'pride');
+  assert.equal(readThemePref(s), 'pride');
+  assert.equal(bootScript(s, true), 'pride');
+  assert.equal(baseOf('pride'), 'light');
+  assert.equal(baseOf('dark'), 'dark');
+  applyThemePref('system', html, s, true);
+  assert.equal(bootScript(s, true), 'dark');
 });

@@ -147,6 +147,8 @@ export const legendOpacity = (rel: number, routeActive: boolean): number =>
 
 // Our palette, low -> very high. Deliberately no red / amber: this is event activity, not traffic.
 export const ACTIVITY_PALETTE = ['#d9ed92', '#b5e48c', '#99d98c', '#76c893', '#52b69a', '#34a0a4', '#168aad', '#1a759f', '#1e6091', '#184e77'] as const;
+/** Pride theme: the flag, low -> high (violet at the quiet edges, red at the busiest core). */
+export const PRIDE_ACTIVITY_PALETTE = ['#732982', '#24408e', '#008026', '#ffed00', '#ff8c00', '#e40303'] as const;
 
 /** Where the camera goes when a pin is clicked (relative zoom): close enough that its neighbours show, never out. */
 export const focusRel = (rel: number): number => Math.max(rel, 2);
