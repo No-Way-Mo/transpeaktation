@@ -62,6 +62,8 @@
   --compass-n: #D9454F;
   /* Esri light-grey basemap, washed toward the meadow end so roads/water pick up the palette. */
   --map-tint: sepia(0.28) hue-rotate(58deg) saturate(1.25) brightness(1.01);
+  /* Water, repainted over the basemap on its own untinted pane (app/map-view.tsx, lib/water.ts). */
+  --map-water: #9DD5E5;
 
   --shadow: 0 2px 10px rgba(16, 41, 61, 0.08), 0 8px 28px rgba(16, 41, 61, 0.1);
   --shadow-sm: 0 1px 3px rgba(16, 41, 61, 0.1), 0 4px 12px rgba(16, 41, 61, 0.08);
@@ -128,6 +130,7 @@
   --ev-other: #6B8196;
   /* Esri dark-grey basemap pushed toward #184e77 navy. */
   --map-tint: sepia(0.5) hue-rotate(168deg) saturate(1.7) brightness(0.92);
+  --map-water: #184E77;
 
   --shadow: 0 2px 10px rgba(0, 0, 0, 0.35), 0 10px 32px rgba(0, 0, 0, 0.4);
   --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4), 0 4px 14px rgba(0, 0, 0, 0.35);
@@ -145,7 +148,8 @@ input::placeholder { color: var(--muted); }
 
 .map { position: absolute; inset: 0; z-index: 0; }
 .leaflet-container { background: var(--canvas); font-family: var(--sans); }
-/* ponytail: CSS-filter tint over the grey Esri tiles (GPU, cheap); swap for a styled vector basemap if we need exact hues. */
+/* ponytail: CSS-filter tint over the grey Esri tiles (GPU, cheap); swap for a styled vector basemap if we need exact hues.
+   Water sits on its own 'water' pane outside this filter, so it keeps its exact --map-water. */
 .leaflet-tile-pane { filter: var(--map-tint); }
 .map[data-style='satellite'] .leaflet-tile-pane { filter: none; } /* photos keep their real colours */
 .leaflet-control-attribution { background: var(--sheet-bg) !important; color: var(--muted) !important; font-size: 10px !important; }
