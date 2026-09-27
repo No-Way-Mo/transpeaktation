@@ -16,6 +16,7 @@ export type SnapState = {
   routeEventIds: ReadonlySet<string>; // events on the selected route: shown at every zoom
   routeActive: boolean;
   theme: Theme;
+  decorate?: (ev: MapEvent, card: HTMLElement) => void; // adds a community event's extras (and host controls) to its card
 };
 
 const PANE = 'snap-activity';      // between tiles (200) and route lines (400): heat never covers a route
@@ -205,16 +206,26 @@ export class SnapMapLayers {
     for (const [id, m] of this.pins) if (!keep.has(id)) { m.remove(); this.pins.delete(id); }
   }
 
+  /** Bring one event into view from outside the map (a host's "View on map"): selected, so it shows at any zoom,
+   *  its card open and one pulse around the pin. False if it isn't among the events drawn. */
+  focus(id: string): boolean {
+    if (!this.byId.has(id)) return false;
+    this.select(id, true);
+    return true;
+  }
+
   /** Click a pin: keep it selected, glide in, then show its details. Its neighbours appear as the zoom passes
    *  their thresholds on the way in, not all at once. */
-  private select(id: string) {
+  private select(id: string, pulse = false) {
     const ev = this.byId.get(id);
     if (!ev) return;
     this.selected = id;
     const target = this.map.getZoom() + focusRel(this.rel()) - this.rel();
     const open = () => {
       this.drawPins();
-      this.pins.get(id)?.bindPopup(() => eventCard(ev), { className: 'event-pop', closeButton: false, offset: [0, -8], autoPan: true }).openPopup();
+      const m = this.pins.get(id);
+      m?.bindPopup(() => eventCard(ev, this.state?.decorate), { className: 'event-pop', closeButton: false, offset: [0, -8], autoPan: true }).openPopup();
+      if (pulse) pulseOnce(m?.getElement()?.firstElementChild);
     };
     if (this.map.getZoom() >= target && this.map.getBounds().pad(-0.2).contains([ev.lat, ev.lon])) return open();
     this.map.once('moveend', open);
@@ -229,13 +240,23 @@ export class SnapMapLayers {
   }
 }
 
+/** One ring pulse around a pin (CSS .pulse, none with reduced motion), then the class is dropped. */
+export function pulseOnce(el: Element | null | undefined) {
+  if (!el) return;
+  el.classList.remove('pulse');
+  void (el as HTMLElement).offsetWidth; // restart the animation if it was mid-pulse
+  el.classList.add('pulse');
+  el.addEventListener('animationend', () => el.classList.remove('pulse'), { once: true });
+}
+
 /** Only real fields: name, category, venue / street, SF time, closure extent, source. No crowd or delay numbers. */
-function eventCard(ev: MapEvent): HTMLElement {
+function eventCard(ev: MapEvent, decorate?: SnapState['decorate']): HTMLElement {
   const box = document.createElement('div');
   const blocks = new Set(ev.road_closure_ids ?? []).size;
-  const source = ev.source === 'predicthq' ? 'PredictHQ' : ev.source === 'street_closures' ? 'DataSF street closures' : ev.source;
+  const source = ev.source === 'predicthq' ? 'PredictHQ' : ev.source === 'street_closures' ? 'DataSF street closures'
+    : ev.source === 'community' ? 'added by its host' : ev.source;
   const lines: [string, string | null][] = [
-    ['cat', fmtCategory(ev.category) || null],
+    ['cat', (ev.source === 'community' ? EVENT_KINDS[eventKind(ev)].label : fmtCategory(ev.category)) || null], // a host picked the kind
     ['name', ev.name],
     ['sub', ev.venue],
     ['sub', fmtEventTime(ev)],
@@ -248,5 +269,6 @@ function eventCard(ev: MapEvent): HTMLElement {
     line.className = cls;
     line.textContent = text;
   }
+  decorate?.(ev, box);
   return box;
 }

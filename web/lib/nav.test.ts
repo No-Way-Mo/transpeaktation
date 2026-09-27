@@ -18,8 +18,8 @@ test('only one panel at a time: a menu page or Settings replaces the menu', () =
 
 test('menu entries, in order, with the two dividers', () => {
   assert.deepEqual(MENU.map(m => m?.label ?? '---'),
-    ['Saved Places', 'Trip History', '---', 'Settings', 'Help & Feedback', '---', 'About us']);
-  const ids = MENU.flatMap(m => m && !('href' in m) ? [m.id] : []);
+    ['Saved Places', 'Saved Events', 'Trip History', '---', 'Add Event', 'My Events', '---', 'Settings', 'Help & Feedback', '---', 'About us']);
+  const ids = MENU.flatMap(m => m && !('href' in m) && !('host' in m) ? [m.id] : []);
   assert.deepEqual(ids.map(id => open(id).panel), ids); // every panel entry opens its own page
   assert.deepEqual(MENU.flatMap(m => m && 'href' in m ? [m.href] : []), ['/about']); // About us: the /about page (new tab)
   assert.ok(!MENU.some(m => m && /account|profile|sign in|avatar/i.test(m.label)));
@@ -31,4 +31,14 @@ test('settings sections and where Settings opens', () => {
   assert.deepEqual(open('settings', null, false), { panel: 'settings', section: null });       // phone: the section list
   assert.deepEqual(open('settings', 'privacy', false), { panel: 'settings', section: 'privacy' }); // route card's trace strip
   assert.equal(open('help', 'privacy').section, null); // sections only mean something in Settings
+});
+
+test('community section: Add Event (emphasised, +) and My Events open hosting views, not menu pages', () => {
+  const host = MENU.flatMap(m => m && 'host' in m ? [m] : []);
+  assert.deepEqual(host.map(m => [m.id, m.label, m.icon, !!m.accent]),
+    [['savedEvents', 'Saved Events', 'bookmark', false], ['addEvent', 'Add Event', 'plus', true], ['myEvents', 'My Events', 'calendar', false]]);
+  assert.equal(MENU[MENU.findIndex(m => m?.id === 'saved') + 1]?.id, 'savedEvents'); // right under Saved Places
+  const i = MENU.findIndex(m => m?.id === 'addEvent');
+  assert.equal(MENU[i - 1], null);   // its own section, between Trip History...
+  assert.equal(MENU[i + 2], null);   // ...and Settings
 });

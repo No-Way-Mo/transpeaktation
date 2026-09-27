@@ -16,11 +16,24 @@ export const SECTIONS: { id: Section; label: string }[] = [
   { id: 'notifications', label: 'Notifications' },
 ];
 
-/** ☰ menu entries in order; `null` = divider. An entry with `href` is a link (opens in a new tab), not a panel. */
-type MenuIcon = 'star' | 'history' | 'settings' | 'help' | 'info';
-export const MENU: ({ id: Panel; label: string; icon: MenuIcon } | { id: string; label: string; icon: MenuIcon; href: string } | null)[] = [
+/** Community events (app/host.tsx): Add Event, My Events (hosted in this browser) and Saved Events (saved in this
+ *  browser) open over the map, not as menu pages. */
+export type HostAction = 'addEvent' | 'myEvents' | 'savedEvents';
+
+/** ☰ menu entries in order; `null` = divider. An entry with `href` is a link (opens in a new tab), one with `host` a
+ *  hosting view (`accent` = the slightly emphasised Add Event), any other a panel. */
+type MenuIcon = 'star' | 'history' | 'settings' | 'help' | 'info' | 'plus' | 'calendar' | 'bookmark';
+export type MenuEntry =
+  | { id: Panel; label: string; icon: MenuIcon }
+  | { id: string; label: string; icon: MenuIcon; href: string }
+  | { id: HostAction; label: string; icon: MenuIcon; host: true; accent?: boolean };
+export const MENU: (MenuEntry | null)[] = [
   { id: 'saved', label: 'Saved Places', icon: 'star' },
+  { id: 'savedEvents', label: 'Saved Events', icon: 'bookmark', host: true },
   { id: 'history', label: 'Trip History', icon: 'history' },
+  null,
+  { id: 'addEvent', label: 'Add Event', icon: 'plus', host: true, accent: true },
+  { id: 'myEvents', label: 'My Events', icon: 'calendar', host: true },
   null,
   { id: 'settings', label: 'Settings', icon: 'settings' },
   { id: 'help', label: 'Help & Feedback', icon: 'help' },

@@ -9,6 +9,12 @@ export type MapEvent = {
   lat: number; lon: number; start_time: string; end_time: string | null;
   source: string; status: string | null;
   road_closure_ids: string[];      // road_incidents ids closed for this event
+  community?: CommunityInfo | null; // only on source "community" (hosted by a rider, contracts/community_event.md)
+};
+export type CommunityInfo = {
+  admission: 'free' | 'ticketed'; ticket_url: string | null; ticket_price: number | null;
+  description: string | null; image_url: string | null;
+  promotion: { status: 'none' };   // set only by the api, after a verified payment (not built yet)
 };
 export type RoadCondition = {
   id: string; kind: 'closure' | 'incident'; category: string | null; is_closure: boolean;
@@ -54,6 +60,17 @@ export function eventActive(e: MapEvent): Span | null {
   if (!Number.isFinite(from)) return null;
   return { from, to: Number.isFinite(end) ? end : from + DEFAULT_EVENT_MIN * 60_000 };
 }
+/** Map pins: an event stays on the map at time `t` (the map's time: now, or the chosen Leave at / Arrive by departure)
+ *  until its active interval ends, i.e. it's hidden once t >= end (no end time: the point-event rule above). Events
+ *  starting later in the fetched window still show (arriving crowds). Filtering only: nothing is deleted. */
+export function onMapAt(e: MapEvent, t: number): boolean {
+  const a = eventActive(e);
+  return !!a && t < a.to;
+}
+export const liveEvents = (events: MapEvent[], t: number): MapEvent[] => events.filter(e => onMapAt(e, t));
+/** Pins in "Leave now" mode are re-checked this often, so an event that ends while the map is open leaves it. */
+export const LIVE_RECHECK_MS = 60_000;
+
 /** event.start <= windowEnd && event.end >= windowStart, with the window = eventWindow(trip). */
 export function eventInTime(e: MapEvent, trip: Span): boolean {
   const a = eventActive(e);
@@ -186,7 +203,7 @@ export const eventGlyph = (k: EventKind) => `<svg viewBox="0 0 24 24" aria-hidde
 const KIND_BY_CATEGORY: Record<string, EventKind> = {
   concert: 'music', concerts: 'music', music: 'music', performing_arts: 'music',
   sports: 'sports', sport: 'sports', festival: 'festival', festivals: 'festival', community: 'community',
-  conference: 'conference', conferences: 'conference', expo: 'conference', expos: 'conference', parade: 'parade',
+  conference: 'conference', conferences: 'conference', expo: 'conference', expos: 'conference', parade: 'parade', market: 'market',
 };
 const KIND_BY_NAME: [EventKind, RegExp][] = [
   ['music', /\bmusic\b|concert|symphony|opera|\bjazz\b|\bdj\b/i],

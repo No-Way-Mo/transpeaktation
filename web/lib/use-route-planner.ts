@@ -19,7 +19,7 @@ export type Card = { i: number; tp: boolean; dur: number; leave: number; arrive:
 const NOW: When = { mode: 'now', at: 0 };
 
 /** Debounced place search. The latest text wins; slower, older responses are dropped. */
-function usePlaceSearch() {
+export function usePlaceSearch() {
   const [q, setQ] = useState('');
   const [results, setResults] = useState<Place[]>([]);
   const [searching, setSearching] = useState(false);
