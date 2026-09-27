@@ -27,7 +27,7 @@ load_dotenv(_API_DIR / ".env")  # api/.env; real env vars win
 # Local dev: reuse keys already in ingest/.env (e.g. its MAPBOX_TOKEN) instead of copying them. Never overrides.
 load_dotenv(_API_DIR.parent / "ingest" / ".env")
 
-from . import advice, ml, model, providers, rewards, voice
+from . import advice, coordination, ml, model, providers, rewards, voice
 from . import store as ingested  # map views (find_*); `store` below is the planner's Store
 from .segments import Segments
 from .store import Store
@@ -194,7 +194,8 @@ async def plan_trip(
     explanation and a better departure time. Logs the request to Mongo `trips` (no user identity) unless save=false;
     data.trip_record is exactly what was logged.
     Traffic by trip time: live (now), observed (past, replay), typical (future); see Store.traffic_at.
-    With ML_URL set, ml/ makes the decision (app/ml.py, contracts/route_decision.md); otherwise the heuristic."""
+    With COORDINATION_URL set, trips leaving now get ml/'s load-balanced route on its congestion map (app/coordination.py);
+    otherwise, with ML_URL set, ml/ makes the decision (app/ml.py, contracts/route_decision.md); else the heuristic."""
     a, b = lonlat(from_), lonlat(to)
     if depart_at and arrive_by:
         raise HTTPException(400, "pass depart_at or arrive_by, not both")
@@ -225,7 +226,24 @@ async def plan_trip(
     ctx = {"events": evs, "incidents": incidents or [], "traffic": traffic or [], "traffic_kind": traffic_kind,
            "predictions": predictions or [], "lengths": lengths, "names": names}  # names: for the card notes
     decision, decided_by = None, "heuristic"
-    if ml.url():
+    trip_id = uuid.uuid4().hex if save and not replay else None
+    coord = None
+    if coordination.url() and mode == "now" and not replay:
+        # a saved trip holds a short reservation under its trip_id; an unsaved one only previews (reserves nothing).
+        # Ends = the provider route's, already snapped onto a street (a venue or park centre can be > 75 m from one).
+        ends = [(p[1], p[0]) for p in (found[0]["coords"][0], found[0]["coords"][-1])] if found[0].get("coords") else [a, b]
+        coord, why = await coordination.recommend(state["http"], trip_id or uuid.uuid4().hex, *ends, reserve=bool(trip_id))
+        if coord:
+            # its time on the provider's scale: the provider's fastest ETA x (its pick / its own fastest), so the card
+            # shows the real cost of spreading riders, never a gap between two ETA methods
+            dur = round(min(r["dur"] for r in found) * coord["vs_fastest"])
+            found = [*found, {**coord["route"], "dur": dur}]
+            departs = [*departs, real_now]
+            decision = {"model": coord["model"], "dur": dur, "reasons": coord["reasons"], "best": len(found) - 1}
+            decided_by = f"ml:{coord['model']}"
+        else:
+            decided_by = f"heuristic (coordinator {why})"
+    if decision is None and ml.url():
         window = (t0 - timedelta(hours=1), t0 + timedelta(hours=1))
         demand = await asyncio.to_thread(store.trips_to, *b, *window)
         body = ml.request_body(at=t0, mode=mode, replay=replay, origin=a, destination=b, routes=found, departs=departs,
@@ -263,7 +281,7 @@ async def plan_trip(
     if logged:
         record = {
             # random, returned only to this client so it can report arrival; not linked to the rider
-            "trip_id": uuid.uuid4().hex, "arrived_at": None,
+            "trip_id": trip_id, "arrived_at": None,
             "requested_at": now, "source": "web", "mode": mode, "depart_at": departs[result["best"]],
             # ~100 m: enough for demand by area, without storing exact addresses
             "origin": {"lon": round(a[0], 3), "lat": round(a[1], 3)}, "destination": {"lon": round(b[0], 3), "lat": round(b[1], 3)},
@@ -273,6 +291,9 @@ async def plan_trip(
             # the picked route, so ml/ can count riders on the same roads at the same time; ponytail: 3 segments
             # (~1-3 blocks) cut off each end to keep exact addresses out, trim by metres if that's too coarse
             "road_segment_ids": (found[result["best"]].get("road_segment_ids") or [])[3:-3]}
+        if coord and coord["assignment"]:  # the load balancer's reservation for this trip (start / arrived act on it)
+            record["coordination"] = {"assignment_id": coord["assignment"]["assignment_id"], "model": coord["model"],
+                                      "forecast_issued_at": coord["forecast"]["issued_at"]}
         if offer := result["reward"]:  # what POST /trips/{id}/reward may accept
             record["reward_offer"] = {"route": offer["route"], "lamports": offer["lamports"],
                                       "expected_sec": round(best["dur"])}
@@ -296,16 +317,46 @@ async def plan_trip(
 TRIP_ID = PathParam(pattern="^[0-9a-f]{32}$", description="data.trip_record.trip_id from /plan")
 
 
+async def _coordinated(trip_id: str, op: str) -> dict:
+    """accept / cancel / complete the load balancer's reservation for a saved trip, if it has one."""
+    trip = await asyncio.to_thread(store.trip_coordination, trip_id)
+    if trip is None:
+        raise HTTPException(503, "trip store unavailable")
+    if trip == {}:
+        raise HTTPException(404, "unknown trip")
+    aid = (trip.get("coordination") or {}).get("assignment_id")
+    if not aid:
+        return {"coordination": "none (this trip was not load-balanced)"}
+    code, body = await coordination.act(state["http"], aid, op)
+    a = body.get("assignment") or {}
+    return {"coordination": a.get("status") if code == 200 else f"{op} refused: {body.get('error', code)}"}
+
+
+@app.post("/trips/{trip_id}/start")
+async def trip_start(trip_id: str = TRIP_ID,
+                     coordinated: bool = Query(True, description="true = the rider took the transPEAKtation route")):
+    """The rider set off. On the transPEAKtation route its reservation is confirmed, so the load balancer steers later
+    riders around it; on a normal route the reservation is released."""
+    return {"trip_id": trip_id, **await _coordinated(trip_id, "accept" if coordinated else "cancel")}
+
+
+@app.post("/trips/{trip_id}/cancel")
+async def trip_cancel(trip_id: str = TRIP_ID):
+    """The rider isn't taking this trip: its reservation (if any) is released."""
+    return {"trip_id": trip_id, **await _coordinated(trip_id, "cancel")}
+
+
 @app.post("/trips/{trip_id}/arrived")
 async def trip_arrived(trip_id: str = TRIP_ID):
-    """The rider reached the destination: sets the trip's arrived_at, so demand counts only riders still on the way."""
+    """The rider reached the destination: sets the trip's arrived_at, so demand counts only riders still on the way,
+    and releases the load balancer's reservation for it."""
     at = datetime.now(timezone.utc)
     n = await asyncio.to_thread(store.mark_arrived, trip_id, at)
     if n is None:
         raise HTTPException(503, "trip store unavailable")
     if not n:
         raise HTTPException(404, "unknown trip or already arrived")
-    return {"trip_id": trip_id, "arrived_at": at.isoformat()}
+    return {"trip_id": trip_id, "arrived_at": at.isoformat(), **await _coordinated(trip_id, "complete")}
 
 
 class RewardClaim(BaseModel):
@@ -499,4 +550,5 @@ def health():
     else:
         mapbox = "ready" if providers.mapbox_available() else "backing off after an error"
     return {"ok": True, "mapbox": mapbox, "road_graph": segments.status, **store.status(),
+            "coordination": "configured" if coordination.url() else "not configured (ML_URL / heuristic decide)",
             "voice": "ready" if voice.available() else "no ELEVENLABS_API_KEY", "rewards": rewards.status()}
