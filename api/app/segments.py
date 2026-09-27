@@ -66,6 +66,19 @@ class Segments:
                 out[sid] = name
         return out
 
+    def route_geometry(self, coords: list[list[float]], segment_ids: list[str]) -> tuple[list, list] | None:
+        """For turn-by-turn on a route given as segments + line (app/directions.py): the line's points in the graph's
+        metres, and the node where each segment meets the next. None without a graph or for an unknown segment."""
+        g = self.graph
+        if g is None or len(coords) < 2:
+            return None
+        try:
+            joints = [(g.nodes[int(s.split("-")[0])]["x"], g.nodes[int(s.split("-")[0])]["y"]) for s in segment_ids[1:]]
+        except (ValueError, KeyError, IndexError):
+            return None
+        pts, _ = ox.projection.project_geometry(MultiPoint([(lon, lat) for lat, lon in coords]), to_crs=g.graph["crs"])
+        return [(q.x, q.y) for q in pts.geoms], joints
+
     def match(self, coords: list[list[float]]) -> list[str] | None:
         """coords: [[lat, lon], ...] along the route. Returns edge IDs in driving order, or None if no graph."""
         g = self.graph

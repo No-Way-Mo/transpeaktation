@@ -599,6 +599,18 @@ class PlanEndpoint(unittest.TestCase):
         self.assertIn("spread", body["plan"]["note"])
         self.assertEqual(store.trips[0]["coordination"]["assignment_id"], "a1b2")
 
+    def test_load_balancer_route_gets_turn_by_turn(self):
+        geo = ([(0, 0), (1500, -1000)], [])                          # its 2-point line in metres, no inner joints
+        lb = {**self.LB, "recommended": {**self.LB["recommended"], "road_segment_ids": ["1-2-0"]}}
+        with mock.patch.object(main.segments, "route_geometry", return_value=geo),                 mock.patch.object(main.segments, "names", return_value={"1-2-0": "Howard Street"}):
+            body, _, _, _ = self.coord_plan(lb)
+        steps = body["routes"][2]["steps"]
+        self.assertEqual([(s["maneuver"]["type"], s["name"]) for s in steps], [("depart", "Howard Street"), ("arrive", "")])
+        self.assertEqual(round(steps[0]["duration"]), body["plan"]["preds"][2]["dur"])   # the card's time
+        with mock.patch.object(main.segments, "route_geometry", return_value=None):  # no road graph yet: none
+            body, _, _, _ = self.coord_plan(lb)
+        self.assertEqual(body["routes"][2]["steps"], [])
+
     def test_unsaved_trip_only_previews(self):
         body, sent, store, _ = self.coord_plan({**self.LB, "outcome": "preview", "assignment": None}, save=False)
         self.assertFalse(json.loads(sent[0].content)["reserve"])

@@ -72,7 +72,7 @@ def parse(data: dict) -> dict:
     route = {
         "dur": dur, "forecast_eta_sec": dur, "dur_typical": None, "dist": float(rec["distance_m"]), "summary": "",
         "coords": [[lat, lon] for lon, lat in geo["coordinates"]],
-        "congestion": None, "steps": [],       # its exact roads have no turn list; web shows the line
+        "congestion": None, "steps": [],       # turn-by-turn built in /plan from its roads (app/directions.py)
         "road_segment_ids": list(rec["road_segment_ids"]), "by": "ml",
     }
     a = data.get("assignment") or None
