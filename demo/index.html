@@ -1244,11 +1244,12 @@ const SIM = (() => {
   addEventListener('resize', fit);
   window.seek = t => { T = t; paused = true; render(T); };   // for scripted captures
   // The /about player (web/app/about/player.tsx) drives this from the parent page.
-  window.player = { total: TOTAL, get t() { return T; }, get paused() { return paused || T >= TOTAL; },
+  let running = false;   // the loop starts once fonts + map tiles are in (≤ 6 s)
+  window.player = { total: TOTAL, get ready() { return running; }, get t() { return T; }, get paused() { return paused || T >= TOTAL; },
     play() { if (T >= TOTAL) T = 0; paused = false; }, pause() { paused = true; }, seek: t => window.seek(t) };
   fit();
   const fonts = Promise.all(['500 16px "Instrument Sans"', 'italic 500 16px "Instrument Sans"', '600 16px "Instrument Sans"'].map(f => document.fonts.load(f)));
-  Promise.race([Promise.all([fonts, preloadTiles()]), new Promise(r => setTimeout(r, 6000))]).then(() => requestAnimationFrame(loop));
+  Promise.race([Promise.all([fonts, preloadTiles()]), new Promise(r => setTimeout(r, 6000))]).then(() => { running = true; requestAnimationFrame(loop); });
 })();
 </script>
 </body>
