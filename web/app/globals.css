@@ -515,8 +515,14 @@ input::placeholder { color: var(--muted); }
 .mob .chip { height: 36px; font-size: 15px; }
 .mob .seg button { height: 38px; font-size: 14px; }
 .mob .when-pop input { height: 44px; font-size: 17px; }
+.mob .reward-form input { height: 40px; font-size: 16px; }
+.wallet-addr { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.wallet-form { gap: 8px; font-size: 13px; }
 .mob .route-sec .label { padding: 0 4px; }
 .mob .label { font-size: 13px; padding: 0 4px 4px; }
+/* Route section headings: a step up from other labels; Recommended in the brand green. */
+.route-sec .label { font-size: 15px; }
+.route-sec .label.rec { font-weight: 700; color: var(--brand-text); }
 .mob .place { min-height: 56px; padding: 6px 8px; border-radius: 14px; }
 .mob .place .name { font-size: 17px; }
 .mob .place .sub { font-size: 14px; }
@@ -553,10 +559,12 @@ input::placeholder { color: var(--muted); }
 .turn .stack { gap: 3px; }
 .turn .sub { font-size: 15px; color: rgba(255, 255, 255, 0.85); }
 .turn-text { font-size: 21px; font-weight: 650; letter-spacing: -0.01em; line-height: 1.2; text-wrap: pretty; }
-.hint { flex: none; font-size: 12px; color: rgba(255, 255, 255, 0.85); }
+.hint { flex: none; font-size: 15px; font-weight: 600; color: rgba(255, 255, 255, 0.9); }
 .nav-bar { position: absolute; left: 0; right: 0; bottom: 0; z-index: 25; padding: 18px 20px calc(var(--safe-bottom) + 4px); border-radius: 16px 16px 0 0; background: var(--sheet-bg); backdrop-filter: blur(20px) saturate(1.6); -webkit-backdrop-filter: blur(20px) saturate(1.6); box-shadow: 0 -2px 20px rgba(0, 0, 0, 0.12); display: flex; align-items: center; gap: 16px; }
 .nav-stats { flex: 1; display: grid; grid-template-columns: repeat(3, auto); justify-content: space-between; gap: 12px; }
-.nav-stats b { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; line-height: 1; }
+.nav-stats b { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; line-height: 1; white-space: nowrap; }
+.nav-stats b small { font-size: 16px; font-weight: 600; letter-spacing: 0; }
+.nav-stats div { align-items: center; text-align: center; } /* each number centred over its label */
 .end { flex: none; height: 48px; padding: 0 22px; border-radius: 14px; background: var(--bad-fill); color: #FFFFFF; font-size: 17px; font-weight: 650; }
 /* "Arrived" (web; the iOS app marks it from GPS): its own row under the stats so the bar fits a 375px screen. */
 .nav-bar.two-row { flex-wrap: wrap; gap: 14px 12px; }
@@ -574,7 +582,6 @@ input::placeholder { color: var(--muted); }
 .clear-btn { flex: none; width: 20px; height: 20px; border-radius: 50%; background: var(--muted); color: var(--panel); display: flex; align-items: center; justify-content: center; padding: 0; }
 .list > .status { padding: 8px; font-size: 13px; }
 
-.smart-head { display: flex; align-items: center; gap: 8px; padding: 0 8px 2px; font-size: 13px; font-weight: 650; color: var(--brand-text); }
 .trip-note { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border-radius: 12px; background: var(--brand-tint); }
 .trip-note svg { flex: none; margin-top: 1px; }
 .trip-note span { font-size: 13px; line-height: 1.4; color: var(--brand-text); text-wrap: pretty; }

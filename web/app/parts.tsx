@@ -77,6 +77,7 @@ const ICONS = {
   help: 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0zM9.6 9.4a2.5 2.5 0 1 1 3.6 2.3c-.7.3-1.2 1-1.2 1.7v.4M12 17h.01',
   info: 'M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0zM12 11v6M12 7.5h.01',
   bell: 'M6 16v-5a6 6 0 0 1 12 0v5l2 2H4l2-2zM10 21h4',
+  wallet: 'M4 7a2 2 0 0 1 2-2h12v4M4 7v11a2 2 0 0 0 2 2h14V9H6a2 2 0 0 1-2-2zM16 14.5h.01',
 } as const;
 export type IconName = keyof typeof ICONS;
 
@@ -247,7 +248,7 @@ export function PlaceRow({ place, onPick, plain }: { place: Place; onPick(): voi
   );
 }
 
-/** The two route sections: transPEAKtation's event-aware pick, then the normal alternatives. `action` (e.g. a
+/** The two route sections: transPEAKtation's event-aware pick, then the regular alternatives. `action` (e.g. a
  *  Directions button) goes inside the selected card. */
 export function RouteList({ p, action }: { p: Planner; action?: ReactNode }) {
   if (!p.tp || !p.routes.length) return null;
@@ -255,8 +256,8 @@ export function RouteList({ p, action }: { p: Planner; action?: ReactNode }) {
   const fastest = p.routes[0].dur;
   return (
     <>
-      <section className="route-sec" aria-label="transPEAKtation route">
-        <div className="smart-head"><Logo size={15} stroke={3} /><span>transPEAKtation</span></div>
+      <section className="route-sec" aria-label="Recommended route">
+        <div className="label rec">Recommended</div>
         <RouteCard route={p.routes[best]} card={p.card(best, true)} when={p.when} tag={tag} tone="tp"
           bonus={p.rewardOffer ? `+${solText(p.rewardOffer.sol)}` : undefined}
           note={note} selected={p.choice.tp} onPick={() => p.setChoice({ i: best, tp: true })} as={as}>
@@ -264,8 +265,8 @@ export function RouteList({ p, action }: { p: Planner; action?: ReactNode }) {
         </RouteCard>
         {advice && <button className="pill-btn advice" onClick={p.applyAdvice}>{`Leave at ${fmtWhen(Date.parse(advice.depart_at))}`}</button>}
       </section>
-      <section className="route-sec" aria-label="Normal routes">
-        <div className="label">Normal</div>
+      <section className="route-sec" aria-label="Regular routes">
+        <div className="label">Regular</div>
         {p.routes.map((rt, i) => {
           if (rt.by === 'ml') return null; // ml/'s own route only appears as the transPEAKtation pick
           const pred = p.tp?.preds[i], longer = longerThanItLooks(pred), on = !p.choice.tp && p.choice.i === i;
