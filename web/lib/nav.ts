@@ -1,7 +1,7 @@
 // The logo menu, Settings and the menu's pages: which one is open. Only one at a time, so opening
 // any of them replaces whatever was open. Plain TS so `node --test` can run it; the React side is app/menu.tsx.
 
-export type Page = 'saved' | 'history' | 'help' | 'about';
+export type Page = 'saved' | 'history' | 'help';
 export type Section = 'appearance' | 'map' | 'privacy' | 'wallet' | 'notifications';
 export type Panel = 'menu' | 'settings' | Page;
 /** `section` = the open Settings section; null on a phone means the section list (stacked navigation). */
@@ -16,19 +16,20 @@ export const SECTIONS: { id: Section; label: string }[] = [
   { id: 'notifications', label: 'Notifications' },
 ];
 
-/** ☰ menu entries in order; `null` = divider. */
-export const MENU: ({ id: Panel; label: string; icon: 'star' | 'history' | 'settings' | 'help' | 'info' } | null)[] = [
+/** ☰ menu entries in order; `null` = divider. An entry with `href` is a link (opens in a new tab), not a panel. */
+type MenuIcon = 'star' | 'history' | 'settings' | 'help' | 'info';
+export const MENU: ({ id: Panel; label: string; icon: MenuIcon } | { id: string; label: string; icon: MenuIcon; href: string } | null)[] = [
   { id: 'saved', label: 'Saved Places', icon: 'star' },
   { id: 'history', label: 'Trip History', icon: 'history' },
   null,
   { id: 'settings', label: 'Settings', icon: 'settings' },
   { id: 'help', label: 'Help & Feedback', icon: 'help' },
   null,
-  { id: 'about', label: 'About transPEAKtation', icon: 'info' },
+  { id: 'about', label: 'About us', icon: 'info', href: '/about' },
 ];
 
 export const PAGE_TITLES: Record<Page, string> = {
-  saved: 'Saved Places', history: 'Trip History', help: 'Help & Feedback', about: 'About transPEAKtation',
+  saved: 'Saved Places', history: 'Trip History', help: 'Help & Feedback',
 };
 
 /** Open `panel` (closing anything else). Settings opens at `section`, or the first section on a wide screen. */
