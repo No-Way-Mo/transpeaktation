@@ -3,7 +3,6 @@ import { useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'rea
 import { fmtDist, fmtWhen, fromPtInput, longerThanItLooks, mins, ptInput, RECENT, REPLAY, routeTag, stepIcon, type Place, type Route, type Step, type When } from '@/lib/route.ts';
 import { EVENT_KINDS, eventKind, type EventKind, type MapEvent } from '@/lib/context.ts';
 import { eventGlyph } from './map-view.tsx';
-import { smartSuggestions } from '@/lib/suggest.ts';
 import type { Card, useRoutePlanner } from '@/lib/use-route-planner.ts';
 import { useVoice } from '@/lib/use-voice.ts';
 import { dataPath, planStale, traceLine, type Privacy, type Stop } from '@/lib/privacy.ts';
@@ -134,7 +133,7 @@ export function Compass({ onPress, movable, className = '' }: { onPress(): void;
   );
 }
 
-/** Recent places (empty query), or place results + transPEAKtation suggestions (typed query). */
+/** Recent places (empty query), or place results (typed query). */
 export function SearchResults({ p }: { p: Planner }) {
   const { q, results, searching } = p.search;
   if (!q.trim()) {
@@ -145,31 +144,13 @@ export function SearchResults({ p }: { p: Planner }) {
       </div>
     );
   }
-  const smart = smartSuggestions(q, results, p.events);
   return (
-    <>
-      <div className="list">
-        <div className="label">Suggestions</div>
-        {results.map(pl => <PlaceRow key={`${pl.lat},${pl.lon}`} place={pl} onPick={() => p.go(pl)} plain />)}
-        {searching && <div className="status">Searching…</div>}
-        {!searching && !results.length && <div className="status">No places found in San Francisco.</div>}
-      </div>
-      {smart.length > 0 && (
-        <div className="smart">
-          <div className="smart-head"><Logo size={15} stroke={3} /><span>transPEAKtation suggestions</span></div>
-          {smart.map(s => (
-            <button key={s.title} className="smart-card" onClick={() => p.go(s.dest, { note: s.note, leaveMin: s.leaveMin })}>
-              <span className="glyph"><Icon name={s.glyph} size={18} /></span>
-              <span className="stack grow">
-                <span className="smart-title">{s.title}</span>
-                <span className="smart-sub">{s.sub}</span>
-                <span className={`badge-pill${s.clear ? ' clear' : ''}`}>{s.badge}</span>
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
-    </>
+    <div className="list">
+      <div className="label">Suggestions</div>
+      {results.map(pl => <PlaceRow key={`${pl.lat},${pl.lon}`} place={pl} onPick={() => p.go(pl)} plain />)}
+      {searching && <div className="status">Searching…</div>}
+      {!searching && !results.length && <div className="status">No places found in San Francisco.</div>}
+    </div>
   );
 }
 

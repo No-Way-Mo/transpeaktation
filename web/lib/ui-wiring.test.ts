@@ -57,7 +57,7 @@ test('privacy switches keep their behaviour: voice hides the mic, the others sha
 test('map layers are wired to what the map draws', () => {
   assert.match(map, /const events = eventPins \? latest\.current\.events : undefined;/);
   assert.match(map, /if \(traffic\) for \(const run of trafficRuns\(r\)\)/);
-  assert.match(desktop, /\{prefs\.eventPins && <EventLegend /);
+  assert.match(desktop, /\{prefs\.eventPins && (MAP_EXPERIMENT !== 'snapmap' && )?<EventLegend /); // snapmap draws its own legend
 });
 
 test('notifications are a "Coming soon" note only: no permission prompt, no switch', () => {
