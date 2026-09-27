@@ -33,10 +33,42 @@ Try it at **[yowaymo.us](https://yowaymo.us)**, or watch the one-minute simulati
 
 ## How it works
 
-```
-data inputs     ──▶  ingest/     ──▶  MongoDB +   ──▶  ml/        ──▶  api/     ──▶  web/     ──▶  ios/
-events, roads,       normalize,       Tiger Data       forecast,       routes,       the app       iPhone
-traffic, maps        geocode          (stored)         balance         /plan                       shell
+```mermaid
+flowchart LR
+  subgraph IN["1. Data inputs"]
+    ES[Event sources]
+    CR[City + road data]
+    MD[Mobility data]
+    MB[Map / baseline routing]
+  end
+  subgraph ST["2. Ingestion + storage"]
+    IW[Ingestion workers]
+    TG[(Tiger Data)]
+    MG[(MongoDB Atlas)]
+  end
+  subgraph AI["3. Intelligence"]
+    EU[Event understanding]
+    FC[Traffic + demand forecast]
+    FO[Fleet optimizer]
+  end
+  subgraph ACT["4. Action"]
+    TP[Human trip planner]
+    VI[Voice → intent]
+    TX[Confirm → transaction]
+  end
+  subgraph OUT["5. Outputs + control"]
+    WA[Web app]
+    FD[Fleet dashboard]
+    TR[AI control / transparency]
+  end
+  ES & CR & MD & MB --> IW
+  IW --> TG & MG
+  TG & MG --> EU
+  EU --> FC --> FO
+  FO --> TP & VI
+  TP --> VI --> TX
+  TP --> WA
+  TP --> FD
 ```
 
 | Folder | What it is | Stack |
