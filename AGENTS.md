@@ -28,7 +28,7 @@ One owner per folder. Only edit another folder with its owner's OK.
 ## Data stores
 Mongo = long-lived entities / nested JSON. Tiger = time-series + fast-changing numbers. Both are empty; field names below are the join keys, keep them.
 
-**MongoDB Atlas**: org Designathon → project Transpeaktation → cluster `transpeaktation` (M0, AWS us-east-1) → db `transpeaktation`. Connect with `MONGODB_URI` (every `<folder>/.env.example`); setup + IP access: `README.md` step 3.
+**MongoDB Atlas**: org Designathon → project Transpeaktation → cluster `transpeaktation` (M0, AWS us-east-1) → db `transpeaktation`. Connect with `MONGODB_URI` (every `<folder>/.env.example`); setup + IP access: Team setup below.
 
 | Collection | Holds | Indexes |
 |---|---|---|
@@ -45,7 +45,7 @@ Mongo = long-lived entities / nested JSON. Tiger = time-series + fast-changing n
 | `road_incidents` | closures, permits, crashes, dispatch | `source+source_id` unique, `location` 2dsphere, `start_time+end_time`, `road_segment_ids` |
 | `forecast_runs` | one per congestion map (ml): `status` ready, exact `closures`, coverage, model identity (`contracts/congestion_map.md`) | `_id` = `model_version|issued_at` |
 
-**Tiger Data**: service `transPEAKtation` (`dp0coukufh`, us-east-1), db `tsdb`. Schema: `contracts/tiger_schema.sql` (idempotent). Connect with `TIGER_DATABASE_URL`; setup: `README.md` step 3. Apply schema: `psql "$TIGER_DATABASE_URL" -f contracts/tiger_schema.sql`.
+**Tiger Data**: service `transPEAKtation` (`dp0coukufh`, us-east-1), db `tsdb`. Schema: `contracts/tiger_schema.sql` (idempotent). Connect with `TIGER_DATABASE_URL`; setup: Team setup below. Apply schema: `psql "$TIGER_DATABASE_URL" -f contracts/tiger_schema.sql`.
 
 | Hypertable | One row per | Key columns |
 |---|---|---|
@@ -54,6 +54,10 @@ Mongo = long-lived entities / nested JSON. Tiger = time-series + fast-changing n
 | `demand_metrics` | zone × time | `trip_requests`, `available_vehicles`, `event_id` |
 | `prediction_metrics` | segment × time × model × issue time (congestion map, `contracts/congestion_map.md`) | `issued_at`, `predicted_travel_time_sec`, `predicted_speed_mph`, `predicted_congestion_ratio`, `availability`, `predicted_delay_sec`, `confidence` (NULL) |
 | `simulation_metrics` | run × segment × time | `avg_speed_mph`, `avg_delay_sec`, `throughput_vph` |
+
+**Team setup** (core team; outside contributors use their own databases, `README.md` → Set up secrets):
+1. **Database passwords.** Ask the team admin in a DM (not the group chat) for the MongoDB and Tiger Data passwords and replace both `<password>` placeholders in your `.env` files. Keep the double quotes around the URLs.
+2. **Get your IP allowed on MongoDB.** Atlas only accepts listed IPs. Send the admin the output of `curl -s https://checkip.amazonaws.com`. Admin: `atlas accessLists create <ip> --projectId 6ab779947130c8fd8f092be3`. (Tiger Data accepts any IP.)
 
 ## Traffic data normalization (raw feeds → `traffic_metrics`)
 Forecast models need one fixed road list, one unit, and one time step. Raw feeds (`ingest/data/timeseries/`) have none of these, so the ingestion worker enforces them before anything reaches Tiger:
