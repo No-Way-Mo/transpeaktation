@@ -89,6 +89,23 @@ export function AppBar({ n, className = '' }: { n: NavApi; className?: string })
   );
 }
 
+/** Phone: no menu bar, the map runs to the top edge. The same ☰ menu (state, popover, outside press / Esc, focus
+ *  return) from a floating round button top-left, styled like the map controls on the right. */
+export function MenuButton({ n }: { n: NavApi }) {
+  const wrap = useRef<HTMLDivElement>(null);
+  const on = n.nav.panel === 'menu';
+  useOutside(wrap, n.close, on);
+  return (
+    <div className="nav-wrap mob-menu" ref={wrap}>
+      <button className="layers-btn" data-nav-home aria-label="Open menu" title="Menu" aria-expanded={on} aria-haspopup="dialog"
+        onClick={() => n.toggle('menu')}>
+        <Icon name="menu" size={18} />
+      </button>
+      {on && <Popover label="Main menu" className="menu-pop"><MenuList n={n} /></Popover>}
+    </div>
+  );
+}
+
 function Popover({ label, className, children }: { label: string; className: string; children: ReactNode }) {
   const box = useRef<HTMLDivElement>(null);
   useFocusReturn();

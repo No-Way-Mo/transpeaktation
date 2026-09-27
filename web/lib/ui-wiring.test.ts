@@ -14,9 +14,11 @@ test('old standalone theme toggle and AI & privacy button are gone', () => {
   }
 });
 
-test('menu bar on top of both layouts, the app icon opens the menu; layers button on both maps; one dialog host each', () => {
+test('desktop: menu bar, the app icon opens the menu; phone: a floating ☰ opens the same menu; layers button on both maps; one dialog host each', () => {
   assert.match(desktop, /<div className="desk">\s*<AppBar n=\{n\} \/>/);
-  assert.match(mobile, /<AppBar n=\{n\} className="mob-bar" \/>/);
+  assert.match(mobile, /<MenuButton n=\{n\} \/>/);                                  // phone: floating ☰, no bar
+  assert.doesNotMatch(mobile, /<AppBar /);
+  assert.match(menu, /className="layers-btn" data-nav-home aria-label="Open menu"[\s\S]{0,200}?n\.toggle\('menu'\)/);
   assert.match(menu, /data-nav-home aria-label="Main menu"[\s\S]{0,200}?<Logo /);
   assert.doesNotMatch(desktop + mobile, /MainMenu|<Icon name="menu"/);
   assert.equal(count(desktop, /<MapLayers /g), 1);
