@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ESRI_PARK, ESRI_WATER, hexRgb, paintBasemap, parkAlpha, tone, toneLut, waterAlpha, type RGB } from './water.ts';
+import { ESRI_PARK, ESRI_WATER, hexRgb, majorRoads, paintBasemap, parkAlpha, tone, toneLut, waterAlpha, type RGB } from './water.ts';
 
 const hex = (h: string) => hexRgb(h)!;
 const alpha = (h: string, w: RGB) => waterAlpha(...hex(h), w);
@@ -51,10 +51,10 @@ const lum = ([r, g, b]: RGB) => (r + g + b) / 3;
 const near = (got: RGB, want: string, tol: number) => got.every((c, i) => Math.abs(c - hex(want)[i]) <= tol);
 
 test('tone curves are monotonic, so labels, edges and anti-aliasing keep their order', () => {
-  for (const [t, z] of [['light', 16], ['dark', 12], ['dark', 14], ['dark', 16]] as const) {
-    const lut = toneLut(t, z);
-    for (let v = 1; v < 256; v++) assert.ok(lut[v] >= lut[v - 1], `${t} z${z} at ${v}`);
-    assert.equal(lut[0], 0); assert.equal(lut[255], 255);
+  for (const [t, z, road] of [['light', 16, 'minor'], ['dark', 12, 'minor'], ['dark', 13, 'major'], ['dark', 14, 'minor'], ['dark', 16, 'major']] as const) {
+    const lut = toneLut(t, z, road), at = (v: number) => lum([lut[v * 3], lut[v * 3 + 1], lut[v * 3 + 2]]);
+    for (let v = 1; v < 256; v++) assert.ok(at(v) >= at(v - 1), `${t} z${z} at ${v}`);
+    assert.equal(at(0), 0); assert.equal(at(255), 255);
   }
 });
 
@@ -69,13 +69,29 @@ test('light: buildings cool grey < land < white roads; dark label text untouched
   assert.ok(bldg[2] > bldg[0]); // keeps its cool cast
 });
 
-test('dark: charcoal land < grey buildings < slate roads < labels, at every zoom band', () => {
-  for (const [z, land, bldg, road] of [[12, '#4E4E50', null, '#5F5F61'], [14, '#48484A', '#505052', '#5F5F61'], [16, '#48484A', '#505052', '#666668']] as const) {
-    const lut = toneLut('dark', z), t = (h: string) => tone(...hex(h), 'dark', lut);
-    const l = t(land), r = t(road), label = t('#828284');
-    assert.ok(near(l, '#202326', 5), `z${z} land ${l}`);
-    if (bldg) { const b = t(bldg); assert.ok(near(b, '#34393E', 5), `z${z} bldg ${b}`); assert.ok(lum(l) < lum(b) && lum(b) < lum(r)); }
-    assert.ok(lum(r) > 105 && lum(r) < 150, `z${z} road ${r}`);
-    assert.ok(lum(label) > lum(r) && r[2] > r[0]); // labels brightest; roads slate (cool)
+test('dark: charcoal land < subtle buildings < minor roads < major roads < labels, at every zoom band', () => {
+  // [zoom, land, building, road grey] sampled from the real tiles; z12 splits minor / major by brightness alone.
+  for (const [z, land, bldg, road] of [[12, '#4E4E50', null, '#5A5A5C'], [13, '#4E4E50', null, '#606062'], [14, '#48484A', '#515153', '#616163'], [16, '#48484A', '#515153', '#676769']] as const) {
+    const t = (h: string, c: 'minor' | 'major' = 'minor') => tone(...hex(h), 'dark', toneLut('dark', z, c));
+    const l = t(land), mn = t(road), mj = z === 12 ? t('#606062') : t(road, 'major'), label = t('#828284');
+    assert.ok(near(l, '#182126', 4), `z${z} land ${l}`);
+    if (bldg) { const b = t(bldg); assert.ok(near(b, '#29343A', 4), `z${z} bldg ${b}`); assert.ok(lum(l) < lum(b) && lum(b) < lum(mn)); }
+    assert.ok(near(mn, '#48555D', 4), `z${z} minor ${mn}`);
+    assert.ok(near(mj, '#75828A', 4), `z${z} major ${mj}`);
+    assert.ok(lum(label) > lum(mj) && mn[2] > mn[0]); // labels brightest; roads slate (cool)
   }
+});
+
+test('majorRoads: a wide road is major, a narrow street and its crossing are not', () => {
+  // 64×64 dark tile at z16: land, a 10 px avenue across (rows 20-29) and a 3 px street down (cols 40-42).
+  const w = 64, px = new Uint8ClampedArray(w * w * 4);
+  for (let y = 0; y < w; y++) for (let x = 0; x < w; x++) {
+    const v = (y >= 20 && y < 30) || (x >= 40 && x < 43) ? 0x67 : 0x48;
+    px.set([v, v, v, 255], (y * w + x) * 4);
+  }
+  const m = majorRoads(px, w, 16)!;
+  assert.equal(m[25 * w + 10], 1);  // avenue
+  assert.equal(m[50 * w + 41], 0);  // street, well away from the avenue
+  assert.equal(m[5 * w + 10], 0);   // land
+  assert.equal(majorRoads(px, w, 12), null); // z12: brightness splits them
 });
