@@ -6,7 +6,7 @@ import { useMapPrefs } from '@/lib/use-map-prefs.ts';
 import { usePosition } from '@/lib/use-position.ts';
 import { useRoutePlanner } from '@/lib/use-route-planner.ts';
 import MapView, { type MapHandle } from './map-view.tsx';
-import { AppBar, MapLayers, NavDialogs, useNav } from './menu.tsx';
+import { MapLayers, MenuButton, NavDialogs, useNav } from './menu.tsx';
 import { Compass, Endpoints, Icon, MicButton, PlaceRow, RouteList, SearchResults, TripNote, TurnIcon, WhenPicker, WhereTo } from './parts.tsx';
 import { RewardPanel } from './reward.tsx';
 
@@ -27,9 +27,9 @@ function useSheet(ceiling: { current: HTMLElement | null }, initial = 1) {
   const g = useRef<{ y0: number; h0: number; i0: number; y: number; t: number; v: number; on: boolean } | null>(null);
   const TOP = DETENTS.length - 1;
   // Room left under the from/to card if it's on screen (the card itself, not its open search dropdown), else under
-  // the menu bar, with an 8px gap.
+  // the floating ☰ button, with an 8px gap.
   const room = () => {
-    const over = ceiling.current?.querySelector('.endpoints') ?? root.current?.querySelector('.mob-bar');
+    const over = ceiling.current?.querySelector('.endpoints') ?? root.current?.querySelector('.mob-menu');
     return innerHeight - (over ? over.getBoundingClientRect().bottom + 8 : 0);
   };
   const px = (i: number) => i === TOP ? Math.min(DETENTS[i] * innerHeight, room()) : DETENTS[i] * innerHeight;
@@ -200,7 +200,7 @@ export default function Mobile() {
     <div className={`mob${sheet.full ? ' sheet-full' : ''}`} ref={sheet.root}>
       <MapView ref={map} routes={p.routes} sel={p.sel} tp={p.choice.tp} labels={p.mapLabels} from={p.from} to={p.to} events={p.mapEvents} onSelect={p.setSel}
         marker={marker} me={fix?.pos ?? null} span={p.mapSpan} routeEvents={p.selectedContext?.events} pad={{ topLeft: [24, 242], bottomRight: [24, 420] }} />
-      <AppBar n={n} className="mob-bar" />
+      <MenuButton n={n} />
 
       {p.screen !== 'search' && !nav && (
         <>
