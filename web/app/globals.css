@@ -340,11 +340,14 @@ input::placeholder { color: var(--muted); }
 .mob .swap { width: 44px; height: 44px; border-radius: 12px; background: var(--fill); }
 .mob .compass { position: absolute; right: 12px; top: calc(var(--bar-bottom) + 146px); z-index: 28; }
 .mob .compass.high { top: calc(var(--bar-bottom) + 8px); }
+/* Full-height sheet reaches the menu bar: the map buttons would float on the list, so they step aside. */
+.mob .compass, .mob-layers { transition: opacity 0.25s ease; }
+.mob.sheet-full .compass, .mob.sheet-full .mob-layers { opacity: 0; pointer-events: none; }
 
 /* Draggable sheet: height comes from --sheet-h (set on .mob by the sheet hook).
    ponytail: animates height, not transform, so the footer (Start) stays pinned to the visible bottom at every detent.
-   One element, 0.45 s per snap, no animation while dragging; move to transform + a pinned footer if it ever janks. */
-.sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 25; height: var(--sheet-h, 50dvh); display: flex; flex-direction: column; border-radius: 16px 16px 0 0; background: var(--sheet-bg); backdrop-filter: blur(20px) saturate(1.6); -webkit-backdrop-filter: blur(20px) saturate(1.6); box-shadow: 0 -2px 20px rgba(0, 0, 0, 0.12); transition: height 0.45s var(--ease-out); }
+   One element, 0.5 s per snap on the iOS sheet curve, no animation while dragging; move to transform + a pinned footer if it ever janks. */
+.sheet { position: absolute; left: 0; right: 0; bottom: 0; z-index: 25; height: var(--sheet-h, 50dvh); display: flex; flex-direction: column; border-radius: 16px 16px 0 0; background: var(--sheet-bg); backdrop-filter: blur(20px) saturate(1.6); -webkit-backdrop-filter: blur(20px) saturate(1.6); box-shadow: 0 -2px 20px rgba(0, 0, 0, 0.12); transition: height 0.5s cubic-bezier(0.32, 0.72, 0, 1); }
 .sheet.dragging { transition: none; }
 .sheet-handle { flex: none; display: flex; flex-direction: column; gap: 10px; padding: 6px 16px 10px; touch-action: none; cursor: grab; }
 .grabber { position: relative; align-self: center; flex: none; width: 36px; height: 5px; padding: 0; border-radius: 3px; background: var(--grabber); }
