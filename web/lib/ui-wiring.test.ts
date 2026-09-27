@@ -64,3 +64,29 @@ test('notifications are a "Coming soon" note only: no permission prompt, no swit
   assert.doesNotMatch(menu, /Notification\.requestPermission|new Notification\(/);
   assert.match(menu, /Routine disruption alerts<\/span><span className="tag off">Coming soon/);
 });
+
+test('navigation arrival comes from the rider position (GPS or demo), not a button, and closes navigation', () => {
+  assert.doesNotMatch(mobile, /onClick=\{p\.arrived\}/);                  // no manual "Arrived" in the nav bar
+  // device mode: one watcher, only while navigating; demo mode never asks for location
+  assert.match(mobile, /const gps = usePosition\(nav && !navArrived && !demo\);/);
+  assert.match(mobile, /navFix\(demo \? 'demo' : 'device', r, demoStep, gps\)/); // one pipeline for both sources
+  assert.match(mobile, /if \(isArrived\(fix, r\)\) \{/);
+  assert.match(mobile, /setTimeout\(\(\) => finishRef\.current\('arrived'\), ARRIVED_EXIT_MS\)/);
+  assert.match(mobile, /onClick=\{\(\) => finishNavigation\(navArrived \? 'arrived' : 'cancelled'\)\}>End</);
+  assert.match(mobile, /\{!navArrived && \(\s*<div className="nav-stats">/);  // no stale "1.6 mi remaining" once arrived
+});
+
+test('the demo start is defined once', () => {
+  const lib = (f: string) => readFileSync(new URL(`./${f}`, import.meta.url), 'utf8');
+  for (const s of [desktop, mobile, parts, menu, map, lib('route.ts'), lib('use-route-planner.ts')]) assert.doesNotMatch(s, /37\.788\b/);
+  assert.match(lib('location.ts'), /DEMO_START = \{ name: 'Union Square', lat: 37\.788, lon: -122\.4075 \}/);
+  assert.match(menu, /<legend className="eyebrow">Location mode<\/legend>/);
+});
+
+test('device mode: the maneuver banner is not a button, only demo taps advance', () => {
+  assert.match(mobile, /const TurnBox = demo \? 'button' : 'div';/);
+  assert.match(mobile, /<TurnBox className="turn" onClick=\{demo \? \(\) => setDemoStep\(/);
+  assert.match(mobile, /\{demo && <span className="hint">Tap for next<\/span>\}/);
+  assert.doesNotMatch(mobile, /goTo\(/);                                   // the old device-mode turn preview is gone
+  assert.equal(count(mobile, /setStep\(g\.step\)|setStep\(Math\.max\(0, steps\.length - 1\)\)/g), 2); // only progress/arrival set the turn
+});

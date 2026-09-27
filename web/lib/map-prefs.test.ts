@@ -8,19 +8,27 @@ function store(init: Record<string, string> = {}) {
 }
 const blocked = { getItem(): never { throw new Error('denied'); }, setItem(): never { throw new Error('denied'); } };
 
-test('defaults: standard map, event pins and route traffic on', () => {
-  assert.deepEqual(DEFAULT_MAP_PREFS, { style: 'standard', eventPins: true, traffic: true });
+test('defaults: standard map, event pins and route traffic on, demo location', () => {
+  assert.deepEqual(DEFAULT_MAP_PREFS, { style: 'standard', eventPins: true, traffic: true, location: 'demo' });
   assert.deepEqual(parseMapPrefs(null), DEFAULT_MAP_PREFS);
   assert.deepEqual(parseMapPrefs('not json'), DEFAULT_MAP_PREFS);
-  assert.deepEqual(parseMapPrefs('{"style":"terrain","eventPins":"no","traffic":false}'), { style: 'standard', eventPins: true, traffic: false });
+  assert.deepEqual(parseMapPrefs('{"style":"terrain","eventPins":"no","traffic":false}'), { style: 'standard', eventPins: true, traffic: false, location: 'demo' });
 });
 
 test('choices persist: written, then read back on the next visit', () => {
   const s = store();
   const p = toggleLayer({ ...DEFAULT_MAP_PREFS, style: 'satellite' }, 'eventPins');
   writeMapPrefs(p, s);
-  assert.deepEqual(readMapPrefs(s), { style: 'satellite', eventPins: false, traffic: true });
+  assert.deepEqual(readMapPrefs(s), { style: 'satellite', eventPins: false, traffic: true, location: 'demo' });
   assert.ok(s.m.has(MAP_KEY));
+});
+
+test('location mode: demo by default, device persists, anything else falls back to demo', () => {
+  const s = store();
+  writeMapPrefs({ ...DEFAULT_MAP_PREFS, location: 'device' }, s);
+  assert.equal(readMapPrefs(s).location, 'device');
+  assert.equal(parseMapPrefs('{"location":"miami"}').location, 'demo');
+  assert.equal(parseMapPrefs('{"style":"satellite"}').location, 'demo');   // prefs saved before this setting existed
 });
 
 test('blocked storage: defaults, and writing does not throw', () => {
@@ -41,7 +49,7 @@ test('map layers button: one tap hides every layer, the next shows them all; sty
   const sat = { ...DEFAULT_MAP_PREFS, style: 'satellite' as const };
   assert.equal(overlaysOn(sat), true);
   const off = setOverlays(sat, !overlaysOn(sat));
-  assert.deepEqual(off, { style: 'satellite', eventPins: false, traffic: false });
+  assert.deepEqual(off, { style: 'satellite', eventPins: false, traffic: false, location: 'demo' });
   assert.equal(overlaysOn(off), false);
   assert.deepEqual(setOverlays(off, !overlaysOn(off)), sat);
   // one layer switched off in Settings: the button still reads "on", and a tap turns both off

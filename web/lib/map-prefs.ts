@@ -3,11 +3,13 @@
 // state (lib/use-map-prefs.ts), so they can't disagree.
 // Plain TS (no DOM types needed) so `node --test` can run it directly.
 
+import { DEFAULT_LOCATION_MODE, type LocationMode } from './location.ts';
+
 export type MapStyle = 'standard' | 'satellite';
 /** Only layers the map can really draw get a key here; the rest are listed in LAYERS as unavailable. */
-export type MapPrefs = { style: MapStyle; eventPins: boolean; traffic: boolean };
+export type MapPrefs = { style: MapStyle; eventPins: boolean; traffic: boolean; location: LocationMode };
 export type LayerKey = 'eventPins' | 'traffic';
-export const DEFAULT_MAP_PREFS: MapPrefs = { style: 'standard', eventPins: true, traffic: true };
+export const DEFAULT_MAP_PREFS: MapPrefs = { style: 'standard', eventPins: true, traffic: true, location: DEFAULT_LOCATION_MODE };
 export const MAP_KEY = 'transpeaktation.map'; // localStorage, next to 'transpeaktation.privacy'
 
 type Store = { getItem(k: string): string | null; setItem(k: string, v: string): void };
@@ -37,7 +39,8 @@ export function parseMapPrefs(raw: string | null | undefined): MapPrefs {
   try { v = JSON.parse(raw ?? 'null'); } catch { /* corrupt: defaults */ }
   const o = v && typeof v === 'object' ? v as Record<string, unknown> : {};
   const bool = (k: LayerKey) => typeof o[k] === 'boolean' ? o[k] as boolean : DEFAULT_MAP_PREFS[k];
-  return { style: o.style === 'satellite' ? 'satellite' : 'standard', eventPins: bool('eventPins'), traffic: bool('traffic') };
+  return { style: o.style === 'satellite' ? 'satellite' : 'standard', eventPins: bool('eventPins'), traffic: bool('traffic'),
+    location: o.location === 'device' ? 'device' : DEFAULT_LOCATION_MODE };
 }
 
 export function readMapPrefs(storage: Store | undefined): MapPrefs {

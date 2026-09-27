@@ -2,6 +2,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from 'react';
 import { createPortal } from 'react-dom';
 import { CLOSED, MENU, open, PAGE_TITLES, SECTIONS, toggle, type Nav, type Page, type Panel, type Section } from '@/lib/nav.ts';
+import { LOCATION_MODES } from '@/lib/location.ts';
 import { LAYERS, layerOn, overlaysOn, STYLES } from '@/lib/map-prefs.ts';
 import type { ThemePref } from '@/lib/theme.ts';
 import type { useRoutePlanner } from '@/lib/use-route-planner.ts';
@@ -255,9 +256,21 @@ function Appearance() {
 
 /** Same state as the Map layers button: changing either changes both, and it's remembered on this device. */
 function MapDefaults() {
-  const { prefs, toggle, setStyle } = useMapPrefs();
+  const { prefs, toggle, setStyle, setLocation } = useMapPrefs();
+  const name = useId();
   return (
     <div className="set-stack">
+      <fieldset className="choice">
+        <legend className="eyebrow">Location mode</legend>
+        <div className="choice-list">
+          {LOCATION_MODES.map(m => (
+            <label key={m.id} className="choice-row">
+              <input type="radio" name={name} value={m.id} checked={prefs.location === m.id} onChange={() => setLocation(m.id)} />
+              <span className="stack grow"><span className="name">{m.label}</span><span className="sub">{m.sub}</span></span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
       <StylePicker value={prefs.style} onChange={setStyle} legend="Default map style" />
       <section className="layer-group" aria-label="Default map layers">
         <h4 className="eyebrow">Default map layers</h4>

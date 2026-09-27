@@ -3,6 +3,7 @@ import { useEffect, useImperativeHandle, useRef, type Ref } from 'react';
 import type * as Leaflet from 'leaflet';
 import { EVENT_KINDS, eventImpact, eventKind, fmtCrowd, fmtEventTime, type EventKind, type MapEvent, type Span } from '@/lib/context.ts';
 import { MAP_EXPERIMENT } from '@/lib/experiment.ts';
+import { DEMO_START } from '@/lib/location.ts';
 import { fmtDist, labelPoint, trafficRuns, type LatLng, type Place, type Route } from '@/lib/route.ts';
 import type { MapStyle } from '@/lib/map-prefs.ts';
 import type { Theme } from '@/lib/theme.ts';
@@ -17,8 +18,9 @@ import { SnapMapLayers } from './snapmap-layers.ts';
 const SNAP = MAP_EXPERIMENT === 'snapmap';
 const START_REL = 1.25; // start view vs the all-of-SF zoom: where a 1440px desktop lands at zoom 14
 
-/** `focus` dy: show the point this many px above the map's centre (to clear a bottom sheet). */
-export type MapHandle = { fit(): void; focus(p: LatLng, zoom?: number, dy?: number): void; zoomIn(): void; zoomOut(): void };
+/** `focus` dy: show the point this many px above the map's centre (to clear a bottom sheet). `pan`: move to p at
+ *  the current zoom (navigation following the rider). */
+export type MapHandle = { fit(): void; focus(p: LatLng, zoom?: number, dy?: number): void; pan(p: LatLng): void; zoomIn(): void; zoomOut(): void };
 
 type Props = {
   ref?: Ref<MapHandle>;
@@ -29,6 +31,7 @@ type Props = {
   from: Place | null;
   to: Place | null;
   marker?: LatLng | null;           // highlighted turn on the selected route
+  me?: LatLng | null;               // the rider's live GPS position while navigating
   events?: MapEvent[];              // ingested events in the trip's time window
   span?: Span;                      // the trip span those events were fetched for (snapmap: heat time filter)
   routeEvents?: MapEvent[] | null;  // events near the selected route (snapmap: kept visible at every zoom)
@@ -74,7 +77,7 @@ function waterLayer(l: typeof Leaflet, t: Theme, color: string): Leaflet.Layer {
   return new (Water as new (o: Leaflet.GridLayerOptions) => Leaflet.GridLayer)({ pane: 'water', maxNativeZoom: 16, maxZoom: 18 });
 }
 
-export default function MapView({ ref, routes, sel, tp, labels, from, to, marker, events, span, routeEvents, onSelect, pad }: Props) {
+export default function MapView({ ref, routes, sel, tp, labels, from, to, marker, me, events, span, routeEvents, onSelect, pad }: Props) {
   const el = useRef<HTMLDivElement>(null);
   const L = useRef<typeof Leaflet>(null);
   const map = useRef<Leaflet.Map>(null);
@@ -85,8 +88,8 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
   const { prefs } = useMapPrefs(); // map style + layers (Map layers button / Settings → Map & Routing)
   const look = useRef({ theme, prefs }); // Leaflet loads async: the tile layer must use the theme and style at that moment
   look.current = { theme, prefs };
-  const latest = useRef({ routes, sel, tp, labels, from, to, marker, events, span, routeEvents, pad, onSelect });
-  latest.current = { routes, sel, tp, labels, from, to, marker, events, span, routeEvents, pad, onSelect };
+  const latest = useRef({ routes, sel, tp, labels, from, to, marker, me, events, span, routeEvents, pad, onSelect });
+  latest.current = { routes, sel, tp, labels, from, to, marker, me, events, span, routeEvents, pad, onSelect };
 
   const fit = () => {
     const { routes, sel, from, to, pad } = latest.current;
@@ -109,6 +112,7 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
       const m = map.current;
       if (m) m.setView(dy ? m.unproject(m.project(p, zoom).add([0, dy]), zoom) : p, zoom);
     },
+    pan: p => map.current?.panTo(p),
     zoomIn: () => map.current?.zoomIn(),
     zoomOut: () => map.current?.zoomOut(),
   }));
@@ -119,7 +123,7 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
   const draw = () => {
     const l = L.current, g = layer.current;
     if (!l || !g || !el.current) return;
-    const { routes, sel, tp, labels, from, to, marker, span, routeEvents } = latest.current;
+    const { routes, sel, tp, labels, from, to, marker, me, span, routeEvents } = latest.current;
     const { eventPins, traffic } = look.current.prefs;
     const events = eventPins ? latest.current.events : undefined; // Event Pins off: no pins, no impact areas (snapmap: no heat)
     // Colours come from the CSS theme tokens, so light/dark and brand changes stay in globals.css.
@@ -168,6 +172,7 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
     // Map convention: start = hollow ring dot, destination = teardrop pin with its tip on the spot.
     if (from) l.marker([from.lat, from.lon], { icon: l.divIcon({ className: 'origin-pin', iconSize: [18, 18] }), keyboard: false, zIndexOffset: 1500, title: `Start: ${from.label}` }).addTo(g);
     if (to) l.marker([to.lat, to.lon], { icon: l.divIcon({ className: 'dest-pin', iconSize: [28, 36], iconAnchor: [14, 35], html: DEST_PIN }), keyboard: false, zIndexOffset: 2000, title: `Destination: ${to.label}` }).addTo(g);
+    if (me) l.circleMarker(me, { radius: 8, color: ring, weight: 3, fillColor: c('--action'), fillOpacity: 1, interactive: false }).addTo(g);
     snap.current?.update({
       events: events ?? [], span: span ?? { from: Date.now(), to: Date.now() },
       routeEventIds: new Set((routeEvents ?? []).map(e => e.id)), routeActive: routes.length > 0, theme: look.current.theme,
@@ -180,7 +185,7 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
       if (cancelled || !el.current) return;
       const l = (L.current = mod.default ?? mod);
       // snapmap: quarter-level zoom steps, so pins and heat change gradually as you wheel / pinch.
-      const m = (map.current = l.map(el.current, { zoomControl: false, ...(SNAP ? { zoomSnap: 0.25, zoomDelta: 0.5, wheelPxPerZoomLevel: 100 } : {}) }).setView([37.788, -122.4075], 14));
+      const m = (map.current = l.map(el.current, { zoomControl: false, ...(SNAP ? { zoomSnap: 0.25, zoomDelta: 0.5, wheelPxPerZoomLevel: 100 } : {}) }).setView([DEMO_START.lat, DEMO_START.lon], 14));
       m.attributionControl.setPrefix(false);
       const water = m.createPane('water'); // between the tile pane (200) and the routes / pins (400+)
       water.style.zIndex = '250';
@@ -209,7 +214,7 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
   // span / routeEvents are rebuilt every render ("Leave now" moves by the millisecond): key them on minutes and ids.
   const spanKey = span ? `${Math.floor(span.from / 60_000)}-${Math.floor(span.to / 60_000)}` : '';
   const routeEventKey = routeEvents?.map(e => e.id).join() ?? '';
-  useEffect(draw, [routes, sel, tp, labels?.join(), from, to, marker, events, spanKey, routeEventKey]);
+  useEffect(draw, [routes, sel, tp, labels?.join(), from, to, marker, me, events, spanKey, routeEventKey]);
   // New routes or endpoints: frame them.
   useEffect(fit, [routes, from, to]);
 
