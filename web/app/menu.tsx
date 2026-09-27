@@ -121,9 +121,10 @@ function MenuList({ n }: { n: NavApi }) {
   return (
     <nav className="menu-list" aria-label="Main menu">
       <div className="menu-brand"><Logo size={18} stroke={3} /><span>transPEAKtation</span></div>
-      {MENU.map((m, i) => m
-        ? <button key={m.id} className="menu-item" onClick={() => n.open(m.id)}><Icon name={m.icon} size={18} className="lead" /><span>{m.label}</span></button>
-        : <hr key={i} className="menu-sep" />)}
+      {MENU.map((m, i) => !m ? <hr key={i} className="menu-sep" />
+        : 'href' in m
+          ? <a key={m.id} className="menu-item" href={m.href} target="_blank" rel="noopener" onClick={n.close}><Icon name={m.icon} size={18} className="lead" /><span>{m.label}</span></a>
+          : <button key={m.id} className="menu-item" onClick={() => n.open(m.id)}><Icon name={m.icon} size={18} className="lead" /><span>{m.label}</span></button>)}
     </nav>
   );
 }
@@ -211,7 +212,7 @@ function Dialog({ title, onClose, wide, big, back, children }: {
 export function NavDialogs({ n, p, wide }: { n: NavApi; p: Planner; wide: boolean }) {
   const { panel, section } = n.nav;
   if (panel === 'settings') return <Settings n={n} p={p} wide={wide} section={section} />;
-  if (panel === 'saved' || panel === 'history' || panel === 'help' || panel === 'about') {
+  if (panel === 'saved' || panel === 'history' || panel === 'help') {
     return <Dialog title={PAGE_TITLES[panel]} onClose={n.close} wide={wide}><div className="dialog-body prose">{PAGES[panel]}</div></Dialog>;
   }
   return null;
@@ -422,22 +423,6 @@ const PAGES: Record<Page, ReactNode> = {
         &amp; Routing switches each one on its own and picks the standard or satellite map.</p>
       <h3>Feedback</h3>
       <p>There’s no feedback form in the app yet.</p>
-    </>
-  ),
-  about: (
-    <>
-      <p>transPEAKtation helps you understand how events and transportation conditions may affect movement around San
-        Francisco, and picks a route that accounts for them.</p>
-      <h3>Data sources</h3>
-      <ul>
-        <li><b>Routes and place search:</b> Mapbox, with OSRM on OpenStreetMap as a fallback.</li>
-        <li><b>Map:</b> Esri basemap and satellite tiles.</li>
-        <li><b>Events:</b> PredictHQ.</li>
-        <li><b>Closures and incidents:</b> DataSF (street closures, street-use and excavation permits, police dispatch), Caltrans lane closures and CHP incidents.</li>
-        <li><b>Traffic:</b> Mapbox, TomTom, and Muni vehicle positions from 511.org.</li>
-        <li><b>Road network:</b> OpenStreetMap.</li>
-        <li><b>AI:</b> Google Gemini for route explanations, ElevenLabs for voice requests. See Settings → AI &amp; Privacy.</li>
-      </ul>
     </>
   ),
 };

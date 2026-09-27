@@ -18,9 +18,10 @@ test('only one panel at a time: a menu page or Settings replaces the menu', () =
 
 test('menu entries, in order, with the two dividers', () => {
   assert.deepEqual(MENU.map(m => m?.label ?? '---'),
-    ['Saved Places', 'Trip History', '---', 'Settings', 'Help & Feedback', '---', 'About transPEAKtation']);
-  const ids = MENU.flatMap(m => m ? [m.id] : []);
-  assert.deepEqual(ids.map(id => open(id).panel), ids); // every entry opens its own page
+    ['Saved Places', 'Trip History', '---', 'Settings', 'Help & Feedback', '---', 'About us']);
+  const ids = MENU.flatMap(m => m && !('href' in m) ? [m.id] : []);
+  assert.deepEqual(ids.map(id => open(id).panel), ids); // every panel entry opens its own page
+  assert.deepEqual(MENU.flatMap(m => m && 'href' in m ? [m.href] : []), ['/about']); // About us: the /about page (new tab)
   assert.ok(!MENU.some(m => m && /account|profile|sign in|avatar/i.test(m.label)));
 });
 
