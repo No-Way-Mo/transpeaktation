@@ -27,7 +27,7 @@ load_dotenv(_API_DIR / ".env")  # api/.env; real env vars win
 # Local dev: reuse keys already in ingest/.env (e.g. its MAPBOX_TOKEN) instead of copying them. Never overrides.
 load_dotenv(_API_DIR.parent / "ingest" / ".env")
 
-from . import advice, coordination, ml, model, providers, rewards, voice
+from . import advice, coordination, directions, ml, model, providers, rewards, voice
 from . import store as ingested  # map views (find_*); `store` below is the planner's Store
 from .segments import Segments
 from .store import Store
@@ -237,7 +237,10 @@ async def plan_trip(
             # its time on the provider's scale: the provider's fastest ETA x (its pick / its own fastest), so the card
             # shows the real cost of spreading riders, never a gap between two ETA methods
             dur = round(min(r["dur"] for r in found) * coord["vs_fastest"])
-            found = [*found, {**coord["route"], "dur": dur}]
+            ids = coord["route"]["road_segment_ids"]
+            geo = await asyncio.to_thread(segments.route_geometry, coord["route"]["coords"], ids)
+            steps = directions.build(coord["route"]["coords"], *geo, ids, segments.names(ids), dur) if geo else []
+            found = [*found, {**coord["route"], "dur": dur, "steps": steps}]
             departs = [*departs, real_now]
             decision = {"model": coord["model"], "dur": dur, "reasons": coord["reasons"], "best": len(found) - 1}
             decided_by = f"ml:{coord['model']}"
