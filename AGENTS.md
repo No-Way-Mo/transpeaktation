@@ -15,7 +15,7 @@ One owner per folder. Only edit another folder with its owner's OK.
 | `ios/`       | TBD | SwiftUI shell that loads the `web/` app (mobile layout) in a WKWebView | SwiftUI, XcodeGen |
 | `contracts/` | everyone | Shared data shapes (events, routes, forecasts, fleet state) | JSON Schema / Pydantic |
 | `demo/`      | — | Standalone transPEAKtation SF demo (`node demo/check.mjs`) | HTML |
-| `deploy/`    | everyone | DigitalOcean droplet (https://167-172-23-38.sslip.io): Caddy, systemd units, setup + redeploy scripts | Caddy, systemd |
+| `deploy/`    | everyone | DigitalOcean droplet (https://yowaymo.us, also https://167-172-23-38.sslip.io): Caddy (`deploy/Caddyfile` = `/etc/caddy/Caddyfile`, copied by hand), systemd units, setup + redeploy scripts | Caddy, systemd |
 
 ## Rules
 - `contracts/` is the only seam between folders. Change it in its own small PR and tell the team first.
