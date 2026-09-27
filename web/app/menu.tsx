@@ -10,9 +10,9 @@ import type { useRoutePlanner } from '@/lib/use-route-planner.ts';
 import { useMapPrefs } from '@/lib/use-map-prefs.ts';
 import { useTheme } from '@/lib/use-theme.ts';
 import { forgetWallet, isSolanaAddress, savedWallet, saveWallet, shortAddress } from '@/lib/wallet.ts';
-import { AiPrivacy, EventKey, Icon, Logo, Toggle, type IconName } from './parts.tsx';
+import { AiPrivacy, EventKey, Icon, Toggle, type IconName } from './parts.tsx';
 
-// Logo menu, Map layers button, Settings and the menu's pages. Shared by desktop (centred dialogs) and mobile
+// ☰ menu, Map layers button, Settings and the menu's pages. Shared by desktop (centred dialogs) and mobile
 // (full-screen pages). Which one is open lives in lib/nav.ts: one at a time, Esc or a click outside closes it.
 
 type Planner = ReturnType<typeof useRoutePlanner>;
@@ -105,7 +105,6 @@ function Popover({ label, className, children }: { label: string; className: str
 function MenuList({ n }: { n: NavApi }) {
   return (
     <nav className="menu-list" aria-label="Main menu">
-      <div className="menu-brand"><Logo size={18} stroke={3} /><span>transPEAKtation</span></div>
       {MENU.map((m, i) => !m ? <hr key={i} className="menu-sep" />
         : 'href' in m
           ? <a key={m.id} className="menu-item" href={m.href} target="_blank" rel="noopener" onClick={n.close}><Icon name={m.icon} size={18} className="lead" /><span>{m.label}</span></a>
