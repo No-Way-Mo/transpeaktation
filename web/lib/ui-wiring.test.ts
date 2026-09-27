@@ -54,6 +54,12 @@ test('privacy switches keep their behaviour: voice hides the mic, the others sha
   assert.match(parts, /key: 'voice', label: 'Voice requests'/);
 });
 
+test('setting off tells the API (road reservation), on both layouts', () => {
+  assert.match(mobile, /className="start" onClick=\{\(\) => \{[^}]*p\.start\(\);/);
+  assert.match(desktop, />Directions<\/button>/);
+  assert.match(desktop, /setSteps\(true\); setStep\(-1\); p\.start\(\);/);
+});
+
 test('map layers are wired to what the map draws', () => {
   assert.match(map, /const events = eventPins \? latest\.current\.events : undefined;/);
   assert.match(map, /if \(traffic\) for \(const run of trafficRuns\(r\)\)/);

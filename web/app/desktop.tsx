@@ -71,7 +71,7 @@ export default function Desktop() {
                     </div>
                     <TripNote note={p.trip.note} />
                     <RouteList p={p} action={
-                      <button className="pill-btn" onClick={e => { e.stopPropagation(); setSteps(true); setStep(-1); }}>Directions</button>
+                      <button className="pill-btn" onClick={e => { e.stopPropagation(); setSteps(true); setStep(-1); p.start(); }}>Directions</button>
                     } />
                   </>
                 )}

@@ -225,7 +225,7 @@ export default function Mobile() {
             {hasRoutes && (
               <div className="sheet-foot">
                 {!dirs && <button className="foot-alt" onClick={() => { setDirs(true); setDirStep(-1); }}>Directions</button>}
-                <button className="start" onClick={() => { setNav(true); setStep(0); if (r) map.current?.focus(r.coords[0]); }}>Start</button>
+                <button className="start" onClick={() => { setNav(true); setStep(0); p.start(); if (r) map.current?.focus(r.coords[0]); }}>Start</button>
               </div>
             )}
           </div>

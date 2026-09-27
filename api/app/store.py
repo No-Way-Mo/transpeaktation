@@ -238,6 +238,11 @@ class Store:
         """One trip request (Mongo trips): the start of real demand data for ml/. No user identity is stored."""
         return self._mongo_call(lambda db: db.trips.insert_one(doc).acknowledged) or False
 
+    def trip_coordination(self, trip_id: str) -> dict[str, Any] | None:
+        """The trip's load-balancer reservation handle: {} = unknown trip, None = no database."""
+        got = self._mongo_call(lambda db: {"doc": db.trips.find_one({"trip_id": trip_id}, {"_id": 0, "trip_id": 1, "coordination": 1})})
+        return None if got is None else (got["doc"] or {})
+
     def mark_arrived(self, trip_id: str, at: datetime) -> int | None:
         """Set a trip's arrived_at, once. 1 = marked, 0 = unknown trip or already arrived, None = no database."""
         return self._mongo_call(lambda db: db.trips.update_one(

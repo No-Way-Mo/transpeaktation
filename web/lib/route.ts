@@ -132,7 +132,15 @@ export async function fetchPlan(from: Place, to: Place, when: When = { mode: 'no
 export const iosArrival = () => (globalThis as { webkit?: { messageHandlers?: { arrival?: { postMessage(m: unknown): void } } } })
   .webkit?.messageHandlers?.arrival;
 
-/** POST /trips/{id}/arrived: the rider reached the destination, so the logged trip stops counting as demand. */
+/** POST /trips/{id}/start: the rider set off. On the transPEAKtation route (coordinated) its road reservation is
+ *  confirmed, so the load balancer steers later riders around it; on a normal route the reservation is released. */
+export async function startTrip(tripId: string, coordinated: boolean): Promise<void> {
+  const res = await fetch(`${API}/trips/${tripId}/start?coordinated=${coordinated}`, { method: 'POST' });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+}
+
+/** POST /trips/{id}/arrived: the rider reached the destination, so the logged trip stops counting as demand
+ *  (and its road reservation is released). */
 export async function markArrived(tripId: string): Promise<void> {
   const res = await fetch(`${API}/trips/${tripId}/arrived`, { method: 'POST' });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);

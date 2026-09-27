@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 import httpx
 
-from app import advice, main, ml, model, providers, store as store_mod
+from app import advice, coordination, main, ml, model, providers, store as store_mod
 
 SF = model.SF_TZ
 DAY = datetime(2026, 9, 26, tzinfo=SF)
@@ -273,6 +273,10 @@ class FakeStore:
         for t in hit:
             t["arrived_at"] = at
         return len(hit)
+
+    def trip_coordination(self, trip_id):
+        hit = [t for t in self.trips if t["trip_id"] == trip_id]
+        return {"trip_id": trip_id, **({"coordination": hit[0]["coordination"]} if "coordination" in hit[0] else {})}             if hit else {}
 
     def status(self):
         return {"mongo": "not configured", "tiger": "not configured"}
@@ -549,6 +553,86 @@ class PlanEndpoint(unittest.TestCase):
         self.assertEqual(len(body["plan"]["preds"]), 2)
         body, _ = self.ml_plan({"model": "m", "choice": {"candidate": 7}, "predicted_sec": 600})
         self.assertIn("choice.candidate", body["data"]["decision"])
+
+    def coord_plan(self, answer, status=200, save=True):
+        """/plan leaving now with COORDINATION_URL set and the load balancer answering `answer`."""
+        sent, store = [], FakeStore()
+
+        def handler(req: httpx.Request):
+            sent.append(req)
+            return httpx.Response(status, json=answer)
+
+        self.find = mock.AsyncMock(return_value=([dict(PAST), dict(AROUND)], "mapbox"))
+        with mock.patch.dict("os.environ", {"COORDINATION_URL": "http://lb.test/", "COORDINATION_API_TOKEN": "tok",
+                                            "ML_URL": ""}),                 mock.patch.dict(main.state, {"http": httpx.AsyncClient(transport=httpx.MockTransport(handler))}),                 mock.patch.object(providers, "find_routes", self.find), mock.patch.object(main, "store", store),                 mock.patch.object(main.segments, "match", return_value=PAST["road_segment_ids"]):
+            r = self.client.get("/plan", params={"from": "-122.4075,37.788", "to": "-122.3893,37.7786",
+                                                 "save": str(save).lower()})
+            self.assertEqual(r.status_code, 200, r.text)
+            return r.json(), sent, store, handler
+
+    LB = {"outcome": "recommendation", "is_fastest": False,
+          "assignment": {"assignment_id": "a1b2", "version": 1, "status": "provisional"},
+          "fastest_candidate": {"candidate_id": "c0", "forecast_eta_sec": 500.0},
+          "recommended": {"candidate_id": "c1", "forecast_eta_sec": 550.0, "extra_travel_sec": 50.0, "distance_m": 2300.0,
+                          "road_segment_ids": ["1-2-0", "2-3-0"],
+                          "geometry": {"type": "LineString", "coordinates": [[-122.4075, 37.788], [-122.3893, 37.7786]],
+                                       "coordinate_order": "lon,lat"}},
+          "selector": {"name": "heuristic", "fallback_reason": None},
+          "forecast": {"issued_at": "2026-09-27T03:40:00+00:00", "model_version": "m", "input_source": "live_tiger_mongo"}}
+
+    def test_load_balancer_route_becomes_the_transpeaktation_route(self):
+        body, sent, store, _ = self.coord_plan(self.LB)
+        req = json.loads(sent[0].content)
+        self.assertEqual((str(sent[0].url), sent[0].headers["authorization"]), ("http://lb.test/v1/recommendations",
+                                                                              "Bearer tok"))
+        rec = body["data"]["trip_record"]
+        self.assertEqual((req["request_id"], req["reserve"]), (rec["trip_id"], True))   # reserved under the trip
+        self.assertEqual((req["origin"], req["destination"]), ([PAST["coords"][0][1], PAST["coords"][0][0]],
+                                                               [PAST["coords"][-1][1], PAST["coords"][-1][0]]))
+        self.assertEqual(self.find.await_count, 1)                                     # never re-routed by Mapbox
+        r = body["routes"][2]
+        self.assertEqual((r["by"], r["coords"][0], r["road_segment_ids"]), ("ml", [37.788, -122.4075], ["1-2-0", "2-3-0"]))
+        # on the provider's scale: fastest provider ETA 600 s x (550 / 500) -- a detour cost, not a fake saving
+        self.assertEqual((body["plan"]["best"], body["plan"]["preds"][2]["dur"]), (2, 660))
+        self.assertEqual(r["forecast_eta_sec"], 550.0)
+        self.assertEqual(body["data"]["decision"], "ml:coordinator-heuristic")
+        self.assertIn("spread", body["plan"]["note"])
+        self.assertEqual(store.trips[0]["coordination"]["assignment_id"], "a1b2")
+
+    def test_unsaved_trip_only_previews(self):
+        body, sent, store, _ = self.coord_plan({**self.LB, "outcome": "preview", "assignment": None}, save=False)
+        self.assertFalse(json.loads(sent[0].content)["reserve"])
+        self.assertEqual((store.trips, body["data"]["decision"]), ([], "ml:coordinator-heuristic"))
+
+    def test_load_balancer_that_cannot_serve_keeps_the_heuristic(self):
+        body, _, _, _ = self.coord_plan({"outcome": "unsupported", "reason": "beyond_horizon"}, status=422)
+        self.assertEqual(body["data"]["decision"], "heuristic (coordinator cannot serve this trip: beyond_horizon)")
+        self.assertEqual(len(body["routes"]), 2)
+
+    def test_start_arrived_drive_the_reservation(self):
+        body, _, store, handler = self.coord_plan(self.LB)
+        tid = body["data"]["trip_record"]["trip_id"]
+        ops = []
+
+        def lb(req: httpx.Request):
+            ops.append(str(req.url).rsplit("/", 1)[1])
+            return httpx.Response(200, json={"assignment": {"status": {"accept": "accepted", "complete": "completed",
+                                                                       "cancel": "cancelled"}[ops[-1]]}})
+
+        with mock.patch.dict("os.environ", {"COORDINATION_URL": "http://lb.test/"}),                 mock.patch.dict(main.state, {"http": httpx.AsyncClient(transport=httpx.MockTransport(lb))}),                 mock.patch.object(main, "store", store):
+            self.assertEqual(self.client.post(f"/trips/{tid}/start").json()["coordination"], "accepted")
+            self.assertEqual(self.client.post(f"/trips/{tid}/arrived").json()["coordination"], "completed")
+            self.assertEqual(self.client.post(f"/trips/{tid}/start", params={"coordinated": "false"}).json()["coordination"],
+                             "cancelled")
+            self.assertEqual(self.client.post(f"/trips/{'0' * 32}/start").status_code, 404)
+        self.assertEqual(ops, ["accept", "complete", "cancel"])
+
+    def test_later_departures_skip_the_load_balancer(self):
+        sent = []
+        depart = (datetime.now(SF) + timedelta(hours=2)).replace(second=0, microsecond=0)
+        with mock.patch.dict("os.environ", {"COORDINATION_URL": "http://lb.test/", "ML_URL": ""}),                 mock.patch.dict(main.state, {"http": httpx.AsyncClient(transport=httpx.MockTransport(sent.append))}):
+            self.assertEqual(self.plan(FakeStore(), depart).json()["data"]["decision"], "heuristic")
+        self.assertEqual(sent, [])
 
     def test_without_ml_url_nothing_is_sent(self):
         depart = (datetime.now(SF) + timedelta(hours=1)).replace(second=0, microsecond=0)

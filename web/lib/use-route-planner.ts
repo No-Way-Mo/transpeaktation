@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
-import { claimReward, fetchPlan, fmtWhen, markArrived, mins, ORIGIN, REPLAY, searchPlaces, spokenTime, voiceNote,
+import { claimReward, fetchPlan, fmtWhen, markArrived, mins, startTrip, ORIGIN, REPLAY, searchPlaces, spokenTime, voiceNote,
   type Plan, type Place, type Reward, type Route, type TransPeak, type VoiceIntent, type When } from './route.ts';
 // Ingested events (windowed /events) + /road-conditions: map pins and the route card's context line.
 import { conditionWindow, eventWindow, fetchEvents as fetchWindowEvents, fetchRoadConditions, routeContext,
@@ -190,6 +190,13 @@ export function useRoutePlanner() {
   const [reward, setReward] = useState<{ tripId: string; r: Reward } | null>(null);
   const arrival = useRef<Promise<unknown>>(Promise.resolve());
   const myReward = reward && reward.tripId === tripId ? reward.r : null;
+  const [startedId, setStartedId] = useState('');
+  /** The rider set off (Start / Directions): once per trip, on the transPEAKtation card or a normal one. */
+  const start = () => {
+    if (!tripId || startedId === tripId) return;
+    setStartedId(tripId);
+    startTrip(tripId, choice.tp).catch(() => {}); // the reservation just lapses on its own after a minute
+  };
   const arrived = () => {
     if (!tripId || arrivedId === tripId) return;
     setArrivedId(tripId); setArrivedTp(choice.tp);
@@ -216,7 +223,7 @@ export function useRoutePlanner() {
     suggestions, searching: fieldSearch.searching,
     showSuggest: !!active && (suggestions.length > 0 || fieldSearch.searching),
     routes, sel, setSel, choice, setChoice, tp, card, loading, error, retry: () => route(),
-    trace, applyAdvice, tripId, arrived, hasArrived: !!tripId && arrivedId === tripId,
+    trace, applyAdvice, tripId, start, arrived, hasArrived: !!tripId && arrivedId === tripId,
     /** The route reward: offered on the transPEAKtation card (logged trips only), earned by arriving on it, then
      *  claimed; `reward` is how the claim went. */
     rewardOffer: offer, reward: myReward, claim,
