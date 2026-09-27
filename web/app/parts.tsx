@@ -23,13 +23,16 @@ export function EventLegend({ events }: { events: MapEvent[] }) {
   );
 }
 
-/** The fork mark: one road splitting into the normal route (blue) and transPEAKtation's (green). */
+/** The mark: the red spike is the jam when everyone takes one road; the routes under it are more ways, each one flat. */
 export function Logo({ size = 26, stroke = 2.6, className }: { size?: number; stroke?: number; className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 32 32" width={size} height={size} fill="none" strokeLinecap="round" strokeWidth={stroke} aria-hidden="true">
-      <path d="M16 29v-9M16 20V5" style={{ stroke: 'var(--ink)' }} />
-      <path d="M16 20c0-7-9-7-9-15" style={{ stroke: 'var(--brand-strong)' }} />
-      <path d="M16 20c0-7 9-7 9-15" style={{ stroke: 'var(--route)' }} />
+    <svg className={className} viewBox="0 0 32 32" width={size} height={size} fill="none" strokeLinecap="round" strokeLinejoin="round" strokeWidth={stroke} aria-hidden="true">
+      <path d="M9 24 16 5l7 19" stroke="#FF4D5E" strokeWidth={stroke * 0.77} opacity={0.45} />
+      <path d="M4 24c4 0 4.5-11 8.5-11h7c4 0 4.5 11 8.5 11" stroke="#16C7B7" />
+      <path d="M4 24c4 0 4.5-5.5 8.5-5.5h7c4 0 4.5 5.5 8.5 5.5" stroke="#2F6BFF" />
+      <path d="M4 24h24" style={{ stroke: 'var(--ink)' }} />
+      <circle cx="4" cy="24" r="3" style={{ fill: 'var(--ink)' }} />
+      <circle cx="28" cy="24" r="3" fill="#16C7B7" />
     </svg>
   );
 }
