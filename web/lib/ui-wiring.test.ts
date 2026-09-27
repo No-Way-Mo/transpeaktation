@@ -43,8 +43,8 @@ test('AI & privacy exists once, inside Settings, with its original wording', () 
   assert.match(parts, /Every service and model that touches your trip, and the switches that control them\./);
   assert.match(parts, /'Where your trip goes'/);
   assert.match(menu, /'AI & privacy'/);
-  // the route card's trace strip now opens Settings at that section
-  assert.equal(count(desktop + mobile, /onTrace=\{\(\) => n\.open\('settings', 'privacy'\)\}/g), 2);
+  // no per-trip AI / privacy strip under the route card: Settings → AI & Privacy covers it
+  assert.doesNotMatch(desktop + mobile + parts, /trace-strip|onTrace/);
 });
 
 test('privacy switches keep their behaviour: voice hides the mic, the others shape /plan', () => {

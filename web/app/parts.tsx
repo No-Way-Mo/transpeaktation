@@ -5,7 +5,7 @@ import { EVENT_KINDS, eventKind, type EventKind, type MapEvent } from '@/lib/con
 import { eventGlyph } from './map-view.tsx';
 import type { Card, useRoutePlanner } from '@/lib/use-route-planner.ts';
 import { useVoice } from '@/lib/use-voice.ts';
-import { dataPath, planStale, traceLine, type Privacy, type Stop } from '@/lib/privacy.ts';
+import { dataPath, planStale, type Privacy, type Stop } from '@/lib/privacy.ts';
 import { usePrivacy } from '@/lib/use-privacy.ts';
 import { solText } from './reward.tsx';
 
@@ -239,7 +239,7 @@ export function PlaceRow({ place, onPick, plain }: { place: Place; onPick(): voi
 
 /** The two route sections: transPEAKtation's event-aware pick, then the normal alternatives. `action` (e.g. a
  *  Directions button) goes inside the selected card. */
-export function RouteList({ p, action, onTrace }: { p: Planner; action?: ReactNode; onTrace(): void }) {
+export function RouteList({ p, action }: { p: Planner; action?: ReactNode }) {
   if (!p.tp || !p.routes.length) return null;
   const { best, tag, note, advice } = p.tp, as = action ? 'div' : 'button';
   const fastest = p.routes[0].dur;
@@ -252,11 +252,6 @@ export function RouteList({ p, action, onTrace }: { p: Planner; action?: ReactNo
           note={note} selected={p.choice.tp} onPick={() => p.setChoice({ i: best, tp: true })} as={as}>
           {p.choice.tp && action}
         </RouteCard>
-        {p.trace && (
-          <button className="trace-strip" aria-label={`AI and privacy for this trip: ${traceLine(p.trace.data)}`} onClick={onTrace}>
-            <Icon name="shield" size={16} className="lead" /><span className="grow">{traceLine(p.trace.data)}</span><Icon name="chevron" size={14} rotate={-90} className="lead" />
-          </button>
-        )}
         {advice && <button className="pill-btn advice" onClick={p.applyAdvice}>{`Leave at ${fmtWhen(Date.parse(advice.depart_at))}`}</button>}
       </section>
       <section className="route-sec" aria-label="Normal routes">

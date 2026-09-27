@@ -197,7 +197,7 @@ export default function Mobile() {
               {hasRoutes && !dirs && (
                 <>
                   <TripNote note={p.trip.note} />
-                  <RouteList p={p} onTrace={() => n.open('settings', 'privacy')} />
+                  <RouteList p={p} />
                 </>
               )}
 
