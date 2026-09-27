@@ -48,6 +48,24 @@ class Segments:
                 continue
         return out
 
+    def names(self, segment_ids: list[str]) -> dict[str, str]:
+        """segment_id -> OSM street name (the first, for edges merged from several; unnamed edges are left out)."""
+        g, out = self.graph, {}
+        if g is None:
+            return out
+        for sid in segment_ids:
+            try:
+                u, v, k = (int(x) for x in sid.split("-"))
+                name = g.edges[u, v, k].get("name")
+            except (ValueError, KeyError):
+                continue
+            name = name[0] if isinstance(name, list) and name else name
+            if isinstance(name, str) and name.startswith("["):  # graphml can keep lists as "['A', 'B']"
+                name = name.strip("[]").split(",")[0].strip(" '\"")
+            if isinstance(name, str) and name:
+                out[sid] = name
+        return out
+
     def match(self, coords: list[list[float]]) -> list[str] | None:
         """coords: [[lat, lon], ...] along the route. Returns edge IDs in driving order, or None if no graph."""
         g = self.graph

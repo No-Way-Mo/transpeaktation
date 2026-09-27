@@ -338,7 +338,7 @@ const SWITCHES: { key: keyof Privacy; label: string; detail: string }[] = [
   { key: 'saveTrips', label: 'Save my trips',
     detail: 'Keeps an area-level record of each trip (no exact start or end, no name or device ID) so we can forecast crowds. Off: nothing is written.' },
   { key: 'aiText', label: 'AI-written explanations',
-    detail: 'Google Gemini words why the normal routes are slower, from trip facts, never addresses. Off: a built-in sentence, and nothing is sent to Google.' },
+    detail: 'Google Gemini writes why the route is the pick and sums up the congestion on the others, from trip facts, never addresses. Off: a built-in sentence, and nothing is sent to Google.' },
   { key: 'voice', label: 'Voice requests',
     detail: 'Your clip goes to ElevenLabs to become text; we don’t keep the audio. Off: the mic button is hidden.' },
 ];

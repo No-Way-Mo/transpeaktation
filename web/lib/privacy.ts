@@ -51,7 +51,7 @@ export function dataPath(d: PlanData, source: string): Stop[] {
       ? { who: 'Route model', did: `${d.decision.slice(3)} picked the route from the data above, on our servers.`, ai: true }
       : { who: 'Rule-based estimate', did: 'Picked the route from the data above with fixed rules. No AI model.' },
     gemini
-      ? { who: 'Google Gemini', did: 'Worded why the normal routes are slower, from trip facts only: times, minutes, street and event names. No addresses or coordinates.', ai: true, outside: true }
+      ? { who: 'Google Gemini', did: 'Wrote why this route is the pick and summed up the congestion on the normal routes, from trip facts only: minutes, event times, street and event names. No addresses or coordinates.', ai: true, outside: true }
       : { who: 'Built-in sentence', off: d.note.includes('ai text off'),
           did: d.note.includes('ai text off') ? 'You turned AI text off, so nothing went to Google.' : 'Gemini wasn’t used this time, so nothing went to Google.' },
     d.stored === 'trips'
