@@ -4,7 +4,7 @@ import { dataPath, DEFAULT_PRIVACY, parsePrivacy, planStale, privacyQuery, readP
 
 const data = (over: Partial<PlanData> = {}): PlanData => ({
   at: '', replay: false, events: 'mongo', incidents: 'mongo', traffic: 'tiger:live', predictions: 'tiger',
-  decision: 'heuristic', note: 'gemini:gemini-flash-lite-latest', stored: 'trips', trip_record: {}, ...over,
+  decision: 'heuristic', note: 'gemini:gemini-3.5-flash-lite', stored: 'trips', trip_record: {}, ...over,
 });
 
 test('switches: saved choices over defaults, junk ignored, blocked storage still works', () => {

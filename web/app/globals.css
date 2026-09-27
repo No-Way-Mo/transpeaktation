@@ -202,7 +202,8 @@ input::placeholder { color: var(--muted); }
 .route-row { display: flex; align-items: flex-start; gap: 12px; }
 .route .stack { gap: 4px; }
 .route .sub.ellipsis { font-size: 13px; }
-.route-note { font-size: 13px; line-height: 1.4; color: var(--brand-text); text-wrap: pretty; }
+.route-note { font-size: 13px; line-height: 1.4; color: var(--brand-text); text-wrap: pretty;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden; } /* notes are ≤110 chars; never a 3rd line */
 .eta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 6px; }
 .eta .tag { white-space: nowrap; }
 .eta b { font-size: 26px; font-weight: 700; letter-spacing: -0.02em; line-height: 1; }

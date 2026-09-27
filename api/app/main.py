@@ -187,7 +187,7 @@ async def plan_trip(
     replay: bool = Query(False, description="Simulate a trip at a past time with the data stored for then (demo); "
                                             "not logged as a trip"),
     save: bool = Query(True, description="Log this request to Mongo `trips` (area-level, no identity); false = nothing stored"),
-    ai_text: bool = Query(True, description="Let Gemini word the normal routes' notes; false = template, nothing sent to Google"),
+    ai_text: bool = Query(True, description="Let Gemini sum up the congestion on the normal routes; false = template, nothing sent to Google"),
 ):
     """The trip planner: candidate routes (Mapbox/OSRM) -> events, closures, traffic and forecasts for their road
     segments at the trip's time (Mongo / Tiger, written by ingest/ and ml/) -> event-aware model -> pick,
@@ -211,18 +211,19 @@ async def plan_trip(
     t1 = max(d + timedelta(seconds=r["dur"]) for d, r in zip(departs, found)) + timedelta(minutes=90)  # + advice range
     sids = sorted({s for r in found for s in (r.get("road_segment_ids") or [])})
 
-    events, closure_events, incidents, (traffic, traffic_kind), predictions, lengths = await asyncio.gather(
+    events, closure_events, incidents, (traffic, traffic_kind), predictions, lengths, names = await asyncio.gather(
         asyncio.to_thread(store.events_between, t0 - timedelta(hours=1), t1),
         asyncio.to_thread(store.closure_events, t0 - timedelta(hours=1), t1),
         asyncio.to_thread(store.incidents_on, sids, t0, t1),
         asyncio.to_thread(store.traffic_at, sids, t0, real_now),
         asyncio.to_thread(store.predictions, sids, t0, t1),
-        asyncio.to_thread(segments.lengths, sids))
+        asyncio.to_thread(segments.lengths, sids),
+        asyncio.to_thread(segments.names, sids))
     evs = [e for e in (model.from_mongo(x) for x in events or []) if e] if events is not None else \
         model.demo_events(t0)
     evs += [model.from_map_event(e) for e in closure_events or []]
     ctx = {"events": evs, "incidents": incidents or [], "traffic": traffic or [], "traffic_kind": traffic_kind,
-           "predictions": predictions or [], "lengths": lengths}
+           "predictions": predictions or [], "lengths": lengths, "names": names}  # names: for the card notes
     decision, decided_by = None, "heuristic"
     if ml.url():
         window = (t0 - timedelta(hours=1), t0 + timedelta(hours=1))
@@ -243,12 +244,16 @@ async def plan_trip(
         if decision:
             decided_by = f"ml:{decision['model']}"
     result = model.plan(found, departs, mode, ctx, now=now, ml=decision)
-    note_by = "none (no normal route is slower)"
-    if slower := [p for p in result["preds"] if p.get("note")]:  # Gemini words the facts, template on any failure
-        texts, note_by = (None, "template (ai text off)") if not ai_text else \
-            await advice.explain(state["http"], advice.facts(found, ctx, result))  # off: nothing goes to Google
-        for p, text in zip(slower, texts or []):
-            p["note"] = text
+    # Gemini words the facts (the pick's reason only when ml/ gave none); template for any note it gets wrong.
+    note_by = "template (ai text off)"
+    if ai_text:  # off: nothing goes to Google
+        explain_pick = not (decision and decision.get("reasons"))
+        pick, texts, note_by = await advice.explain(state["http"], advice.facts(found, ctx, result, pick=explain_pick))
+        if pick:
+            result["note"] = pick
+        for p, text in zip([p for p in result["preds"] if p.get("note")], texts or []):
+            if text:
+                p["note"] = text
     best = result["preds"][result["best"]]
     logged = save and not replay  # a simulation isn't demand
     # A little SOL for taking the recommended route: only on a logged trip (claimed by trip_id), when the treasury can pay.

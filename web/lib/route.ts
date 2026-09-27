@@ -77,7 +77,7 @@ export type Prediction = {
   model: string; blocked: boolean;
   /** api/'s own event/closure estimate for this route; shown on the normal cards, never on transPEAKtation's. */
   estimate?: { dur: number; delay: number; why: string[] };
-  /** Normal card only, ≤100 chars: why this route is slower than transPEAKtation's (null when it isn't). */
+  /** Normal card only, ≤110 chars (2 lines): the congestion on this route when you'd drive it, and how much slower it is than transPEAKtation's. */
   note?: string | null;
 };
 /** Route reward (api/app/rewards.py): completing the trip on the recommended route (`route` = plan.best) earns
@@ -296,7 +296,8 @@ export function trafficRuns(r: Route): { level: Slow; coords: LatLng[] }[] {
 export function longerThanItLooks(pred: Prediction | undefined): string | null {
   const est = pred?.estimate;
   if (pred?.blocked) return 'Closure ahead';
-  return est && est.delay >= 60 ? `+${mins(est.delay)} min events` : null;
+  // no named event or closure behind the delay: it is ml/'s traffic forecast, not an event
+  return est && est.delay >= 60 ? `+${mins(est.delay)} min ${est.why.length ? 'events' : 'predicted'}` : null;
 }
 
 export function routeTag(i: number, dur: number, fastest: number): string {

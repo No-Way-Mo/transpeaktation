@@ -1,4 +1,5 @@
 """Offline checks for the event-aware trip plan: the model (pure) and GET /plan / /events with a fake store."""
+import asyncio
 import json
 import unittest
 from datetime import datetime, timedelta, timezone
@@ -59,18 +60,30 @@ class EventImpact(unittest.TestCase):
         self.assertEqual((round(est["dur"]), est["delay"]), (PAST["dur"] + 600, 600))
         self.assertEqual(est["why"], ["Giants vs. Dodgers at Oracle Park"])
         self.assertEqual(p["tag"], "Events on the way")
-        self.assertEqual(p["note"], "")  # the transPEAKtation card gets no note; the slower normal routes do
+        # the pick's note: what's on it; no "faster"/"avoids", since api/'s estimate for AROUND (11) beats PAST's (20)
+        self.assertEqual(p["note"], "Passes Giants vs. Dodgers at Oracle Park.")
         self.assertEqual(p["preds"][0]["note"], "10 min slower: Giants vs. Dodgers at Oracle Park.")
         self.assertEqual(p["preds"][1]["note"], "1 min slower: longer or busier roads.")
-        tie = model.plan([AROUND, AROUND], [at(12)] * 2, "depart", CTX, now=now)  # same time: nothing to explain
+        tie = model.plan([AROUND, AROUND], [at(12)] * 2, "depart", CTX, now=now)  # same time: nothing slows them
         self.assertEqual(([x["note"] for x in tie["preds"]], tie["note"]),
-                         ([None, None], "No events or traffic slowing the fastest normal route."))
-        note = lambda *why: model.slower_note({"blocked": False, "estimate": {"why": list(why)}}, 3)  # noqa: E731
+                         (["No events or closures on it."] * 2, "No events or closures on it."))
+        self.assertEqual(model.plan([PAST, AROUND], [at(12)] * 2, "depart", CTX, now=now)["tag"], "Clear")
+
+    def test_normal_route_note_sums_up_its_congestion(self):
+        def note(*why, slower=3, slow=0, coverage=1.0, blocked=False):
+            return model.route_note({"blocked": blocked, "estimate": {"why": list(why)},
+                                     "traffic": {"slow_segments": slow, "coverage": coverage}}, slower)
         self.assertEqual(note("LIVE Spinal Manual Therapy Course", "Catawba and Cherokee American Revolution Symposium",
                               "Other"), "3 min slower: LIVE Spinal Manual Therapy Course +2 more.")
         self.assertEqual(note("Catawba and Cherokee American Revolution Symposium at Moscone West"),
                          "3 min slower: Catawba and Cherokee American Revolution…")  # whole words only
-        self.assertEqual(model.plan([PAST, AROUND], [at(12)] * 2, "depart", CTX, now=now)["tag"], "Clear")
+        self.assertEqual(note("Giants vs. Dodgers", slow=4), "3 min slower: Giants vs. Dodgers, 4 slow stretches.")
+        self.assertEqual(note(slow=1, slower=0), "1 slow stretch of traffic.")
+        self.assertEqual(note(slow=4, coverage=0.0), "3 min slower: longer or busier roads.")  # no traffic data: no claim
+        self.assertEqual(note("Giants vs. Dodgers", slower=0), "Giants vs. Dodgers.")
+        self.assertEqual(note("Road closure on King St", slower=25, blocked=True),  # the minutes are the penalty
+                         "Crosses a road closure when you'd get there.")
+        self.assertLessEqual(len(note("x" * 200, "y", slow=12, slower=99)), model.NOTE_MAX)
 
     def test_special_event_closure_counts_like_any_event(self):
         # shaped like store.find_closure_events (what /events shows): a multi-day event right on the route
@@ -355,31 +368,130 @@ class PlanEndpoint(unittest.TestCase):
         self.assertEqual(store.traffic_asked[0], depart)
         self.assertEqual(self.plan(FakeStore(), depart + timedelta(days=7)).status_code, 400)  # 31 days: too far
 
-    def test_gemini_words_the_normal_route_notes_from_the_facts_only(self):
-        depart = (datetime.now(SF) + timedelta(hours=1)).replace(second=0, microsecond=0)
-        self.assertEqual(self.plan(FakeStore(), depart).json()["data"]["note"], "template (no GEMINI_API_KEY)")
+    def test_gemini_words_both_cards_from_the_facts_only(self):
+        depart = at(12) + timedelta(days=(datetime.now(SF).date() - DAY.date()).days + 1)  # noon tomorrow: no crowds
+        body = self.plan(FakeStore(), depart).json()
+        self.assertEqual(body["data"]["note"], "template (no GEMINI_API_KEY)")
+        # PAST (10 min) is the pick; AROUND (11 min) the other route: the template claims just that minute
+        self.assertEqual(body["plan"]["note"], "1 min faster than the next best route.")
         sent = []
 
-        def run(note):
+        def run(write, pick=lambda rec: f"{rec['minutes_faster']} min faster than the next best route."):
             def handler(req: httpx.Request):
                 sent.append(req)
-                n = len(json.loads(json.loads(req.content)["contents"][0]["parts"][0]["text"])["normal_routes"])
-                return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": json.dumps([note] * n)}]}}]})
+                trip = json.loads(json.loads(req.content)["contents"][0]["parts"][0]["text"])
+                return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": json.dumps(
+                    {"recommended": pick(trip["recommended_route"]), "routes": [write(r) for r in trip["routes"]]})}]}}]})
             advice._cache.clear()
             with mock.patch.dict("os.environ", {"GEMINI_API_KEY": "k"}), \
                     mock.patch.dict(main.state, {"http": httpx.AsyncClient(transport=httpx.MockTransport(handler))}):
                 return self.plan(FakeStore(), depart).json()
 
-        body = run("Longer way round; about 11 min.")  # AROUND (11 min) is always slower than PAST's 10
-        self.assertEqual((body["plan"]["preds"][1]["note"], body["data"]["note"]),
-                         ("Longer way round; about 11 min.", "gemini:gemini-flash-lite-latest"))
-        self.assertNotEqual(body["plan"]["note"], "Longer way round; about 11 min.")  # never on the transPEAKtation card
+        good = lambda r: f"{r['minutes_slower']} min slower: a longer way round." if "minutes_slower" in r \
+            else "Nothing slowing it."  # noqa: E731
+        body = run(good, lambda rec: "1 min faster than the next best route, and nothing on the way")
+        self.assertEqual([p["note"] for p in body["plan"]["preds"]], ["Nothing slowing it.", "1 min slower: a longer way round."])
+        self.assertEqual(body["plan"]["note"], "1 min faster than the next best route, and nothing on the way.")  # tidied
+        self.assertEqual(body["data"]["note"], "gemini:gemini-3.5-flash-lite")
         self.assertEqual(sent[0].headers["x-goog-api-key"], "k")
+        facts = json.loads(json.loads(sent[0].content)["contents"][0]["parts"][0]["text"])
+        self.assertEqual((facts["recommended_route"]["minutes_faster"], facts["recommended_route"]["avoids_on_other_routes"]),
+                         (1, []))
         self.assertNotIn("37.7", sent[0].content.decode())  # facts only: no coordinates leave the api
-        for made_up in ("Saves 987 min by taking the ferry.", "Saves eleven minutes.", "Slow. " * 20):
-            body = run(made_up)
-            self.assertEqual(body["data"]["note"], "template (gemini reply rejected)")
-            self.assertEqual(body["plan"]["preds"][1]["note"], "1 min slower: longer or busier roads.")
+        for made_up in (lambda r: "Saves 987 min by taking the ferry.", lambda r: "Saves eleven minutes.",
+                        lambda r: "Slow. " * 45,
+                        lambda r: "11 min slower: a longer way round.",  # a number in the facts, but not the delay
+                        lambda r: "1 min slower." if "minutes_slower" not in r else good(r)):  # not slower at all
+            with self.assertLogs("app.advice", "WARNING"):  # a rejected note is logged, not only in data.note
+                body = run(made_up)
+            self.assertEqual(body["plan"]["note"], "1 min faster than the next best route.")  # the pick's still Gemini's
+            notes = [p["note"] for p in body["plan"]["preds"]]
+            self.assertIn(notes[1], ("1 min slower: longer or busier roads.", "1 min slower: a longer way round."))
+            self.assertNotEqual(notes, [made_up(r) for r in ({}, {"minutes_slower": 1})])  # each wrong one: template
+        for wrong in ("Avoids the Giants crowd.",  # nothing to avoid on the other route
+                      "5 min faster than the next best route."):  # not the minutes the facts give
+            with self.assertLogs("app.advice", "WARNING"):
+                body = run(good, lambda rec: wrong)
+            self.assertEqual(body["plan"]["note"], "1 min faster than the next best route.")  # the template
+            self.assertEqual(body["plan"]["preds"][1]["note"], "1 min slower: a longer way round.")  # notes still Gemini's
+
+    def test_ml_reasons_stay_on_the_pick_and_gemini_only_words_the_normal_routes(self):
+        depart = at(12) + timedelta(days=(datetime.now(SF).date() - DAY.date()).days + 1)
+        sent = []
+
+        def handler(req: httpx.Request):
+            if "generativelanguage" not in str(req.url):
+                return httpx.Response(200, json={"model": "m1", "choice": {"candidate": 1}, "predicted_sec": 700,
+                                                 "reasons": ["Fewer riders here."]})
+            sent.append(json.loads(json.loads(req.content)["contents"][0]["parts"][0]["text"]))
+            return httpx.Response(200, json={"candidates": [{"content": {"parts": [{"text": json.dumps(
+                {"recommended": "Avoids nothing.", "routes": ["No events or closures on it."] * len(sent[-1]["routes"])})}]}}]})
+        with mock.patch.dict("os.environ", {"GEMINI_API_KEY": "k", "ML_URL": "http://ml.test/"}), \
+                mock.patch.dict(main.state, {"http": httpx.AsyncClient(transport=httpx.MockTransport(handler))}):
+            body = self.plan(FakeStore(), depart).json()
+        self.assertEqual(body["plan"]["note"], "Fewer riders here.")
+        self.assertNotIn("recommended_route", sent[0])
+
+    def test_gemini_note_must_name_the_routes_worst_event_and_its_own_delay(self):
+        route = {"events_on_it": [{"name": "Giants vs. Dodgers at Oracle Park", "when": "7:15 PM to 10:15 PM",
+                                   "crowd_when_you_pass": "arriving", "adds_about_min": 10, "passes_within_m": 150}],
+                 "closures_and_incidents_on_it": [{"name": "Road closure on King St", "until": "11:00 PM"}],
+                 "crosses_a_closure": False, "slow_stretches": 3, "minutes_slower": 7}
+        ok = ("7 min slower: Giants game, 3 slow stretches.", "7 minutes slower: Giants crowd until 10:15 PM.",
+              "7 min slower: the Giants crowd will be arriving, 150 m off the route, adding about 10 min.")
+        bad = ("7 min slower: Bay to Breakers race.",  # an event it made up
+               "7 min slower: road closure on King St.",  # a real one, but not the worst
+               "15 min slower: Giants game.",  # a number from the facts (10:15), not the delay
+               "10 min slower: Giants game, adding about 7 min.",  # the two minutes swapped
+               "7 min slower: Giants game, adding about 15 min.",  # an event delay that isn't there
+               "7 min slower: Giants game ends 9 PM.")  # a time that isn't there
+        self.assertEqual([advice.check(t, route) for t in ok], list(ok))
+        self.assertEqual([advice.check(t, route) for t in bad], [None] * len(bad))
+        clear = {"events_on_it": [], "closures_and_incidents_on_it": [], "crosses_a_closure": False, "slow_stretches": 0}
+        self.assertEqual(advice.check("No events or closures on it.", clear), "No events or closures on it.")
+        self.assertIsNone(advice.check("It is a busier way.", clear))  # not slower: Gemini once said this every time
+        self.assertIsNone(advice.check("6 slow stretches on 4th St. Traffic flowing.", {**clear, "slow_stretches": 6}))
+        self.assertIsNone(advice.check("No events or closures, traffic flowing.", clear))  # no traffic data: unknown
+        self.assertIsNotNone(advice.check("No events or closures, traffic flowing.", {**clear, "have_traffic_data": True}))
+        closed = {**route, "crosses_a_closure": True}
+        self.assertEqual(advice.check("Crosses a road closure when you'd get there.", closed),
+                         "Crosses a road closure when you'd get there.")
+
+    def test_pick_note_claims_minutes_only_against_open_routes(self):
+        est = lambda m, **kw: {"estimate": {"dur": m * 60, "why": kw.get("why", [])}, "blocked": kw.get("blocked", False),  # noqa: E731
+                               "traffic": {"slow_segments": 0, "coverage": 1.0}}
+        routes = [{}, {}, {}]
+        f = model.pick_facts(routes, [est(10), est(32, blocked=True), est(13)], 0)  # 32 = 12 + the closure penalty
+        self.assertEqual((f["minutes_faster"], f["avoids_a_closure"]), (3, True))
+        self.assertEqual(model.pick_note(f), "3 min faster than the next best route. Avoids a road closure on another route.")
+        f = model.pick_facts(routes[:2], [est(10), est(32, blocked=True)], 0)  # the only other route is closed
+        self.assertEqual(model.pick_note(f), "Avoids a road closure on another route.")
+
+    def test_gemini_pick_must_back_every_claim_with_the_facts(self):
+        rec = {"events_on_it": [], "closures_and_incidents_on_it": [], "crosses_a_closure": False, "slow_stretches": 2,
+               "avoids_a_closure_on_another_route": False, "minutes_faster": 4,
+               "avoids_on_other_routes": ["Giants vs. Dodgers at Oracle Park", "Concert at Chase Center"]}
+        self.assertEqual(advice.check_pick("4 min faster than the next best route. Avoids the Giants game crowd.", rec),
+                         "4 min faster than the next best route. Avoids the Giants game crowd.")
+        for bad in ("6 min faster than the next best route.",  # made-up minutes
+                    "4 min faster. Avoids the Chase Center concert.",  # avoids the second, not the worst
+                    "Fastest way, avoids the Bay to Breakers."):  # an event it made up
+            self.assertIsNone(advice.check_pick(bad, rec), bad)
+        plain = {**rec, "minutes_faster": None, "avoids_on_other_routes": []}
+        self.assertIsNone(advice.check_pick("Quicker than the others.", plain))  # no minutes: no faster claim
+        self.assertIsNone(advice.check_pick("Avoids the traffic.", plain))  # nothing to avoid
+        self.assertEqual(advice.check_pick("2 slow stretches on the way", plain), "2 slow stretches on the way.")
+        closure = {**plain, "avoids_a_closure_on_another_route": True}
+        self.assertIsNotNone(advice.check_pick("Avoids a road closure on another route.", closure))
+
+    def test_gemini_reply_that_is_not_an_object_is_rejected(self):
+        for reply in ({"notes": "x", "more": "y"}, "ab", {"routes": ["Nothing slowing it."]}):  # no routes, a string, one too few
+            advice._cache.clear()
+            client = httpx.AsyncClient(transport=httpx.MockTransport(lambda req: httpx.Response(200, json={
+                "candidates": [{"content": {"parts": [{"text": json.dumps(reply)}]}}]})))
+            with mock.patch.dict("os.environ", {"GEMINI_API_KEY": "k"}), self.assertLogs("app.advice", "WARNING"):
+                got = asyncio.run(advice.explain(client, {"routes": [{}, {}]}))
+            self.assertEqual(got, (None, None, "template (gemini reply rejected)"))
 
     def test_rider_can_turn_off_saving_and_ai_text(self):
         depart = (datetime.now(SF) + timedelta(hours=1)).replace(second=0, microsecond=0)
