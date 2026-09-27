@@ -1,0 +1,34 @@
+# RL route selection (RL_ROUTING_RESEARCH_AND_PLAN.md) on top of coordinated_routing_v2. Starting settings, not
+# tuned optima. Long runs are opt-in and locally budgeted (rl.max_decisions / rl.wall_hours).
+name: coordinated_routing_rl
+seed: 0
+forecast:
+  path: data/forecast/exports/folsom_1730.parquet     # real trained-model export (serving / route CLI)
+env:
+  batch: b3_verify
+  splits: data/forecast/datasets/b3_verify_v3net_ep1/splits.json
+  history_s: 3600
+  decision_window_s: 1800
+  max_drain_s: 1800
+  participation: 0.05
+  max_participants: 150
+  compliance: 1.0
+  forecast_mode: model
+  forecast_checkpoint: data/forecast/experiments/event_patch_v1/best.pt
+  warm_state_cache: true
+rl:
+  k: 5
+  checkpoint: ""                                     # e.g. data/coordination/rl/runs/ppo_s0/best
+  device: cpu
+  ppo_lr: 0.0003
+  n_steps: 1024
+  batch_size: 128
+  n_epochs: 5
+  clip_range: 0.2
+  ent_coef: 0.01
+  gamma: 1.0
+  gae_lambda: 1.0
+  max_decisions: 50000
+  wall_hours: 2.0
+  eval_every_decisions: 5000
+  eval_episodes: 1

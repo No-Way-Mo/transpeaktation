@@ -1,0 +1,50 @@
+[project]
+name = "transpeaktation-ml"
+version = "0.1.0"
+description = "Event-aware traffic model trained on SUMO scenarios grounded in real SF event closures"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.0",
+    "scikit-learn>=1.4",
+    "tzdata",            # zoneinfo on Windows
+    "eclipse-sumo>=1.20",
+    "sumolib>=1.20",
+    "traci>=1.20",
+]
+
+[project.optional-dependencies]
+# forecasting stack (python -m forecast); the SUMO data generator does not need it
+forecast = [
+    "torch>=2.2",
+    "scipy>=1.10",
+    "pyarrow>=14",
+    "pyyaml>=6",
+]
+
+# coordinated routing (python -m coordination): heuristic serving needs no Torch/SUMO
+coordination = [
+    "scipy>=1.10",
+    "pyarrow>=14",
+    "pyyaml>=6",
+]
+# batch selector (CP-SAT). 9.9 keeps numpy<2 / protobuf 4.x; newer ortools needs numpy>=2
+solver = [
+    "ortools==9.9.3963",
+]
+
+# learned route selection (python -m coordination train-rl / env-check / --selector rl). Pins tested in `strats`
+# alongside numpy 1.26.4 / protobuf 4.25.5 / torch 2.6.0; install with those pinned so they are not upgraded.
+rl = [
+    "gymnasium==1.0.0",
+    "stable-baselines3==2.5.0",
+    "sb3-contrib==2.5.0",
+    "torch>=2.2",
+]
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["eventsim*", "forecast*", "coordination*"]

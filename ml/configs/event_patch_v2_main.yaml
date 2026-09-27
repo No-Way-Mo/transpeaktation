@@ -1,0 +1,7 @@
+# Event-conditioned patch forecasting on the v3 main batch (b3_main: 8 events x 12 families x 2 seeds, sampler v3.1).
+# Same model/training settings and split salt as event_patch_v1, so the held-out test event group is unchanged.
+inherit: event_patch_v1.yaml
+name: event_patch_v2_main
+data:
+  batch: b3_main
+  dataset_id: b3_main_v3net_ep2

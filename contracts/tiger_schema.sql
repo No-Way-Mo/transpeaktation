@@ -66,6 +66,21 @@ CREATE TABLE IF NOT EXISTS simulation_metrics (
 
 -- "Latest value for X" lookups.
 CREATE INDEX IF NOT EXISTS prediction_metrics_segment_time_idx ON prediction_metrics (road_segment_id, time DESC);
+-- Congestion map written by the forecaster (ml/forecast/live.py), one row per road x 10-min interval x issue time:
+-- time = interval start (valid_from), prediction_horizon_min = 10k covers [issued_at + 10(k-1), issued_at + 10k).
+-- A map is complete only once Mongo forecast_runs has its doc with status "ready" (written after these rows commit);
+-- that doc also holds the exact closure intervals the map used. confidence stays NULL (no uncertainty method).
+ALTER TABLE prediction_metrics ADD COLUMN IF NOT EXISTS issued_at TIMESTAMPTZ;
+ALTER TABLE prediction_metrics ADD COLUMN IF NOT EXISTS valid_to TIMESTAMPTZ;
+ALTER TABLE prediction_metrics ADD COLUMN IF NOT EXISTS predicted_travel_time_sec DOUBLE PRECISION;
+ALTER TABLE prediction_metrics ADD COLUMN IF NOT EXISTS predicted_congestion_ratio DOUBLE PRECISION;
+ALTER TABLE prediction_metrics ADD COLUMN IF NOT EXISTS availability TEXT;          -- open|closed|restricted|unavailable
+ALTER TABLE prediction_metrics ADD COLUMN IF NOT EXISTS restriction_reason TEXT;
+ALTER TABLE prediction_metrics ADD COLUMN IF NOT EXISTS prediction_source TEXT;     -- model|representative_road|none
+ALTER TABLE prediction_metrics ADD COLUMN IF NOT EXISTS represented_by TEXT;
+ALTER TABLE prediction_metrics ADD COLUMN IF NOT EXISTS network_version TEXT;
+ALTER TABLE prediction_metrics ADD COLUMN IF NOT EXISTS input_source TEXT;          -- live_tiger_mongo | ...
+CREATE INDEX IF NOT EXISTS prediction_metrics_issue_idx ON prediction_metrics (model_version, issued_at, time);
 CREATE INDEX IF NOT EXISTS traffic_metrics_segment_time_idx ON traffic_metrics (road_segment_id, time DESC);
 CREATE INDEX IF NOT EXISTS av_positions_vehicle_time_idx ON av_positions (vehicle_id, time DESC);
 CREATE INDEX IF NOT EXISTS demand_metrics_zone_time_idx ON demand_metrics (zone_id, time DESC);
