@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 process.env.TZ = 'America/New_York'; // a device outside SF: every clock time must still be Pacific
-import { fmtDist, fmtWhen, fromPtInput, labelPoint, longerThanItLooks, mins, planPath, ptInput, ptTime, sfDays, routeTag, spokenTime, stepIcon, stepText, trafficRuns, voiceNote, type LatLng, type Prediction, type Route, type Step, type VoiceIntent } from './route.ts';
+import { fmtDist, fmtWhen, fromPtInput, labelPoint, longerThanItLooks, mins, planPath, ptInput, ptTime, sfDays, routeTag, spokenTime, stepIcon, stepText, trafficRuns, voiceError, voiceNote, type LatLng, type Prediction, type Route, type Step, type VoiceIntent } from './route.ts';
 
 const step = (type: string, modifier?: string, name = 'Market St'): Step =>
   ({ distance: 0, duration: 0, name, maneuver: { type, modifier, location: [0, 0] } });
@@ -116,4 +116,13 @@ test('longerThanItLooks: normal routes warn when api/ estimates a minute or more
   assert.equal(longerThanItLooks(pred(40)), null);   // under a minute: not worth a warning
   assert.equal(longerThanItLooks(undefined), null);  // no plan yet
   assert.equal(longerThanItLooks(pred(1200, true)), 'Closure ahead');
+});
+
+test('voice errors and silence say what to do', () => {
+  assert.equal(voiceError(new Error('voice unavailable (no ELEVENLABS_API_KEY)')), "Voice isn't set up on this server yet. Type your destination instead.");
+  assert.match(voiceError(new TypeError('Failed to fetch')), /Can't reach the server/);
+  assert.equal(voiceError(new Error('audio too long')), 'That was too long. Keep it to a few seconds.');
+  assert.equal(voiceError(new Error('HTTP 500')), "Couldn't understand that. Try again.");
+  const silent: VoiceIntent = { transcript: '  ', action: 'unknown', destination: null, origin: null, time: null, time_mode: null };
+  assert.match(voiceNote(silent), /^Didn't catch that/);
 });

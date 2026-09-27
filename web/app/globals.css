@@ -68,6 +68,7 @@
   --sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', system-ui, sans-serif;
   /* Mobile overlay offsets: notch-aware on iPhone, plain 12px in a narrow browser. */
   --safe-top: max(calc(env(safe-area-inset-top) + 4px), 12px);
+  --bar-bottom: calc(env(safe-area-inset-top) + 52px); /* phone menu bar: overlays start 8px under it */
   --safe-bottom: max(env(safe-area-inset-bottom), 16px);
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   color-scheme: light; /* native controls (time picker, scrollbars) follow the chosen theme, not the OS */
@@ -146,6 +147,7 @@ input::placeholder { color: var(--muted); }
 .leaflet-container { background: var(--canvas); font-family: var(--sans); }
 /* ponytail: CSS-filter tint over the grey Esri tiles (GPU, cheap); swap for a styled vector basemap if we need exact hues. */
 .leaflet-tile-pane { filter: var(--map-tint); }
+.map[data-style='satellite'] .leaflet-tile-pane { filter: none; } /* photos keep their real colours */
 .leaflet-control-attribution { background: var(--sheet-bg) !important; color: var(--muted) !important; font-size: 10px !important; }
 .leaflet-control-attribution a { color: var(--muted) !important; }
 
@@ -273,10 +275,10 @@ input::placeholder { color: var(--muted); }
 }
 
 /* ---------- desktop ---------- */
-.desk { position: relative; height: 100dvh; display: flex; overflow: hidden; }
+.desk { position: relative; height: 100dvh; display: flex; flex-direction: column; overflow: hidden; }
+.desk-main { flex: 1; min-height: 0; display: flex; }
 .desk-panel { position: relative; z-index: 10; flex: none; width: 400px; height: 100%; display: flex; flex-direction: column; background: var(--panel); border-right: 1px solid var(--line); box-shadow: var(--shadow); }
-.brand { display: flex; align-items: center; gap: 10px; padding: 20px 24px 16px; font-size: 20px; font-weight: 700; letter-spacing: -0.025em; }
-.desk-search { position: relative; padding: 0 16px; }
+.desk-search { position: relative; padding: 16px 16px 0; }
 .desk-search .suggest { position: absolute; top: calc(100% + 6px); left: 16px; right: 16px; z-index: 20; }
 .desk-body { flex: 1; min-height: 0; overflow: auto; padding: 16px 16px 20px; display: flex; flex-direction: column; gap: 10px; }
 .desk-body.roomy { padding-top: 18px; gap: 22px; }
@@ -307,7 +309,7 @@ input::placeholder { color: var(--muted); }
 
 /* ---------- mobile ---------- */
 .mob { position: relative; height: 100dvh; overflow: hidden; }
-.mob-top { position: absolute; top: var(--safe-top); left: 12px; right: 12px; z-index: 30; display: flex; flex-direction: column; gap: 8px; }
+.mob-top { position: absolute; top: calc(var(--bar-bottom) + 8px); left: 12px; right: 12px; z-index: 30; display: flex; flex-direction: column; gap: 8px; }
 .mob .endpoints { background: var(--sheet-bg); backdrop-filter: blur(20px) saturate(1.6); -webkit-backdrop-filter: blur(20px) saturate(1.6); box-shadow: var(--shadow); border-radius: 18px; padding: 6px 8px 6px 14px; }
 .mob .suggest { border-radius: 16px; }
 .mob .suggest button { min-height: 56px; padding: 8px 14px; }
@@ -317,8 +319,8 @@ input::placeholder { color: var(--muted); }
 .mob .rail .line { height: 22px; }
 .mob .inputs input { height: 44px; font-size: 17px; } /* ≥16px stops iOS zooming on focus */
 .mob .swap { width: 44px; height: 44px; border-radius: 12px; background: var(--fill); }
-.mob .compass { position: absolute; right: 12px; top: calc(var(--safe-top) + 150px); z-index: 28; }
-.mob .compass.high { top: calc(var(--safe-top) + 4px); }
+.mob .compass { position: absolute; right: 12px; top: calc(var(--bar-bottom) + 146px); z-index: 28; }
+.mob .compass.high { top: calc(var(--bar-bottom) + 8px); }
 
 /* Draggable sheet: height comes from --sheet-h (set on .mob by the sheet hook).
    ponytail: animates height, not transform, so the footer (Start) stays pinned to the visible bottom at every detent.
@@ -356,7 +358,7 @@ input::placeholder { color: var(--muted); }
 .close-btn { flex: none; width: 30px; height: 30px; border-radius: 50%; background: var(--fill); color: var(--muted); display: flex; align-items: center; justify-content: center; }
 .start { width: 100%; height: 52px; border-radius: 14px; background: var(--action); color: var(--on-action); font-size: 17px; font-weight: 650; }
 
-.turn { position: absolute; top: var(--safe-top); left: 12px; right: 12px; z-index: 30; display: flex; align-items: center; gap: 14px; padding: 16px 18px; border-radius: 20px; background: var(--action); color: var(--on-action); box-shadow: var(--shadow); text-align: left; }
+.turn { position: absolute; top: calc(var(--bar-bottom) + 8px); left: 12px; right: 12px; z-index: 30; display: flex; align-items: center; gap: 14px; padding: 16px 18px; border-radius: 20px; background: var(--action); color: var(--on-action); box-shadow: var(--shadow); text-align: left; }
 .turn-arrow { flex: none; width: 52px; height: 52px; border-radius: 14px; background: rgba(255, 255, 255, 0.2); display: flex; align-items: center; justify-content: center; }
 .turn .stack { gap: 3px; }
 .turn .sub { font-size: 15px; color: rgba(255, 255, 255, 0.85); }
@@ -396,15 +398,11 @@ input::placeholder { color: var(--muted); }
 .trip-note span { font-size: 13px; line-height: 1.4; color: var(--brand-text); text-wrap: pretty; }
 @media (hover: hover) { .smart-card:hover { border-color: var(--brand-strong); } }
 
-.where-to.fake { flex: none; height: 48px; padding: 0 14px; color: var(--muted); font-size: 17px; font-weight: 500; text-align: left; }
-.where-row { display: flex; align-items: center; gap: 8px; }
-.where-row .where-to.fake { flex: 1; min-width: 0; }
-.where-row .mic { width: 48px; height: 48px; border-radius: 12px; background: var(--fill); }
-/* Light / dark toggle: the desktop header's round button, or a twin of the mic in the mobile start row. */
-.theme-btn { flex: none; display: flex; align-items: center; justify-content: center; color: var(--action-text); }
-.brand .theme-btn { margin-left: auto; }
-.where-row .theme-btn { width: 48px; height: 48px; border-radius: 12px; background: var(--fill); }
-@media (hover: hover) { .where-row .theme-btn:hover { background: var(--fill-2); } }
+/* Phone start row: one full-width search bar, the mic inside it on the right. */
+.where-row { display: flex; align-items: center; }
+.where-to.fake { flex: 1; min-width: 0; height: 48px; padding: 0 4px 0 0; gap: 0; }
+.where-open { flex: 1; min-width: 0; height: 100%; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 14px; color: var(--muted); font-size: 17px; font-weight: 500; text-align: left; }
+.where-to.fake .mic { width: 40px; height: 40px; border-radius: 10px; }
 
 /* Voice: tap-to-talk mic, used in the Where-to box, the start sheet, and next to swap. */
 .mic-wrap { position: relative; flex: none; display: flex; }
@@ -433,12 +431,6 @@ input::placeholder { color: var(--muted); }
 .mob .trip-note { border-radius: 14px; }
 
 /* ---------- AI & privacy ---------- */
-/* Shield button: the desktop header's round button, or a twin of the mic in the mobile start row. */
-.ai-btn { flex: none; display: flex; align-items: center; justify-content: center; color: var(--action-text); }
-.brand .ai-btn { margin-left: auto; }
-.brand .ai-btn + .theme-btn { margin-left: 0; }
-.where-row .ai-btn { width: 48px; height: 48px; border-radius: 12px; background: var(--fill); }
-.ai-btn[aria-pressed='true'] { background: var(--action-tint); }
 /* One line under the transPEAKtation card: who picked, who wrote it, whether it was kept. Opens the panel. */
 .trace-strip { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 6px 10px 6px 12px; border-radius: 10px; background: var(--fill); font-size: 13px; font-weight: 550; line-height: 1.35; text-align: left; }
 .trace-strip .lead:first-child { color: var(--action-text); }
@@ -486,6 +478,11 @@ input::placeholder { color: var(--muted); }
 .switch i { position: absolute; top: 3px; left: 3px; width: 20px; height: 20px; border-radius: 50%; background: #FFFFFF; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25); transition: transform 0.2s var(--ease-out); }
 .aip-switch[aria-checked='true'] .switch { background: var(--action); }
 .aip-switch[aria-checked='true'] .switch i { transform: translateX(18px); }
+/* Can't be switched on yet: no switch drawn, a "Coming soon" / "Unavailable" tag says why. */
+.aip-switch:disabled { cursor: default; }
+.aip-switch:disabled .name { color: var(--muted); }
+.switch-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.switch-head .tag { font-size: 11px; padding: 1px 7px; }
 .aip-stale { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-radius: 12px; background: var(--action-tint); font-size: 13px; line-height: 1.4; }
 .aip-stale .pill-btn { flex: none; align-self: center; }
 
@@ -495,7 +492,6 @@ input::placeholder { color: var(--muted); }
 .aip-keep .yes { color: var(--good); }
 .aip-keep .no { color: var(--bad); }
 
-.ai-sheet .search-bar .title { font-size: 20px; font-weight: 700; }
 .mob .aip-switch { padding: 14px; }
 .mob .aip-switch .name { font-size: 16px; }
 .mob .aip-switch .sub, .mob .stop-did { font-size: 14px; }
@@ -503,8 +499,97 @@ input::placeholder { color: var(--muted); }
 .mob .trace-strip { min-height: 44px; border-radius: 12px; font-size: 14px; }
 .mob .aip-stale .pill-btn { height: 40px; }
 @media (hover: hover) {
-  .where-row .ai-btn:hover, .trace-strip:hover { background: var(--fill-2); }
-  .aip-switch:hover { background: var(--fill); }
+  .trace-strip:hover { background: var(--fill-2); }
+  .aip-switch:not(:disabled):hover { background: var(--fill); }
+}
+
+/* ---------- ☰ menu, map layers, settings ---------- */
+.nav-wrap { position: relative; flex: none; }
+/* Menu bar: full width on top of the page; the app icon opens the menu. */
+.app-bar { position: relative; z-index: 20; flex: none; display: flex; align-items: center; gap: 8px; height: 56px; padding: 0 16px 0 12px; background: var(--panel); border-bottom: 1px solid var(--line); }
+.logo-btn { width: 40px; height: 40px; border-radius: 12px; display: flex; align-items: center; justify-content: center; }
+.logo-btn[aria-expanded='true'] { background: var(--action-tint); color: var(--action-text); }
+.wordmark { font-size: 19px; font-weight: 700; letter-spacing: -0.025em; }
+.mob-bar { position: absolute; top: 0; left: 0; right: 0; z-index: 35; height: var(--bar-bottom); padding-top: env(safe-area-inset-top); background: var(--sheet-bg); backdrop-filter: blur(20px) saturate(1.6); -webkit-backdrop-filter: blur(20px) saturate(1.6); box-shadow: var(--shadow-sm); border-bottom: none; }
+.mob-bar .logo-btn { width: 44px; height: 44px; }
+.mob-bar .wordmark { font-size: 18px; }
+.mob-bar .menu-item { min-height: 48px; font-size: 17px; }
+.pop { position: absolute; top: calc(100% + 8px); z-index: 60; padding: 8px; border-radius: 16px; background: var(--pop); border: 1px solid var(--line); box-shadow: var(--shadow); }
+.menu-pop { top: calc(100% + 6px); left: 0; width: 264px; font-size: 15px; font-weight: 500; letter-spacing: normal; }
+.menu-list { display: flex; flex-direction: column; }
+.menu-brand { display: flex; align-items: center; gap: 8px; padding: 8px 10px 10px; font-size: 14px; font-weight: 700; letter-spacing: -0.01em; }
+.menu-item { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 40px; padding: 8px 10px; border-radius: 10px; text-align: left; }
+.menu-item .lead { color: var(--action-text); }
+.menu-sep { height: 1px; margin: 6px; border: none; background: var(--line); }
+
+/* Map layers on / off: top-right of the desktop map (clear of zoom, compass and attribution at the bottom); under the
+   compass on a phone. On = action-blue layers icon; off = muted, crossed-out icon. */
+.layers-btn { position: relative; width: 36px; height: 36px; padding: 0; border-radius: 50%; background: var(--pop); box-shadow: var(--shadow-sm); color: var(--ink); display: flex; align-items: center; justify-content: center; }
+.layers-btn::before { content: ''; position: absolute; inset: -6px; border-radius: 50%; } /* 48px tap target around the small circle */
+.desk-layers { position: absolute; top: 16px; right: 20px; z-index: 6; } /* centred over the 44px zoom column below */
+.mob-layers { position: absolute; right: 18px; top: calc(var(--bar-bottom) + 204px); z-index: 28; } /* centred under the 48px compass */
+.mob-layers.high { top: calc(var(--bar-bottom) + 66px); }
+.layers-btn[aria-pressed='true'] { color: var(--action-text); }
+.layers-btn[aria-pressed='false'] { color: var(--muted); }
+.layer-group { display: flex; flex-direction: column; }
+.eyebrow { margin: 0 0 8px; padding: 0 2px; font-size: 11px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+
+/* Radios (theme, map style): native inputs, so the picked one reads by shape, not colour alone. */
+.choice { margin: 0; padding: 0; border: none; min-width: 0; }
+.choice input[type='radio'] { flex: none; width: 18px; height: 18px; margin: 0; accent-color: var(--action); }
+.style-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.style-opt { display: flex; flex-direction: column; gap: 8px; padding: 6px 6px 10px; border-radius: 12px; border: 1.5px solid var(--line); cursor: pointer; }
+.style-opt:has(input:checked) { border-color: var(--action-edge); background: var(--action-tint); }
+.style-name { display: flex; align-items: center; gap: 8px; padding: 0 4px; font-size: 14px; font-weight: 600; }
+.swatch { height: 52px; border-radius: 8px; border: 1px solid var(--line); }
+.s-standard .swatch { background: linear-gradient(135deg, transparent 46%, #FFFFFF 46% 54%, transparent 54%), linear-gradient(35deg, transparent 60%, #D9ED92 60% 64%, transparent 64%), #E4EBDF; }
+.s-satellite .swatch { background: radial-gradient(circle at 30% 35%, #6E8B4E 0 22%, transparent 23%), radial-gradient(circle at 75% 70%, #4E6B3A 0 26%, transparent 27%), linear-gradient(135deg, #7C7358, #56644A 55%, #2F4A5E); }
+.choice-list { display: flex; flex-direction: column; border-radius: 14px; background: var(--fill); overflow: hidden; }
+.choice-row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; cursor: pointer; }
+.choice-row + .choice-row { border-top: 1px solid var(--line); }
+.set-stack { display: flex; flex-direction: column; gap: 20px; }
+.set-foot { margin: 10px 0 0; padding: 0 2px; line-height: 1.45; text-wrap: pretty; }
+.set-stack .set-foot { margin-top: 0; }
+.soon-row { display: flex; align-items: flex-start; gap: 12px; padding: 12px 14px; border-radius: 14px; background: var(--fill); }
+.soon-row .lead { margin-top: 1px; }
+.soon-row .sub { line-height: 1.4; text-wrap: pretty; }
+
+/* Dialogs (Settings, the menu's pages): above everything, one at a time. */
+.nav-backdrop { position: fixed; inset: 0; z-index: 90; background: rgba(8, 22, 34, 0.32); }
+.dialog { position: fixed; top: 50%; left: 50%; z-index: 91; transform: translate(-50%, -50%); width: min(480px, calc(100vw - 48px)); max-height: min(720px, calc(100dvh - 48px)); display: flex; flex-direction: column; border-radius: 20px; background: var(--panel); box-shadow: var(--shadow); outline: none; }
+.dialog.big { width: min(820px, calc(100vw - 48px)); height: min(640px, calc(100dvh - 48px)); }
+.dialog.full { inset: 0; transform: none; width: auto; max-height: none; border-radius: 0; padding-top: env(safe-area-inset-top); }
+.dialog-head { flex: none; display: flex; align-items: center; gap: 10px; padding: 16px 20px 14px; border-bottom: 1px solid var(--line); }
+.dialog-title { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -0.01em; }
+.dialog.full .dialog-title { font-size: 20px; }
+.dialog-body { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 18px 20px 24px; }
+.dialog.full .dialog-body { padding: 16px 16px calc(var(--safe-bottom) + 24px); }
+.settings { flex: 1; min-height: 0; display: grid; grid-template-columns: 208px 1fr; }
+.settings-nav { display: flex; flex-direction: column; gap: 2px; padding: 12px; border-right: 1px solid var(--line); }
+.settings-tab { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 8px 10px; border-radius: 10px; font-size: 14px; font-weight: 550; text-align: left; }
+.settings-tab[aria-current='page'] { background: var(--action-tint); color: var(--action-text); font-weight: 700; }
+.settings-tab[aria-current='page'] .lead { color: var(--action-text); }
+.settings-body { min-height: 0; overflow: auto; padding: 20px 24px 28px; }
+.settings-h { margin: 0 0 16px; font-size: 18px; font-weight: 700; letter-spacing: -0.01em; }
+.dialog.full .settings-nav { padding: 0; border: none; border-radius: 14px; background: var(--fill); gap: 0; overflow: hidden; }
+.dialog.full .settings-tab { min-height: 56px; padding: 12px 14px; border-radius: 0; font-size: 17px; }
+.dialog.full .settings-tab + .settings-tab { border-top: 1px solid var(--line); }
+.dialog.full .choice-row { min-height: 52px; }
+.dialog.full .name { font-size: 16px; }
+.dialog.full .aip-switch { padding: 14px; }
+.dialog.full .aip-switch .sub, .dialog.full .stop-did { font-size: 14px; }
+.prose h3 { margin: 20px 0 6px; font-size: 15px; font-weight: 650; }
+.prose h3:first-child { margin-top: 0; }
+.prose p, .prose ul { margin: 0 0 8px; font-size: 14px; line-height: 1.5; text-wrap: pretty; }
+.prose ul { padding-left: 18px; }
+.prose li { margin-bottom: 6px; }
+.empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 28px 12px; text-align: center; }
+.empty b { font-size: 16px; }
+.empty p { margin: 0; max-width: 38ch; color: var(--muted); }
+@media (hover: hover) {
+  .menu-item:hover, .settings-tab:not([aria-current='page']):hover, .choice-row:hover { background: var(--fill); }
+  .logo-btn:hover { background: var(--fill); }
+  .layers-btn:hover { background: var(--raised); }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -4,7 +4,9 @@ import type * as Leaflet from 'leaflet';
 import { EVENT_KINDS, eventImpact, eventKind, fmtCrowd, fmtEventTime, type EventKind, type MapEvent, type Span } from '@/lib/context.ts';
 import { MAP_EXPERIMENT } from '@/lib/experiment.ts';
 import { fmtDist, labelPoint, trafficRuns, type LatLng, type Place, type Route } from '@/lib/route.ts';
+import type { MapStyle } from '@/lib/map-prefs.ts';
 import type { Theme } from '@/lib/theme.ts';
+import { useMapPrefs } from '@/lib/use-map-prefs.ts';
 import { useTheme } from '@/lib/use-theme.ts';
 import { SnapMapLayers } from './snapmap-layers.ts';
 
@@ -30,8 +32,12 @@ type Props = {
   pad: { topLeft: [number, number]; bottomRight: [number, number] }; // room left for overlays when fitting
 };
 
-// Esri's own light / dark grey basemaps, tinted toward the palette by --map-tint (globals.css).
-const tiles = (t: Theme) => `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_${t === 'dark' ? 'Dark' : 'Light'}_Gray_Base/MapServer/tile/{z}/{y}/{x}`;
+// Esri's own light / dark grey basemaps, tinted toward the palette by --map-tint (globals.css); satellite is Esri's
+// World Imagery from the same keyless tile server, left untinted.
+const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services';
+const baseLayer = (l: typeof Leaflet, t: Theme, s: MapStyle) => s === 'satellite'
+  ? l.tileLayer(`${ESRI}/World_Imagery/MapServer/tile/{z}/{y}/{x}`, { attribution: 'Tiles © Esri, Maxar, Earthstar Geographics', maxNativeZoom: 18, maxZoom: 18 })
+  : l.tileLayer(`${ESRI}/Canvas/World_${t === 'dark' ? 'Dark' : 'Light'}_Gray_Base/MapServer/tile/{z}/{y}/{x}`, { attribution: 'Tiles © Esri', maxNativeZoom: 16, maxZoom: 18 });
 
 export default function MapView({ ref, routes, sel, tp, labels, from, to, marker, events, span, routeEvents, onSelect, pad }: Props) {
   const el = useRef<HTMLDivElement>(null);
@@ -41,8 +47,9 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
   const base = useRef<Leaflet.TileLayer>(null);
   const snap = useRef<SnapMapLayers>(null);
   const { theme } = useTheme();
-  const themeNow = useRef(theme); // Leaflet loads async: the tile layer must use the theme at that moment
-  themeNow.current = theme;
+  const { prefs } = useMapPrefs(); // map style + layers (Map layers button / Settings → Map & Routing)
+  const look = useRef({ theme, prefs }); // Leaflet loads async: the tile layer must use the theme and style at that moment
+  look.current = { theme, prefs };
   const latest = useRef({ routes, sel, tp, labels, from, to, marker, events, span, routeEvents, pad, onSelect });
   latest.current = { routes, sel, tp, labels, from, to, marker, events, span, routeEvents, pad, onSelect };
 
@@ -68,7 +75,9 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
   const draw = () => {
     const l = L.current, g = layer.current;
     if (!l || !g || !el.current) return;
-    const { routes, sel, tp, labels, from, to, marker, events, span, routeEvents } = latest.current;
+    const { routes, sel, tp, labels, from, to, marker, span, routeEvents } = latest.current;
+    const { eventPins, traffic } = look.current.prefs;
+    const events = eventPins ? latest.current.events : undefined; // Event Pins off: no pins, no impact areas (snapmap: no heat)
     // Colours come from the CSS theme tokens, so light/dark and brand changes stay in globals.css.
     const cs = getComputedStyle(el.current), c = (n: string) => cs.getPropertyValue(n).trim();
     const casing = c('--route-casing'), line = c(tp ? '--brand-line' : '--route');
@@ -92,7 +101,7 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
       l.polyline(r.coords, { color: c('--route-casing-sel'), weight: 11, interactive: false }).addTo(g);
       l.polyline(r.coords, { color: line, weight: 7, interactive: false }).addTo(g);
       // Live slowdowns painted over the route, like Apple/Google: amber, orange-red, deep red.
-      for (const run of trafficRuns(r)) l.polyline(run.coords, { color: c(`--traffic-${run.level}`), weight: 7, interactive: false }).addTo(g);
+      if (traffic) for (const run of trafficRuns(r)) l.polyline(run.coords, { color: c(`--traffic-${run.level}`), weight: 7, interactive: false }).addTo(g);
     }
     // Labels sit above the lines; each one selects its route, like tapping the line.
     labels?.forEach((text, i) => {
@@ -117,7 +126,7 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
     if (to) l.marker([to.lat, to.lon], { icon: l.divIcon({ className: 'dest-pin', iconSize: [28, 36], iconAnchor: [14, 35], html: DEST_PIN }), keyboard: false, zIndexOffset: 2000, title: `Destination: ${to.label}` }).addTo(g);
     snap.current?.update({
       events: events ?? [], span: span ?? { from: Date.now(), to: Date.now() },
-      routeEventIds: new Set((routeEvents ?? []).map(e => e.id)), routeActive: routes.length > 0, theme: themeNow.current,
+      routeEventIds: new Set((routeEvents ?? []).map(e => e.id)), routeActive: routes.length > 0, theme: look.current.theme,
     });
   };
 
@@ -129,7 +138,7 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
       // snapmap: quarter-level zoom steps, so pins and heat change gradually as you wheel / pinch.
       const m = (map.current = l.map(el.current, { zoomControl: false, ...(SNAP ? { zoomSnap: 0.25, zoomDelta: 0.5, wheelPxPerZoomLevel: 100 } : {}) }).setView([37.788, -122.4075], 14));
       m.attributionControl.setPrefix(false);
-      base.current = l.tileLayer(tiles(themeNow.current), { attribution: 'Tiles © Esri', maxNativeZoom: 16, maxZoom: 18 }).addTo(m);
+      base.current = baseLayer(l, look.current.theme, look.current.prefs.style).addTo(m);
       layer.current = l.layerGroup().addTo(m);
       if (SNAP) snap.current = new SnapMapLayers(l, m);
       draw();
@@ -140,9 +149,15 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
     return () => { cancelled = true; ro.disconnect(); snap.current?.destroy(); snap.current = null; map.current?.remove(); map.current = null; };
   }, []);
 
-  // Light/dark switch (toggle, or the OS when nothing is saved): swap the basemap and repaint the lines and markers
-  // in the new theme's colours. The first run just repeats what the map was created with.
-  useEffect(() => { base.current?.setUrl(tiles(theme)); draw(); }, [theme]);
+  // Theme (Settings, or the OS on System) or map style changed: swap the basemap (its attribution too) and repaint the
+  // lines and markers in the new theme's colours. The first run just repeats what the map was created with.
+  useEffect(() => {
+    const l = L.current, m = map.current;
+    if (l && m && base.current) { base.current.remove(); base.current = baseLayer(l, theme, prefs.style).addTo(m); }
+    draw();
+  }, [theme, prefs.style]);
+  // Event Pins / Traffic switched: redraw with or without them.
+  useEffect(draw, [prefs.eventPins, prefs.traffic]);
 
   // span / routeEvents are rebuilt every render ("Leave now" moves by the millisecond): key them on minutes and ids.
   const spanKey = span ? `${Math.floor(span.from / 60_000)}-${Math.floor(span.to / 60_000)}` : '';
@@ -151,7 +166,7 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
   // New routes or endpoints: frame them.
   useEffect(fit, [routes, from, to]);
 
-  return <div ref={el} className="map" />;
+  return <div ref={el} className="map" data-style={prefs.style} />;
 }
 
 const DEST_PIN = '<svg viewBox="0 0 28 36" aria-hidden="true"><path class="body" d="M14 34.5C14 34.5 26.5 21.8 26.5 13.5a12.5 12.5 0 0 0-25 0C1.5 21.8 14 34.5 14 34.5Z"/><circle class="hole" cx="14" cy="13.5" r="4.75"/></svg>';

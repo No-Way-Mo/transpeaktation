@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { applyTheme, otherTheme, parseTheme, readTheme, resolveTheme, THEME_KEY, THEME_SCRIPT, type Theme } from './theme.ts';
+import { applyTheme, applyThemePref, otherTheme, parseTheme, readTheme, readThemePref, resolveTheme, THEME_KEY, THEME_SCRIPT, type Theme } from './theme.ts';
 
 /** In-memory localStorage; `broken` throws like a blocked / private-mode store. */
 function store(init: Record<string, string> = {}, broken = false) {
@@ -70,4 +70,29 @@ test('blocked storage: nothing throws, the OS setting still applies, the switch 
   assert.equal(bootScript(s, true), 'dark');
   assert.doesNotThrow(() => applyTheme('light', html, s));
   assert.equal(html.theme, 'light');
+});
+
+test('System / Light / Dark: System is "no saved choice", so the pre-paint script follows the OS', () => {
+  const s = { ...store(), removeItem(k: string) { s.m.delete(k); } };
+  assert.equal(readThemePref(s), 'system');
+  const html = root();
+  applyThemePref('dark', html, s, false);
+  assert.equal(html.theme, 'dark');
+  assert.equal(readThemePref(s), 'dark');
+  assert.equal(bootScript(s, false), 'dark');
+  applyThemePref('system', html, s, false);          // back to System on a light OS
+  assert.equal(html.theme, 'light');
+  assert.equal(readThemePref(s), 'system');
+  assert.equal(s.m.has(THEME_KEY), false);
+  assert.equal(bootScript(s, true), 'dark');         // next load follows the OS again
+  applyThemePref('light', html, s, true);            // Light beats a dark OS, and persists
+  assert.equal(html.theme, 'light');
+  assert.equal(bootScript(s, true), 'light');
+});
+
+test('System with blocked storage: applies the OS theme and does not throw', () => {
+  const s = store({}, true), html = root();
+  assert.doesNotThrow(() => applyThemePref('system', html, s, true));
+  assert.equal(html.theme, 'dark');
+  assert.equal(readThemePref(s), 'system');
 });
