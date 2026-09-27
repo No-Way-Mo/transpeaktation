@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 process.env.TZ = 'America/New_York'; // a device outside SF: every clock time must still be Pacific
-import { fmtDist, fmtWhen, fromPtInput, labelPoint, longerThanItLooks, mins, planPath, ptInput, ptTime, sfDays, routeTag, spokenTime, stepIcon, stepText, trafficRuns, voiceError, voiceNote, type LatLng, type Prediction, type Route, type Step, type VoiceIntent } from './route.ts';
+import { fmtDist, fmtWhen, fromPtInput, labelPoint, mins, planPath, ptInput, ptTime, sfDays, routeTag, spokenTime, stepIcon, stepText, trafficRuns, voiceError, voiceNote, type LatLng, type Route, type Step, type VoiceIntent } from './route.ts';
 
 const step = (type: string, modifier?: string, name = 'Market St'): Step =>
   ({ distance: 0, duration: 0, name, maneuver: { type, modifier, location: [0, 0] } });
@@ -108,15 +108,6 @@ test('plan query: past times clamp to now unless replaying', () => {
   assert.match(planPath(a, b, { mode: 'depart', at: past }, now, false), /depart_at=2026-09-26T20%3A00%3A00.000Z$/);
   assert.match(planPath(a, b, { mode: 'arrive', at: past }, now, true), /arrive_by=2026-09-20T01%3A30%3A00.000Z&replay=true$/);
   assert.doesNotMatch(planPath(a, b, { mode: 'depart', at: now + 864e5 }, now, true), /replay/); // future: plain plan
-});
-
-test('longerThanItLooks: normal routes warn when api/ estimates a minute or more on top of the provider ETA', () => {
-  const pred = (delay: number, blocked = false) => ({ blocked, estimate: { dur: 360 + delay, delay, why: ['AMZN Unboxed at Howard St'] } }) as Prediction;
-  assert.equal(longerThanItLooks(pred(130)), '+2 min events');
-  assert.equal(longerThanItLooks(pred(40)), null);   // under a minute: not worth a warning
-  assert.equal(longerThanItLooks(undefined), null);  // no plan yet
-  assert.equal(longerThanItLooks(pred(1200, true)), 'Closure ahead');
-  assert.equal(longerThanItLooks({ blocked: false, estimate: { dur: 490, delay: 130, why: [] } } as unknown as Prediction), '+2 min predicted'); // forecast only
 });
 
 test('voice errors and silence say what to do', () => {

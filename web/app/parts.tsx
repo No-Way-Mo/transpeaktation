@@ -1,6 +1,6 @@
 'use client';
 import { useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
-import { fmtDist, fmtWhen, fromPtInput, longerThanItLooks, mins, ptInput, REPLAY, routeTag, stepIcon, type Place, type Route, type Step, type When } from '@/lib/route.ts';
+import { fmtDist, fmtWhen, fromPtInput, mins, ptInput, REPLAY, routeTag, stepIcon, type Place, type Route, type Step, type When } from '@/lib/route.ts';
 import { EVENT_KINDS, eventGlyph, eventKind, type EventKind, type MapEvent } from '@/lib/context.ts';
 import type { Card, useRoutePlanner } from '@/lib/use-route-planner.ts';
 import { useVoice } from '@/lib/use-voice.ts';
@@ -297,10 +297,10 @@ export function RouteList({ p, action }: { p: Planner; action?: ReactNode }) {
         <div className="label">Regular</div>
         {p.routes.map((rt, i) => {
           if (rt.by === 'ml') return null; // ml/'s own route only appears as the transPEAKtation pick
-          const pred = p.tp?.preds[i], longer = longerThanItLooks(pred), on = !p.choice.tp && p.choice.i === i;
+          const pred = p.tp?.preds[i], on = !p.choice.tp && p.choice.i === i;
           return (
-            <RouteCard key={i} route={rt} card={p.card(i, false)} when={p.when} tag={longer ?? routeTag(i, rt.dur, fastest)}
-              tone={i === 0 && !longer ? 'fast' : ''} note={pred?.note ?? undefined}
+            <RouteCard key={i} route={rt} card={p.card(i, false)} when={p.when} tag={pred?.blocked ? 'Closure ahead' : routeTag(i, rt.dur, fastest)}
+              tone={i === 0 && !pred?.blocked ? 'fast' : ''} note={pred?.note ?? undefined}
               selected={on} onPick={() => p.setChoice({ i, tp: false })} as={as}>
               {on && action}
             </RouteCard>

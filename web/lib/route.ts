@@ -73,9 +73,9 @@ export type Prediction = {
   incidents: { label: string; is_closure: boolean; source: string; at: string; until: string | null }[];
   traffic: { delay_sec: number; slow_segments: number; coverage: number; as_of: string | null; sources: string[] };
   model: string; blocked: boolean;
-  /** api/'s own event/closure estimate for this route; shown on the normal cards, never on transPEAKtation's. */
+  /** api/'s own event/closure estimate for this route; the normal cards' note says what it adds to their ETA. */
   estimate?: { dur: number; delay: number; why: string[] };
-  /** Normal card only, ≤110 chars (2 lines): the congestion on this route when you'd drive it, and how much slower it is than transPEAKtation's. */
+  /** Normal card only, ≤110 chars (2 lines): "Might take extra N minutes due to: <cause>", or what's on this route. */
   note?: string | null;
 };
 /** Route reward (api/app/rewards.py): completing the trip on the recommended route (`route` = plan.best) earns
@@ -299,15 +299,6 @@ export function trafficRuns(r: Route): { level: Slow; coords: LatLng[] }[] {
 }
 
 /** Tag for a route card: the first (fastest) route vs. how much slower each alternative is. */
-/** A normal route's card when api/'s estimate says it will take a minute or more longer than the provider's ETA:
- *  the tag and a line saying why. null = nothing to warn about. */
-export function longerThanItLooks(pred: Prediction | undefined): string | null {
-  const est = pred?.estimate;
-  if (pred?.blocked) return 'Closure ahead';
-  // no named event or closure behind the delay: it is ml/'s traffic forecast, not an event
-  return est && est.delay >= 60 ? `+${mins(est.delay)} min ${est.why.length ? 'events' : 'predicted'}` : null;
-}
-
 export function routeTag(i: number, dur: number, fastest: number): string {
   if (i === 0) return 'Fastest';
   const diff = Math.round((dur - fastest) / 60);

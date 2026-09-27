@@ -1,5 +1,5 @@
-"""The normal route cards' notes: a short summary of the congestion on each route when the rider would drive it,
-written by Gemini from the facts the planner computed. The transPEAKtation card gets none.
+"""The normal route cards' notes: why each route might take longer than the ETA on its card ("Might take extra N
+minutes due to: " + the cause, model.extra_lead), or what's on it, written by Gemini from the facts the planner computed. The transPEAKtation card gets none.
 
 Optional. /plan asks only when GEMINI_API_KEY is set; on no key, a slow or failed call, or a reply that is too long,
 spells a number out, has a number that isn't in that route's facts or names the wrong event, the cards keep
@@ -16,7 +16,7 @@ from datetime import datetime
 
 import httpx
 
-from .model import (NOTE_MAX, SF_TZ, best_traffic, fmt_clock, is_slow, mins, minutes_slower, pick_facts, shorten,
+from .model import (NOTE_MAX, SF_TZ, best_traffic, extra_lead, extra_min, fmt_clock, is_slow, mins, pick_facts, shorten,
                     slow_stretches)
 
 log = logging.getLogger(__name__)
@@ -36,19 +36,19 @@ PROMPT = (
     "adds_about_min = the delay it adds), closures_and_incidents_on_it (until = when it ends), slow_stretches and "
     "slow_streets (slow traffic, not events), forecast_adds_about_min (the traffic forecast's extra delay; not an "
     "event), via.\n"
-    "Alternative route notes, in order:\n"
-    "1. Lead: \"N min slower: \" with N = minutes_slower if given. Without minutes_slower the route is not slower: "
-    "never call it slower, longer or busier.\n"
-    "2. Main cause: crosses_a_closure true: \"Crosses the <street> road closure when you'd get there\" (no lead). "
-    "Else the worst event in a few words (\"Giants crowd arriving at Oracle Park\") and what it adds. Else slow "
-    "traffic: slow_stretches and the top slow_streets. Else \"longer or busier roads\" if slower, else \"No events "
-    "or closures on it\".\n"
-    "3. One more detail if it fits: slow streets, when the closure ends, the forecast (\"forecast adds about N "
-    "min\"), or \"traffic flowing\" if have_traffic_data is true and slow_stretches is 0.\n"
+    "Alternative route notes: their cards show the usual ETA. If extra_min is given, the app puts \"Might take extra "
+    "N minutes due to: \" (N = extra_min) before your note, so write only the cause, at most 70 characters, and don't "
+    "repeat N. Never call a route slower, longer or busier.\n"
+    "1. Main cause: crosses_a_closure true: \"Crosses the <street> road closure when you'd get there\". Else the worst "
+    "event in a few words (\"Giants crowd arriving at Oracle Park\"). Else slow traffic: slow_stretches and the top "
+    "slow_streets. Else the forecast if forecast_adds_about_min is given (\"heavier traffic forecast\"). Else \"No "
+    "events or closures on it\".\n"
+    "2. One more detail if it fits: slow streets, when the closure ends, or \"traffic flowing\" if "
+    "have_traffic_data is true and slow_stretches is 0.\n"
     "Examples:\n"
-    "- \"9 min slower: Giants crowd arriving at Oracle Park, adding about 10 min. Slow on King St.\"\n"
+    "- extra_min 10: \"Giants crowd arriving at Oracle Park; slow on King St.\"\n"
     "- \"Crosses the Howard St road closure when you'd get there; closed until 11:00 PM.\"\n"
-    "- \"3 min slower: 6 slow stretches, mostly on 4th St. Forecast adds about 2 min.\"\n"
+    "- extra_min 3: \"6 slow stretches, mostly on 4th St and Bryant St.\"\n"
     "- \"Clear run via Stockton St and 4th St: no events or closures, traffic flowing.\"\n"
     "Recommended note (only if recommended_route is given): why it is the pick, same length and fact rules. Compare "
     "only with what the JSON says about the other routes; never call it the fastest.\n"
@@ -111,7 +111,7 @@ def slow_streets(p: dict, route: dict, ctx: dict) -> list[str]:
     return sorted(slow, key=lambda n: -slow[n])[:3]
 
 
-def _route(r: dict, p: dict, events: dict[str, dict], slower: int, ctx: dict) -> dict:
+def _route(r: dict, p: dict, events: dict[str, dict], extra: int, ctx: dict) -> dict:
     def event(h: dict) -> dict:
         ev = events.get(h["id"]) or {}
         return {"name": shorten(h["label"], 50), "kind": (ev.get("category") or "event").replace("_", " "),
@@ -130,8 +130,8 @@ def _route(r: dict, p: dict, events: dict[str, dict], slower: int, ctx: dict) ->
         out["smaller_events_not_listed"] = len(p["event_hits"]) - MAX_EVENTS
     if not p["event_hits"] and p["breakdown"]["events_sec"] >= 60:  # ml/'s forecast stands in for the events
         out["forecast_adds_about_min"] = mins(p["breakdown"]["events_sec"])
-    if slower and not p["blocked"]:  # a blocked route's minutes are mostly the closure penalty, not a delay
-        out["minutes_slower"] = slower
+    if extra:
+        out["extra_min"] = extra
     return out
 
 
@@ -139,10 +139,9 @@ def facts(routes: list[dict], ctx: dict, result: dict, *, pick: bool = True) -> 
     """What the notes can say, from model.plan's result: each normal route with a note, in order, and (pick=True)
     transPEAKtation's route, with what it avoids on the other routes (model.pick_facts)."""
     best = result["preds"][result["best"]]
-    tp_min = mins(best["dur"])
     events = {e["id"]: e for e in ctx.get("events") or []}
     out = {"traffic_data": TRAFFIC.get(ctx.get("traffic_kind"), "live traffic now"),
-           "routes": [_route(r, p, events, minutes_slower(p, tp_min), ctx)
+           "routes": [_route(r, p, events, extra_min(p), ctx)
                       for r, p in zip(routes, result["preds"]) if p.get("note")]}
     if pick:
         f = pick_facts(routes, result["preds"], result["best"])
@@ -156,18 +155,17 @@ def facts(routes: list[dict], ctx: dict, result: dict, *, pick: bool = True) -> 
 
 
 def check(text: str, route: dict) -> str | None:
-    """The reply, tidied, or None if it's empty, too long, spells a number out, has a number that isn't in this
-    route's facts, gives minutes other than its minutes_slower or event delays (made up or swapped), calls a route that
-    isn't slower slower/longer/busier, or doesn't name the route's worst event/closure."""
+    """The reply, tidied, or None if it's empty, too long (with extra_lead in front), spells a number out, has a number
+    that isn't in this route's facts, gives minutes other than its event delays (made up or swapped), calls the route
+    slower/longer/busier (its card shows the ETA; extra_lead says the rest), or doesn't name the route's worst
+    event/closure."""
     text = _tidy(text)
-    if not text or len(text) > NOTE_MAX or NUMBER_WORDS.search(text):
+    if not text or len(extra_lead(route.get("extra_min")) + text) > NOTE_MAX or NUMBER_WORDS.search(text):
         return None
     known = set(re.findall(r"\d+", json.dumps(route)))
     if not all(n in known for n in re.findall(r"\d+", text)):
         return None
-    if not _minutes_ok(text, route, route.get("minutes_slower"), "slower"):
-        return None
-    if not route.get("minutes_slower") and NOT_SLOWER.search(text):  # a route that isn't slower isn't "busier"
+    if text.lower().startswith("might take") or not _minutes_ok(text, route, None, "slower") or NOT_SLOWER.search(text):
         return None
     if not _flowing_ok(text, route):
         return None
@@ -267,6 +265,7 @@ async def explain(client: httpx.AsyncClient, trip: dict) -> tuple[str | None, li
         if isinstance(notes, list) and len(notes) == len(trip["routes"]) else None  # None in it: template there
     rec = reply.get("recommended")
     pick = check_pick(rec, trip["recommended_route"]) if "recommended_route" in trip and isinstance(rec, str) else None
+    texts = [t and extra_lead(f.get("extra_min")) + t for t, f in zip(texts, trip["routes"])] if texts else texts
     if texts is None or None in texts or ("recommended_route" in trip and pick is None):
         log.warning("gemini route notes rejected: %s", json.dumps(reply)[:400])
     if pick is None and not any(texts or []):
@@ -284,12 +283,12 @@ SAMPLE = {"traffic_data": "live traffic now", "routes": [  # what facts() sends 
         {"name": "Concert at Chase Center", "kind": "concert", "when": "8:00 PM to 11:00 PM",
          "crowd_when_you_pass": "arriving", "adds_about_min": 4, "passes_within_m": 400}],
      "closures_and_incidents_on_it": [], "crosses_a_closure": False, "slow_stretches": 4,
-     "slow_streets": ["King St", "3rd St"], "have_traffic_data": True, "minutes_slower": 9},
+     "slow_streets": ["King St", "3rd St"], "have_traffic_data": True, "extra_min": 10},
     {"via": "Howard St, 6th St", "events_on_it": [],
      "closures_and_incidents_on_it": [{"name": "Road closure on Howard St", "until": "11:00 PM"}],
      "crosses_a_closure": True, "slow_stretches": 0, "slow_streets": [], "have_traffic_data": True},
     {"via": "4th St, 3rd St", "events_on_it": [], "closures_and_incidents_on_it": [], "crosses_a_closure": False,
-     "slow_stretches": 6, "slow_streets": ["4th St", "Bryant St"], "have_traffic_data": True, "minutes_slower": 3},
+     "slow_stretches": 6, "slow_streets": ["4th St", "Bryant St"], "have_traffic_data": True, "extra_min": 3},
     {"via": "Stockton St, 4th St", "events_on_it": [], "closures_and_incidents_on_it": [], "crosses_a_closure": False,
      "slow_stretches": 0, "slow_streets": [], "have_traffic_data": True}],
     "recommended_route": {"via": "Stockton St, 4th St", "events_on_it": [], "closures_and_incidents_on_it": [],
