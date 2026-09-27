@@ -25,6 +25,7 @@ from typing import Any, Iterable
 
 from dotenv import dotenv_values
 
+from . import community
 from .model import LIVE_WINDOW, NOT_A_DELAY, OPEN_ENDED, SF_TZ
 
 _INGEST_ENV = Path(__file__).resolve().parent.parent.parent / "ingest" / ".env"
@@ -136,12 +137,14 @@ class Store:
     # --- reads -----------------------------------------------------------------------------------------------
     def events_between(self, t0: datetime, t1: datetime) -> list[dict] | None:
         """Active events overlapping [t0, t1], each with its venue doc (capacity, keys, drop_off) under `venue`.
-        None = no database; [] with `events_empty` = the collection has nothing yet (planner uses demo events)."""
+        None = no database, or no ingested events yet (the planner uses demo events). Community events (hosted by
+        riders, not moderated) are map-only: the planner never sees them (contracts/community_event.md)."""
+        not_community = {"source_names": {"$ne": community.SOURCE}}
         def q(db):
-            if db.events.estimated_document_count() == 0:
+            if db.events.count_documents(not_community, limit=1) == 0:
                 return None
             found = list(db.events.find(
-                {"status": "active", "start_time": {"$lte": t1},
+                {**not_community, "status": "active", "start_time": {"$lte": t1},
                  "$or": [{"end_time": {"$gte": t0}}, {"end_time": None, "start_time": {"$gte": t0 - timedelta(hours=4)}}]},
                 {"title": 1, "category": 1, "start_time": 1, "end_time": 1, "location": 1, "venue_id": 1,
                  "capacity": 1, "attendance": 1, "rank": 1}).limit(300))
@@ -283,7 +286,7 @@ OPEN_ENDED_INCIDENT = timedelta(hours=6)     # incidents with no end_time count 
 # DataSF closure applications that aren't approved yet may never happen.
 UNAPPROVED = {"Application In Review", "Submitted", "Pending Payment", "Pending Additional Information", "On Hold",
               "Denied", "Withdrawn", "Cancelled"}
-INACTIVE_EVENT = {"cancelled", "postponed", "archived"}
+INACTIVE_EVENT = {"cancelled", "postponed", "archived", "deleted"}  # deleted: a community event its host removed
 # Curb / lane permits: thousands at any time and the road stays open. Opt-in via include_permits.
 PERMIT_SOURCES = ("street_use_permits", "excavation_permits")
 MAX_ITEMS = 2000
@@ -379,7 +382,10 @@ def _street(s: str | None) -> str | None:
 # --- events ----------------------------------------------------------------------------------------------------
 
 EVENT_FIELDS = {"title": 1, "name": 1, "category": 1, "start_time": 1, "end_time": 1, "location": 1, "venue_id": 1,
-                "venue_name": 1, "status": 1, "source_names": 1, "road_closure_ids": 1}
+                "venue_name": 1, "status": 1, "source_names": 1, "road_closure_ids": 1,
+                # community events' public extras only; sources.community.host_key_hash never leaves Mongo
+                **{f"sources.community.{k}": 1 for k in ("admission", "ticket_url", "ticket_price", "description",
+                                                         "image_url", "promotion")}}
 CLOSURE_FIELDS = {"source": 1, "source_id": 1, "category": 1, "is_closure": 1, "incident_type": 1, "location": 1,
                   "start_time": 1, "end_time": 1, "last_ingested_at": 1, "road_segment_ids": 1,
                   "details.name": 1, "details.category": 1, "details.street": 1, "details.from_street": 1,
@@ -406,6 +412,7 @@ def event_from_doc(d: dict, venues: dict[str, str]) -> dict | None:
         "lon": pt[0], "lat": pt[1], "start_time": _iso(d["start_time"]), "end_time": _iso(d.get("end_time")),
         "source": names[0] if names else "events", "status": d.get("status"),
         "road_closure_ids": [str(x) for x in d.get("road_closure_ids") or []],
+        "community": community.public(d),
     }
 
 
@@ -433,6 +440,7 @@ def events_from_closures(docs: Iterable[dict]) -> list[dict]:
             "lon": pt[0], "lat": pt[1], "start_time": _iso(start), "end_time": _iso(max(ends)) if ends else None,
             "source": source, "status": det.get("status"),
             "road_closure_ids": sorted(f"{r['source']}:{r['source_id']}" for r in rows),
+            "community": None,
         })
     return out
 
@@ -459,6 +467,60 @@ def find_events(db: Any, start: datetime, end: datetime, box: Box) -> list[dict]
     out = [e for d in docs if (e := event_from_doc(d, venues))] + find_closure_events(db, start, end)
     out = [e for e in out if _inside((e["lon"], e["lat"]), box)]
     return sorted(out, key=lambda e: (e["start_time"], e["id"]))[:MAX_ITEMS]
+
+
+# --- community events (contracts/community_event.md) -------------------------------------------------------------
+
+def insert_community_event(db: Any, doc: dict) -> dict:
+    db["events"].insert_one(doc)
+    return event_from_doc(doc, {})
+
+
+def community_events(db: Any, keys: dict[str, str]) -> list[dict]:
+    """The events these host keys own (any time, any status), soonest first. Wrong or unknown keys are skipped."""
+    docs = db["events"].find({"_id": {"$in": sorted(keys)}, "source_names": community.SOURCE, "status": {"$ne": "deleted"}})
+    out = [e for d in docs if community.owns(d, keys[d["_id"]]) and (e := event_from_doc(d, {}))]
+    return sorted(out, key=lambda e: (e["start_time"], e["id"]))
+
+
+def update_community_event(db: Any, event_id: str, key: str, changes: dict, now: datetime) -> dict | str:
+    """Apply `changes` if `key` owns the event: the updated MapEvent, or "not_found" / "forbidden"."""
+    doc = db["events"].find_one({"_id": event_id, "source_names": community.SOURCE, "status": {"$ne": "deleted"}})
+    if doc is None:
+        return "not_found"
+    if not community.owns(doc, key):
+        return "forbidden"
+    db["events"].update_one({"_id": event_id}, {"$set": {**changes, "sources.community.updated_at": now,
+                                                          "last_ingested_at": now}})
+    return event_from_doc(db["events"].find_one({"_id": event_id}), {})
+
+
+def delete_community_event(db: Any, event_id: str, key: str, now: datetime) -> str:
+    """The host removes their event: status "deleted" (kept for reports / audit, gone from the map, My Events and
+    lookups). "deleted", "not_found" or "forbidden"."""
+    doc = db["events"].find_one({"_id": event_id, "source_names": community.SOURCE, "status": {"$ne": "deleted"}})
+    if doc is None:
+        return "not_found"
+    if not community.owns(doc, key):
+        return "forbidden"
+    db["events"].update_one({"_id": event_id}, {"$set": {"status": "deleted", "deleted_at": now, "last_ingested_at": now}})
+    return "deleted"
+
+
+def lookup_events(db: Any, ids: list[str]) -> list[dict]:
+    """Events by id from Mongo `events` (any source) that are still listed: Saved Events and shared links. Ids of events
+    derived from DataSF closures aren't in `events`, so they don't come back (the caller keeps what it had)."""
+    docs = list(db["events"].find({"_id": {"$in": sorted(set(ids))}, "status": {"$nin": sorted(INACTIVE_EVENT)}}, EVENT_FIELDS))
+    venue_ids = sorted({d["venue_id"] for d in docs if d.get("venue_id")})
+    venues = {str(v["_id"]): v.get("name") for v in db["venues"].find({"_id": {"$in": venue_ids}}, {"name": 1})} \
+        if venue_ids else {}
+    return [e for d in docs if (e := event_from_doc(d, venues))]
+
+
+def insert_report(db: Any, event_id: str, reason: str, details: str | None, now: datetime) -> None:
+    """One report (Mongo `event_reports`): event id, reason, details, time. No reporter identity. It changes nothing
+    about the event: reports are for review."""
+    db["event_reports"].insert_one({"event_id": event_id, "reason": reason, "details": details, "created_at": now})
 
 
 # --- road conditions -------------------------------------------------------------------------------------------

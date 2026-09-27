@@ -209,3 +209,26 @@ test('fetchEvents drops records with bad coordinates or no name; API errors reje
     globalThis.fetch = real;
   }
 });
+
+// ---- map pins at the map's time (onMapAt / liveEvents) ----
+test('pins: visible while an event runs, hidden at and after its end, back when the map time goes back', async () => {
+  const { liveEvents, onMapAt } = await import('./context.ts');
+  const at = (hhmm: string) => Date.parse(`2026-10-03T${hhmm}:00-07:00`); // SF time
+  const ev: MapEvent = { id: 'e', name: 'Show', category: null, venue: null, lat: 37.77, lon: -122.41,
+    start_time: new Date(at('18:00')).toISOString(), end_time: new Date(at('20:00')).toISOString(), source: 'community', status: 'active', road_closure_ids: [] };
+  assert.equal(onMapAt(ev, at('19:00')), true);            // map at 7:00 PM
+  assert.equal(onMapAt(ev, at('20:00')), false);           // at end_time: gone
+  assert.equal(onMapAt(ev, at('20:01')), false);           // 8:01 PM: gone
+  assert.deepEqual(liveEvents([ev], at('19:00')).map(e => e.id), ['e']); // user moves the map time back: visible again
+  assert.equal(onMapAt(ev, at('17:30')), true);            // starts later in the fetched window: still shown (arriving crowds)
+});
+
+test('pins: no end time uses the existing point-event rule (DEFAULT_EVENT_MIN), not a new one', async () => {
+  const { DEFAULT_EVENT_MIN, onMapAt } = await import('./context.ts');
+  const start = Date.parse('2026-10-03T18:00:00-07:00');
+  const ev: MapEvent = { id: 'p', name: 'Point', category: null, venue: null, lat: 37.77, lon: -122.41,
+    start_time: new Date(start).toISOString(), end_time: null, source: 'predicthq', status: 'active', road_closure_ids: [] };
+  assert.equal(onMapAt(ev, start + (DEFAULT_EVENT_MIN - 1) * 60_000), true);
+  assert.equal(onMapAt(ev, start + DEFAULT_EVENT_MIN * 60_000), false);
+  assert.equal(onMapAt({ ...ev, start_time: 'not a time' }, start), false);
+});

@@ -17,9 +17,29 @@
         "lon": { "type": "number" },
         "start_time": { "type": "string", "format": "date-time" },
         "end_time": { "type": ["string", "null"], "format": "date-time", "description": "null = no end published. Point-event rule (api store.DEFAULT_EVENT_DURATION, web DEFAULT_EVENT_MIN): active start → start + 3 h, never indefinitely" },
-        "source": { "type": "string", "description": "predicthq | ticketmaster | street_closures | ..." },
+        "source": { "type": "string", "description": "predicthq | ticketmaster | street_closures | community | ..." },
         "status": { "type": ["string", "null"] },
-        "road_closure_ids": { "type": "array", "items": { "type": "string" }, "description": "road_incidents ids '<source>:<source_id>' tied to this event" }
+        "road_closure_ids": { "type": "array", "items": { "type": "string" }, "description": "road_incidents ids '<source>:<source_id>' tied to this event" },
+        "community": {
+          "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/CommunityInfo" }],
+          "description": "Only on source 'community' (hosted by a rider, contracts/community_event.md); null otherwise"
+        }
+      }
+    },
+    "CommunityInfo": {
+      "type": "object",
+      "required": ["admission", "ticket_url", "ticket_price", "description", "image_url", "promotion"],
+      "additionalProperties": false,
+      "properties": {
+        "admission": { "enum": ["free", "ticketed"] },
+        "ticket_url": { "type": ["string", "null"], "format": "uri", "description": "external ticket page (http/https); we don't sell tickets" },
+        "ticket_price": { "type": ["number", "null"], "minimum": 0, "description": "USD, as the host typed it; informational only" },
+        "description": { "type": ["string", "null"], "maxLength": 500 },
+        "image_url": { "type": ["string", "null"], "format": "uri" },
+        "promotion": {
+          "type": "object", "required": ["status"], "additionalProperties": false,
+          "properties": { "status": { "enum": ["none"], "description": "'none' until paid promotion exists; only the api sets it, after verifying a Solana tx" } }
+        }
       }
     },
     "RoadCondition": {
