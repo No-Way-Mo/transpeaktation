@@ -7,6 +7,7 @@ import type { Card, useRoutePlanner } from '@/lib/use-route-planner.ts';
 import { useVoice } from '@/lib/use-voice.ts';
 import { dataPath, planStale, traceLine, type Privacy, type Stop } from '@/lib/privacy.ts';
 import { usePrivacy } from '@/lib/use-privacy.ts';
+import { solText } from './reward.tsx';
 
 type Planner = ReturnType<typeof useRoutePlanner>;
 
@@ -247,6 +248,7 @@ export function RouteList({ p, action, onTrace }: { p: Planner; action?: ReactNo
       <section className="route-sec" aria-label="transPEAKtation route">
         <div className="smart-head"><Logo size={15} stroke={3} /><span>transPEAKtation</span></div>
         <RouteCard route={p.routes[best]} card={p.card(best, true)} when={p.when} tag={tag} tone="tp"
+          bonus={p.rewardOffer ? `+${solText(p.rewardOffer.sol)}` : undefined}
           note={note} selected={p.choice.tp} onPick={() => p.setChoice({ i: best, tp: true })} as={as}>
           {p.choice.tp && action}
         </RouteCard>
@@ -311,8 +313,8 @@ export function WhenPicker({ p }: { p: Planner }) {
   );
 }
 
-export function RouteCard({ route, card, when, tag, tone, note, selected, onPick, as = 'button', children }: {
-  route: Route; card: Card; when: When; tag: string; tone: 'fast' | 'tp' | ''; note?: string;
+export function RouteCard({ route, card, when, tag, tone, bonus, note, selected, onPick, as = 'button', children }: {
+  route: Route; card: Card; when: When; tag: string; tone: 'fast' | 'tp' | ''; bonus?: string; note?: string;
   selected: boolean; onPick(): void; as?: 'button' | 'div'; children?: ReactNode;
 }) {
   const Tag = as;
@@ -325,6 +327,7 @@ export function RouteCard({ route, card, when, tag, tone, note, selected, onPick
           <span className="eta">
             <b>{mins(card.dur)}</b><span className="unit">min</span>
             <span className={`tag ${tone}`}>{tag}</span>
+            {bonus && <span className="tag sol" title="Earned when you complete the trip on this route">{bonus}</span>}
           </span>
           <span className="sub ellipsis">{route.summary ? `via ${route.summary}` : 'Direct route'} · {fmtDist(route.dist)}</span>
         </span>
@@ -424,6 +427,7 @@ export function AiPrivacy({ p }: { p: Planner }) {
         <h3 id="aip-keep" className="aip-h">What we keep</h3>
         <ul className="aip-keep">
           <li><Icon name="check" size={16} className="yes" />Trips, if saving is on: start and end rounded to ~100 m, the roads used minus a few blocks at each end, the time, and which route won.</li>
+          <li><Icon name="check" size={16} className="yes" />If you claim a route reward: your Solana wallet address, with that trip, to pay it. The payment itself is public on Solana.</li>
           <li><Icon name="check" size={16} className="yes" />These switches, your theme and map choices, and (on a phone) where you dragged the compass, in this browser.</li>
           <li><Icon name="close" size={16} className="no" />Your name, email, account or device ID.</li>
           <li><Icon name="close" size={16} className="no" />Exact addresses or a location history.</li>

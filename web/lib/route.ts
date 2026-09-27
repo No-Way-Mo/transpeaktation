@@ -80,10 +80,19 @@ export type Prediction = {
   /** Normal card only, ≤100 chars: why this route is slower than transPEAKtation's (null when it isn't). */
   note?: string | null;
 };
+/** Route reward (api/app/rewards.py): completing the trip on the recommended route (`route` = plan.best) earns
+ *  `sol` (devnet), claimed after arrival. Only offered on a logged trip. */
+export type RewardOffer = { route: number; lamports: number; sol: number };
+/** A claimed reward: paid, too_soon (arrived implausibly fast after departing) or failed. */
+export type Reward = {
+  status: 'paid' | 'too_soon' | 'failed'; lamports: number; sol: number; wallet: string;
+  signature: string | null; explorer: string | null;
+};
 /** transPEAKtation's pick across the candidate routes, with the explanation and a better departure time if any. */
 export type TransPeak = {
   best: number; preds: Prediction[]; tag: string; note: string;
   advice: { depart_at: string; saves_sec: number; text: string } | null;
+  reward?: RewardOffer | null;
 };
 /** An event as the search suggestions show it (api/ /events): SF-local clock times [h, m]. */
 export type EventInfo = {
@@ -127,6 +136,15 @@ export const iosArrival = () => (globalThis as { webkit?: { messageHandlers?: { 
 export async function markArrived(tripId: string): Promise<void> {
   const res = await fetch(`${API}/trips/${tripId}/arrived`, { method: 'POST' });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
+}
+
+/** POST /trips/{id}/reward: after arriving on the recommended route (`route`), pay its reward to `wallet` now. */
+export async function claimReward(tripId: string, wallet: string, route: number): Promise<Reward> {
+  const res = await fetch(`${API}/trips/${tripId}/reward`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ wallet, route }),
+  });
+  if (!res.ok) throw new Error((await res.json().catch(() => null))?.detail ?? `HTTP ${res.status}`);
+  return res.json();
 }
 
 

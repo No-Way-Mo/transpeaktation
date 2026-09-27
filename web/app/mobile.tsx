@@ -5,6 +5,7 @@ import { useRoutePlanner } from '@/lib/use-route-planner.ts';
 import MapView, { type MapHandle } from './map-view.tsx';
 import { AppBar, MapLayers, NavDialogs, useNav } from './menu.tsx';
 import { Compass, Endpoints, Icon, MicButton, PlaceRow, RouteList, SearchResults, TripNote, TurnIcon, WhenPicker, WhereTo } from './parts.tsx';
+import { RewardPanel } from './reward.tsx';
 
 // Sheet heights as a share of the screen: peek, half, full (Apple Maps' three detents).
 const DETENTS = [0.22, 0.5, 0.9];
@@ -243,12 +244,13 @@ export default function Mobile() {
             </span>
             <span className="hint">Tap for next</span>
           </button>
-          <div className={`nav-bar${p.tripId && (!ios || p.hasArrived) ? ' two-row' : ''}`}>
+          <div className={`nav-bar${p.earned || p.reward || (p.tripId && (!ios || p.hasArrived)) ? ' two-row' : ''}`}>
             <div className="nav-stats">
               <div><b className="good">{mins(remDur)}</b><span>min left</span></div>
               <div><b>{fmtTime(remDur)}</b><span>arrival</span></div>
               <div><b>{fmtDist(remDist)}</b><span>remaining</span></div>
             </div>
+            {(p.earned || p.reward) && <RewardPanel p={p} />}
             {p.tripId && (!ios || p.hasArrived) && (
               <button className="end arrived-btn" disabled={p.hasArrived} onClick={p.arrived}>{p.hasArrived ? 'Arrived ✓' : 'Arrived'}</button>
             )}
