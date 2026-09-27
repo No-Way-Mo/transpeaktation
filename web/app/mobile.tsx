@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type PointerEvent } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type PointerEvent } from 'react';
 import { fmtDist, fmtTime, fmtWhen, iosArrival, mins, RECENT, stepText, type LatLng } from '@/lib/route.ts';
 import { useRoutePlanner } from '@/lib/use-route-planner.ts';
 import MapView, { type MapHandle } from './map-view.tsx';
@@ -9,54 +9,84 @@ import { RewardPanel } from './reward.tsx';
 
 // Sheet heights as a share of the screen: peek, half, full (Apple Maps' three detents).
 const DETENTS = [0.22, 0.5, 0.9];
+const FLICK = 0.35; // px/ms: a release faster than this moves one detent that way
+
+/** Past a limit the sheet follows the finger less and less (iOS rubber band): at most 15% of the screen past it. */
+const rubber = (over: number) => { const max = innerHeight * 0.15; return (1 - 1 / (over * 0.55 / max + 1)) * max; };
 
 /** Bottom sheet you can drag or flick between detents. Spread `handle` on the grab area (grabber + header);
- *  the list below keeps normal scrolling. `ceiling` = the element the sheet must stop under (the from/to card). */
+ *  the list below keeps normal scrolling. `ceiling` = the element the sheet must stop under (the from/to card).
+ *  Put `root` on the element that carries --sheet-h: drags write it straight to the DOM, no React render per frame. */
 function useSheet(ceiling: { current: HTMLElement | null }, initial = 1) {
   const [idx, setIdx] = useState(initial);
-  const [dragH, setDragH] = useState<number | null>(null);
-  const g = useRef<{ y0: number; h0: number; y: number; t: number; v: number } | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const root = useRef<HTMLDivElement>(null);
+  const g = useRef<{ y0: number; h0: number; i0: number; y: number; t: number; v: number; on: boolean } | null>(null);
   const TOP = DETENTS.length - 1;
-  // Room left under the from/to card (if it's on screen), with an 8px gap.
+  // Room left under the from/to card if it's on screen (the card itself, not its open search dropdown), else under
+  // the menu bar, with an 8px gap.
   const room = () => {
-    const card = ceiling.current?.querySelector('.endpoints'); // the card itself, not its open search dropdown
-    return innerHeight - (card ? card.getBoundingClientRect().bottom + 8 : 0);
+    const over = ceiling.current?.querySelector('.endpoints') ?? root.current?.querySelector('.mob-bar');
+    return innerHeight - (over ? over.getBoundingClientRect().bottom + 8 : 0);
   };
   const px = (i: number) => i === TOP ? Math.min(DETENTS[i] * innerHeight, room()) : DETENTS[i] * innerHeight;
+  const setH = (h: string) => root.current?.style.setProperty('--sheet-h', h);
+  const rest = (i: number) => setH(i === TOP ? `${px(i)}px` : `${DETENTS[i] * 100}dvh`);
+
+  // Resting height after every render (the from/to card may have moved) and on resize; never mid-drag.
+  useLayoutEffect(() => { if (!g.current?.on) rest(idx); });
+  useEffect(() => {
+    const on = () => { if (!g.current?.on) rest(idx); };
+    addEventListener('resize', on);
+    return () => removeEventListener('resize', on);
+  }, [idx]);
 
   const end = (e: PointerEvent) => {
     const d = g.current;
     g.current = null;
-    if (!d || dragH === null) return;
-    // Snap to the detent nearest where a flick would carry the sheet (v in px/ms, up = positive).
-    const target = d.h0 + (d.y0 - e.clientY) + d.v * 250;
-    const near = DETENTS.map((_, i) => Math.abs(px(i) - target));
-    setIdx(near.indexOf(Math.min(...near)));
-    setDragH(null);
+    if (!d?.on) return;
+    const h = d.h0 + (d.y0 - e.clientY);
+    const v = e.timeStamp - d.t > 80 ? 0 : d.v; // finger stopped before lifting: no flick
+    let to: number;
+    if (Math.abs(v) > FLICK) {
+      // A flick moves one detent from where the drag started, never skips past the next one.
+      to = Math.max(0, Math.min(TOP, d.i0 + Math.sign(v)));
+    } else {
+      const near = DETENTS.map((_, i) => Math.abs(px(i) - h));
+      to = near.indexOf(Math.min(...near));
+    }
+    setDragging(false);
+    setIdx(to);
+    rest(to); // idx may not change (snap back); set it here rather than wait for a render
   };
   const handle = {
     onPointerDown(e: PointerEvent) {
       if (e.button) return;
-      g.current = { y0: e.clientY, h0: dragH ?? px(idx), y: e.clientY, t: e.timeStamp, v: 0 };
+      const h0 = root.current?.querySelector('.sheet')?.getBoundingClientRect().height ?? px(idx);
+      g.current = { y0: e.clientY, h0, i0: idx, y: e.clientY, t: e.timeStamp, v: 0, on: false };
     },
     onPointerMove(e: PointerEvent<HTMLElement>) {
       const d = g.current;
       if (!d) return;
       const dy = d.y0 - e.clientY;
-      if (dragH === null) {
+      if (!d.on) {
         if (Math.abs(dy) < 6) return; // still a tap: let buttons in the header get their click
         e.currentTarget.setPointerCapture(e.pointerId); // now it's a drag; keep it even off the handle
+        d.on = true;
+        setDragging(true);
       }
-      d.v = (d.y - e.clientY) / Math.max(1, e.timeStamp - d.t);
+      // Smoothed velocity (px/ms, up = positive): one jittery last sample can't fling the sheet.
+      const v = (d.y - e.clientY) / Math.max(1, e.timeStamp - d.t);
+      d.v = d.v * 0.3 + v * 0.7;
       d.y = e.clientY; d.t = e.timeStamp;
-      setDragH(Math.min(px(TOP), Math.max(px(0) * 0.8, d.h0 + dy)));
+      const h = d.h0 + dy, lo = px(0), hi = px(TOP);
+      setH(`${h > hi ? hi + rubber(h - hi) : h < lo ? lo - rubber(lo - h) : h}px`);
     },
     onPointerUp: end,
     onPointerCancel: end,
   };
   return {
-    idx, setIdx, handle, dragging: dragH !== null,
-    style: { '--sheet-h': dragH !== null ? `${dragH}px` : idx === TOP ? `${px(TOP)}px` : `${DETENTS[idx] * 100}dvh` } as CSSProperties,
+    idx, setIdx, handle, dragging, root, full: idx === TOP && !dragging,
     /** Grabber button: tap / Enter / Space steps up a detent, wrapping from full back to peek. */
     cycle: () => setIdx(i => (i + 1) % DETENTS.length),
   };
@@ -122,7 +152,7 @@ export default function Mobile() {
   );
 
   return (
-    <div className="mob" style={sheet.style}>
+    <div className={`mob${sheet.full ? ' sheet-full' : ''}`} ref={sheet.root}>
       <MapView ref={map} routes={p.routes} sel={p.sel} tp={p.choice.tp} labels={p.mapLabels} from={p.from} to={p.to} events={p.mapEvents} onSelect={p.setSel}
         marker={marker} span={p.mapSpan} routeEvents={p.selectedContext?.events} pad={{ topLeft: [24, 242], bottomRight: [24, 420] }} />
       <AppBar n={n} className="mob-bar" />
