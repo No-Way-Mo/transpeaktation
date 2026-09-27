@@ -5,7 +5,7 @@
 import type * as Leaflet from 'leaflet';
 import { fmtCategory, fmtEventTime, type MapEvent, type Span } from '@/lib/context.ts';
 import {
-  ACTIVITY_PALETTE, activityPoints, densityPeak, focusRel, heatAlpha, heatLevel, heatOpacity, heatRadiusMeters, kernel, legendOpacity,
+  ACTIVITY_PALETTE, PRIDE_ACTIVITY_PALETTE, activityPoints, densityPeak, focusRel, heatAlpha, heatLevel, heatOpacity, heatRadiusMeters, kernel, legendOpacity,
   pinStates, relZoom, SF_BOUNDS, type HeatPoint,
 } from '@/lib/snapmap.ts';
 import type { Theme } from '@/lib/theme.ts';
@@ -21,15 +21,15 @@ export type SnapState = {
 const PANE = 'snap-activity';      // between tiles (200) and route lines (400): heat never covers a route
 const RES = 0.4;                   // heat computed at 0.4x resolution: it's a soft glow, ~6x fewer pixels
 const PAD = 0.25;                  // pins kept for this much of the view beyond each edge (smooth panning)
-const MAX_ALPHA: Record<Theme, number> = { light: 0.78, dark: 0.8 }; // hotspot centre; edges fade to 0 (heatAlpha)
+const MAX_ALPHA: Record<Theme, number> = { light: 0.78, dark: 0.8, pride: 0.85 }; // hotspot centre; edges fade to 0 (heatAlpha)
 const GLYPH = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M8 3v4M16 3v4M4 10h16"/><path d="m12 12.6.9 1.8 2 .3-1.45 1.4.35 2-1.8-.95-1.8.95.35-2-1.45-1.4 2-.3Z" fill="#fff" stroke="none"/></svg>';
 
 /** Palette as a 256-entry RGB lookup, low -> high. */
-function paletteLut(): Uint8ClampedArray {
+function paletteLut(palette: readonly string[]): Uint8ClampedArray {
   const c = document.createElement('canvas');
   c.width = 256; c.height = 1;
   const g = c.getContext('2d')!, grad = g.createLinearGradient(0, 0, 256, 0);
-  ACTIVITY_PALETTE.forEach((col, i) => grad.addColorStop(i / (ACTIVITY_PALETTE.length - 1), col));
+  palette.forEach((col, i) => grad.addColorStop(i / (palette.length - 1), col));
   g.fillStyle = grad;
   g.fillRect(0, 0, 256, 1);
   return g.getImageData(0, 0, 256, 1).data;
@@ -39,7 +39,8 @@ export class SnapMapLayers {
   private L: typeof Leaflet;
   private map: Leaflet.Map;
   private canvas: HTMLCanvasElement;
-  private lut = paletteLut();
+  private lut = paletteLut(ACTIVITY_PALETTE);
+  private prideLut = paletteLut(PRIDE_ACTIVITY_PALETTE);
   private points: HeatPoint[] = [];
   private bounds: Leaflet.LatLngBounds | null = null;
   private pins = new Map<string, Leaflet.Marker>();
@@ -149,7 +150,7 @@ export class SnapMapLayers {
       }
     }
     // 2. relative intensity -> our palette; transparent below the floor so sparse areas stay a normal map
-    const img = g.createImageData(w, h), d = img.data, lut = this.lut, max = MAX_ALPHA[s.theme], peak = this.peak;
+    const img = g.createImageData(w, h), d = img.data, lut = s.theme === 'pride' ? this.prideLut : this.lut, max = MAX_ALPHA[s.theme], peak = this.peak;
     for (let i = 0; i < grid.length; i++) {
       if (!grid[i]) continue;
       const t = heatLevel(grid[i] / peak), a = heatAlpha(t, max);

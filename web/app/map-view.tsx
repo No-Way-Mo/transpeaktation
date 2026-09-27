@@ -5,7 +5,7 @@ import { EVENT_KINDS, eventImpact, eventKind, fmtCrowd, fmtEventTime, type Event
 import { MAP_EXPERIMENT } from '@/lib/experiment.ts';
 import { fmtDist, labelPoint, trafficRuns, type LatLng, type Place, type Route } from '@/lib/route.ts';
 import type { MapStyle } from '@/lib/map-prefs.ts';
-import type { Theme } from '@/lib/theme.ts';
+import { baseOf, type Theme } from '@/lib/theme.ts';
 import { useMapPrefs } from '@/lib/use-map-prefs.ts';
 import { useTheme } from '@/lib/use-theme.ts';
 import { ESRI_WATER, hexRgb, paintWater } from '@/lib/water.ts';
@@ -39,7 +39,7 @@ type Props = {
 // Esri's own light / dark grey basemaps, tinted toward the palette by --map-tint (globals.css), with their water
 // repainted --map-water (lib/water.ts); satellite is Esri's World Imagery from the same keyless tile server, left as is.
 const ESRI = 'https://server.arcgisonline.com/ArcGIS/rest/services';
-const canvasUrl = (t: Theme) => `${ESRI}/Canvas/World_${t === 'dark' ? 'Dark' : 'Light'}_Gray_Base/MapServer/tile/{z}/{y}/{x}`;
+const canvasUrl = (t: Theme) => `${ESRI}/Canvas/World_${baseOf(t) === 'dark' ? 'Dark' : 'Light'}_Gray_Base/MapServer/tile/{z}/{y}/{x}`;
 // crossOrigin on both layers: one CORS request per tile, shared by the basemap and the water layer that reads its pixels.
 const baseLayer = (l: typeof Leaflet, t: Theme, s: MapStyle, water: string): Leaflet.Layer => s === 'satellite'
   ? l.tileLayer(`${ESRI}/World_Imagery/MapServer/tile/{z}/{y}/{x}`, { attribution: 'Tiles © Esri, Maxar, Earthstar Geographics', maxNativeZoom: 18, maxZoom: 18 })
@@ -51,7 +51,7 @@ const baseLayer = (l: typeof Leaflet, t: Theme, s: MapStyle, water: string): Lea
 /** The basemap's water only, in `color`, on the 'water' pane: above the (tinted) tiles, so the blue is exact, and
  *  under routes and pins. A tile that fails to load just draws no water; the basemap under it is unchanged. */
 function waterLayer(l: typeof Leaflet, t: Theme, color: string): Leaflet.Layer {
-  const to = hexRgb(color) ?? [0x9D, 0xD5, 0xE5], from = ESRI_WATER[t];
+  const to = hexRgb(color) ?? [0x9D, 0xD5, 0xE5], from = ESRI_WATER[baseOf(t)];
   const Water = l.GridLayer.extend({
     createTile(c: Leaflet.Coords, done: (err: Error | undefined, tile: HTMLElement) => void) {
       const tile = document.createElement('canvas');
@@ -138,12 +138,12 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
       if (i === sel) return;
       const pick = () => latest.current.onSelect(i);
       l.polyline(r.coords, { color: casing, weight: 10, opacity: 0.9 }).on('click', pick).addTo(g);
-      l.polyline(r.coords, { color: c('--route-alt'), weight: 6 }).on('click', pick).addTo(g);
+      l.polyline(r.coords, { color: c('--route-alt'), weight: 6, className: 'alt-line' }).on('click', pick).addTo(g);
     });
     const r = routes[sel];
     if (r) {
       l.polyline(r.coords, { color: c('--route-casing-sel'), weight: 11, interactive: false }).addTo(g);
-      l.polyline(r.coords, { color: line, weight: 7, interactive: false }).addTo(g);
+      l.polyline(r.coords, { color: line, weight: 7, interactive: false, className: 'sel-line' }).addTo(g);
       // Live slowdowns painted over the route, like Apple/Google: amber, orange-red, deep red.
       if (traffic) for (const run of trafficRuns(r)) l.polyline(run.coords, { color: c(`--traffic-${run.level}`), weight: 7, interactive: false }).addTo(g);
     }
@@ -213,7 +213,35 @@ export default function MapView({ ref, routes, sel, tp, labels, from, to, marker
   // New routes or endpoints: frame them.
   useEffect(fit, [routes, from, to]);
 
-  return <div ref={el} className="map" data-style={prefs.style} />;
+  return (
+    <>
+      <div ref={el} className="map" data-style={prefs.style} />
+      {theme === 'pride' && <PrideGradient />}
+    </>
+  );
+}
+
+const FLAG = ['#E40303', '#FF8C00', '#FFED00', '#008026', '#24408E', '#732982'];
+/** Pride theme: the flag as SVG gradients (globals.css). #pride-route strokes the route lines: it repeats and slides
+ *  along the line, so the rainbow flows toward the destination (still with reduced motion). #pride-flag fills the
+ *  destination pin with the six hard stripes. */
+function PrideGradient() {
+  const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const stops = [...FLAG, FLAG[0]];
+  return (
+    <svg className="pride-defs" width="0" height="0" aria-hidden="true">
+      <linearGradient id="pride-route" x1="0" y1="0" x2="0.5" y2="0.5" spreadMethod="repeat">
+        {stops.map((c, i) => <stop key={i} offset={i / (stops.length - 1)} stopColor={c} />)}
+        {!still && <animateTransform attributeName="gradientTransform" type="translate" from="0 0" to="0.5 0.5" dur="3s" repeatCount="indefinite" />}
+      </linearGradient>
+      <linearGradient id="pride-flag" x1="0" y1="0" x2="0" y2="1">
+        {FLAG.flatMap((c, i) => [
+          <stop key={`${i}a`} offset={i / FLAG.length} stopColor={c} />,
+          <stop key={`${i}b`} offset={(i + 1) / FLAG.length} stopColor={c} />,
+        ])}
+      </linearGradient>
+    </svg>
+  );
 }
 
 const DEST_PIN = '<svg viewBox="0 0 28 36" aria-hidden="true"><path class="body" d="M14 34.5C14 34.5 26.5 21.8 26.5 13.5a12.5 12.5 0 0 0-25 0C1.5 21.8 14 34.5 14 34.5Z"/><circle class="hole" cx="14" cy="13.5" r="4.75"/></svg>';

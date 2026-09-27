@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import type { MapEvent, Span } from './context.ts';
 import { parseExperiment } from './experiment.ts';
 import {
-  ACTIVITY_PALETTE, activityPoints, densityPeak, focusRel, getEventImportance, getMinZoomForEvent, HEAT_FLOOR, heatAlpha, heatLevel,
+  ACTIVITY_PALETTE, PRIDE_ACTIVITY_PALETTE, activityPoints, densityPeak, focusRel, getEventImportance, getMinZoomForEvent, HEAT_FLOOR, heatAlpha, heatLevel,
   heatOpacity, heatRadiusMeters, heatWeight, kernel, legendOpacity, metersBetween, MIN_PEAK, pinOpacity, pinScale, pinStates,
   REL, relZoom, type HeatPoint,
 } from './snapmap.ts';
@@ -213,6 +213,11 @@ test('palette is ours: blue-green, no traffic red / amber', () => {
     assert.ok(g >= r, `${c}: not red/amber`);
     assert.ok(b > 100 || g > 200, `${c}: blue-green`);
   }
+});
+
+test('Pride heat palette is the flag, violet (quiet) to red (busiest), all valid hex', () => {
+  assert.deepEqual([PRIDE_ACTIVITY_PALETTE[0], PRIDE_ACTIVITY_PALETTE.at(-1)], ['#732982', '#e40303']);
+  for (const c of PRIDE_ACTIVITY_PALETTE) assert.match(c, /^#[0-9a-f]{6}$/);
 });
 
 test('experiment switch: on by default on this branch, NEXT_PUBLIC_MAP_EXPERIMENT=off restores the stable map', () => {
