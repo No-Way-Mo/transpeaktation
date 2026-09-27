@@ -140,8 +140,6 @@
 html, body { margin: 0; height: 100%; background: var(--canvas); color: var(--ink); font-family: var(--sans); -webkit-font-smoothing: antialiased; font-variant-numeric: tabular-nums; -webkit-tap-highlight-color: transparent; }
 button, input { font: inherit; color: inherit; }
 button { border: none; background: transparent; cursor: pointer; }
-/* iOS WebKit pads buttons ~1em a side (Chrome: 6px): in a small icon button that squeezed the icon to a few px. */
-svg { flex-shrink: 0; }
 input { caret-color: var(--action); }
 input::placeholder { color: var(--muted); }
 ::selection { background: var(--action-tint); }
@@ -363,19 +361,6 @@ input::placeholder { color: var(--muted); }
 .sheet .arrive b { font-size: 16px; }
 .close-btn { flex: none; width: 30px; height: 30px; border-radius: 50%; background: var(--fill); color: var(--muted); display: flex; align-items: center; justify-content: center; }
 .start { width: 100%; height: 52px; border-radius: 14px; background: var(--action); color: var(--on-action); font-size: 17px; font-weight: 650; }
-/* Route sheet footer: Directions (turn list) beside Start. */
-.sheet-foot { display: flex; gap: 10px; }
-.sheet-foot .start { flex: 1; width: auto; }
-.foot-alt { flex: none; height: 52px; padding: 0 20px; border-radius: 14px; background: var(--fill); color: var(--action-text); font-size: 17px; font-weight: 650; }
-@media (hover: hover) { .foot-alt:hover { background: var(--fill-2); } }
-/* Directions list in the sheet: desktop's summary + steps at touch sizes. */
-.sheet .summary { padding: 14px; }
-.sheet .summary b { font-size: 20px; }
-.sheet .summary span { font-size: 13px; }
-.sheet .step { min-height: 52px; padding: 10px 6px; align-items: center; }
-.sheet .step .arrow { width: 34px; height: 34px; border-radius: 10px; }
-.sheet .step-text { font-size: 16px; }
-.sheet .step .sub { font-size: 13px; }
 
 .turn { position: absolute; top: calc(var(--bar-bottom) + 8px); left: 12px; right: 12px; z-index: 30; display: flex; align-items: center; gap: 14px; padding: 16px 18px; border-radius: 20px; background: var(--action); color: var(--on-action); box-shadow: var(--shadow); text-align: left; }
 .turn-arrow { flex: none; width: 52px; height: 52px; border-radius: 14px; background: rgba(255, 255, 255, 0.2); display: flex; align-items: center; justify-content: center; }
@@ -402,10 +387,20 @@ input::placeholder { color: var(--muted); }
 .clear-btn { flex: none; width: 20px; height: 20px; border-radius: 50%; background: var(--muted); color: var(--panel); display: flex; align-items: center; justify-content: center; padding: 0; }
 .list > .status { padding: 8px; font-size: 13px; }
 
+/* transPEAKtation suggestions: the one place violet leads */
+.smart { display: flex; flex-direction: column; gap: 8px; }
 .smart-head { display: flex; align-items: center; gap: 8px; padding: 0 8px 2px; font-size: 13px; font-weight: 650; color: var(--brand-text); }
+.smart-card { display: flex; align-items: flex-start; gap: 12px; padding: 14px; border-radius: 14px; border: 1.5px solid var(--brand-edge); background: var(--brand-tint); text-align: left; }
+.smart-card .glyph { flex: none; width: 34px; height: 34px; border-radius: 10px; background: var(--brand); color: var(--on-brand); display: flex; align-items: center; justify-content: center; }
+.smart-card .stack { gap: 4px; }
+.smart-title { font-size: 15px; font-weight: 650; line-height: 1.25; text-wrap: pretty; }
+.smart-sub { font-size: 13px; line-height: 1.4; color: var(--muted); text-wrap: pretty; }
+.badge-pill { align-self: flex-start; margin-top: 2px; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; color: var(--on-brand); background: var(--brand); }
+.badge-pill.clear { color: var(--good); background: var(--good-tint); }
 .trip-note { display: flex; align-items: flex-start; gap: 10px; padding: 10px 12px; border-radius: 12px; background: var(--brand-tint); }
 .trip-note svg { flex: none; margin-top: 1px; }
 .trip-note span { font-size: 13px; line-height: 1.4; color: var(--brand-text); text-wrap: pretty; }
+@media (hover: hover) { .smart-card:hover { border-color: var(--brand-strong); } }
 
 /* Phone start row: one full-width search bar, the mic inside it on the right. */
 .where-row { display: flex; align-items: center; }
@@ -434,6 +429,9 @@ input::placeholder { color: var(--muted); }
 .search-body { flex: 1; min-height: 0; overflow: auto; padding: 4px 16px calc(var(--safe-bottom) + 24px); display: flex; flex-direction: column; gap: 22px; }
 .search-body .list { gap: 4px; }
 .search-body .list > .status { padding: 10px 8px; font-size: 14px; }
+.mob .smart-card { border-radius: 16px; }
+.mob .smart-card .glyph { width: 36px; height: 36px; border-radius: 12px; }
+.mob .smart-title { font-size: 16px; }
 .mob .trip-note { border-radius: 14px; }
 
 /* ---------- AI & privacy ---------- */
@@ -602,30 +600,3 @@ input::placeholder { color: var(--muted); }
   .sheet, .route, .switch, .switch i { transition: none; }
   .leaflet-zoom-anim .leaflet-zoom-animated { transition: none !important; }
 }
-
-/* ---------- snapmap experiment (lib/experiment.ts, app/snapmap-layers.ts) ----------
-   One event pin style for every event (importance only changes when it shows and a little size), an "Event activity"
-   heat canvas in our blue-green ramp (never traffic colours), and its legend. */
-.snap-heat { position: absolute; left: 0; top: 0; pointer-events: none; transition: opacity 0.3s ease; }
-.snap-pin-icon { background: none; border: none; }
-.snap-pin { position: absolute; left: 50%; top: 50%; width: 22px; height: 22px; margin: -11px 0 0 -11px; box-sizing: border-box; border-radius: 50%;
-  background: #1A759F; border: 2px solid #FFFFFF; box-shadow: 0 1px 3px rgba(24, 78, 119, 0.4), 0 3px 10px rgba(24, 78, 119, 0.22);
-  display: flex; align-items: center; justify-content: center; cursor: pointer;
-  opacity: var(--o); transform: scale(var(--s)); transition: opacity 0.28s ease, transform 0.28s var(--ease-out), background-color 0.2s; }
-.snap-pin svg { width: 13px; height: 13px; fill: none; stroke: #FFFFFF; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
-.snap-pin.off { pointer-events: none; }
-.snap-pin.on { background: #184E77; box-shadow: 0 0 0 5px rgba(26, 117, 159, 0.3), 0 3px 10px rgba(24, 78, 119, 0.35); }
-:root[data-theme='dark'] .snap-pin { border-color: #EAF4EC; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5), 0 3px 10px rgba(0, 0, 0, 0.4); }
-:root[data-theme='dark'] .snap-pin.on { box-shadow: 0 0 0 5px rgba(108, 196, 224, 0.35), 0 3px 10px rgba(0, 0, 0, 0.45); }
-@media (hover: hover) { .snap-pin:not(.off):hover { background: #1E6091; } }
-.event-pop .cat { align-self: flex-start; width: fit-content; margin-bottom: 2px; padding: 1px 7px; border-radius: 6px; font-size: 11px; font-weight: 650; color: var(--action-text); background: var(--action-tint); }
-.event-pop .src { font-size: 11px; opacity: 0.85; }
-.activity-legend { position: absolute; left: 16px; bottom: 28px; z-index: 800; pointer-events: none; display: flex; flex-direction: column; gap: 5px;
-  padding: 8px 12px; border-radius: 12px; background: var(--sheet-bg); box-shadow: var(--shadow-sm); color: var(--ink); font: 550 12px var(--sans);
-  opacity: 0; transition: opacity 0.3s ease; }
-.activity-legend .ramp { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; }
-.activity-legend .ramp b { font-weight: 550; }
-.activity-legend .ramp i { width: 88px; height: 6px; border-radius: 3px;
-  background: linear-gradient(90deg, #D9ED92, #B5E48C, #99D98C, #76C893, #52B69A, #34A0A4, #168AAD, #1A759F, #1E6091, #184E77); }
-.mob .activity-legend { left: 12px; bottom: calc(var(--sheet-h, 22dvh) + 12px); }
-@media (prefers-reduced-motion: reduce) { .snap-pin, .snap-heat, .activity-legend { transition: none; } }

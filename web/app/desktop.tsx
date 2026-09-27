@@ -2,7 +2,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { fmtDist, fmtWhen, mins, stepText, type LatLng } from '@/lib/route.ts';
 import { useRoutePlanner } from '@/lib/use-route-planner.ts';
-import { MAP_EXPERIMENT } from '@/lib/experiment.ts';
 import { useMapPrefs } from '@/lib/use-map-prefs.ts';
 import MapView, { type MapHandle } from './map-view.tsx';
 import { AppBar, MapLayers, NavDialogs, useNav } from './menu.tsx';
@@ -112,8 +111,8 @@ export default function Desktop() {
 
         <main className="desk-map">
           <MapView ref={map} routes={p.routes} sel={p.sel} tp={p.choice.tp} labels={p.mapLabels} from={p.from} to={p.to} events={p.mapEvents} marker={marker}
-            span={p.mapSpan} routeEvents={p.selectedContext?.events} onSelect={p.setSel} pad={{ topLeft: [60, 60], bottomRight: [60, 60] }} />
-          {prefs.eventPins && MAP_EXPERIMENT !== 'snapmap' && <EventLegend events={p.mapEvents} />}
+            onSelect={p.setSel} pad={{ topLeft: [60, 60], bottomRight: [60, 60] }} />
+          {prefs.eventPins && <EventLegend events={p.mapEvents} />}
           <MapLayers className="desk-layers" />
           <div className="map-ctrls">
             <Compass onPress={() => map.current?.fit()} />

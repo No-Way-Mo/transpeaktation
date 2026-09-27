@@ -19,7 +19,6 @@ struct WebView: UIViewRepresentable {
         let web = WKWebView(frame: .zero, configuration: config)
         context.coordinator.web = web
         web.navigationDelegate = context.coordinator
-        web.uiDelegate = context.coordinator       // mic for the page's voice button (see extension below)
         web.isOpaque = false                       // no white flash before the page paints
         web.backgroundColor = UIColor(Color.appBackground)
         web.scrollView.bounces = false             // the map handles its own panning
@@ -93,13 +92,4 @@ extension WebView.Coordinator: @preconcurrency CLLocationManagerDelegate {
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {} // keeps trying; denied = no auto-arrive
-}
-
-extension WebView.Coordinator: WKUIDelegate {
-    /// The page's mic button (web/lib/use-voice.ts): grant our own page's request so the rider sees one prompt,
-    /// the system's (NSMicrophoneUsageDescription), not a second WebKit one on every launch. Other origins: no.
-    func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin, initiatedByFrame frame: WKFrameInfo,
-                 type: WKMediaCaptureType, decisionHandler: @escaping @MainActor (WKPermissionDecision) -> Void) {
-        decisionHandler(type == .microphone && origin.host == webView.url?.host ? .grant : .deny)
-    }
 }
