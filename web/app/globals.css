@@ -915,3 +915,5 @@ input::placeholder { color: var(--muted); }
   .player-big svg { width: 24px; height: 24px; }
   .player.poster .player-hit { padding-bottom: 7%; }
 }
+.player-big.loading { animation: player-wait 1s ease-in-out infinite alternate; } /* play pressed, demo still loading */
+@keyframes player-wait { to { opacity: 0.45; transform: scale(0.94); } }
