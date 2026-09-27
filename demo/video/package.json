@@ -1,0 +1,13 @@
+{
+  "name": "transpeaktation-pitch-video",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "record": "bash record.sh",
+    "render": "node render.mjs",
+    "preview": "node render.mjs --serve"
+  },
+  "devDependencies": {
+    "playwright-core": "1.63.0"
+  }
+}

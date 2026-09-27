@@ -1,0 +1,16 @@
+# UI-test driver for the pitch video: ios/'s app (included as is) + a Tour target that taps through it on camera.
+# Generated with `xcodegen` by record.sh; the .xcodeproj here is gitignored.
+include: [../../../ios/project.yml]
+name: TranspeaktationTour
+targets:
+  Tour:
+    type: bundle.ui-testing
+    platform: iOS
+    sources: [Tour]
+    dependencies: [{ target: Transpeaktation }]
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        PRODUCT_BUNDLE_IDENTIFIER: app.transpeaktation.tour
+        TEST_TARGET_NAME: Transpeaktation
+        SWIFT_VERSION: "5.0"

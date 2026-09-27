@@ -1,0 +1,605 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>transPEAKtation Pitch</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet">
+<!--
+  The pitch video, one page on one clock: ../index.html (light theme) for the first minute, then the iOS app as
+  record.sh filmed it (footage/), then the closing scenes. Every frame is a pure function of the time, so render.mjs
+  can seek frame by frame. Preview: `npm run preview` (Space pauses, arrows seek, ?t=75 starts at 75 s).
+-->
+<style>
+:root {
+  /* the web app's light palette (web/app/globals.css) */
+  --bg: #E9F0E6; --panel: #FFFFFF; --raised: #F4F7F2; --ink: #10293D; --muted: #4F6577;
+  --line: rgba(24, 78, 119, 0.12); --line-strong: rgba(24, 78, 119, 0.24);
+  --action: #1A759F; --action-tint: #EAF3F7; --brand: #99D98C; --brand-strong: #52B69A; --brand-text: #23735C;
+  --brand-tint: #F1F8EA; --amber: #E9A23B; --bad: #C8313F; --bad-tint: #FBE9EA;
+  --font: "Instrument Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+html, body { margin: 0; height: 100%; background: var(--bg); overflow: hidden; }
+#stage {
+  position: absolute; width: 1920px; height: 1080px; transform-origin: 0 0; overflow: hidden;
+  background: var(--bg); color: var(--ink); font-family: var(--font); font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+.scene { position: absolute; inset: 0; opacity: 0; visibility: hidden; }
+.scene.on { visibility: visible; }
+canvas.fx { position: absolute; inset: 0; width: 1920px; height: 1080px; }
+.eyebrow { font-size: 18px; font-weight: 650; letter-spacing: .12em; text-transform: uppercase; color: var(--brand-text); }
+h1, h2, h3, p { margin: 0; }
+.soft {
+  background:
+    radial-gradient(900px 600px at 12% 18%, rgba(153, 217, 140, .28), transparent 70%),
+    radial-gradient(900px 700px at 88% 86%, rgba(26, 117, 159, .14), transparent 70%),
+    var(--bg);
+}
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 24px; box-shadow: 0 18px 50px rgba(16, 41, 61, .08); }
+
+/* ---------- 1. the demo ---------- */
+#demo iframe { position: absolute; inset: 0; width: 1920px; height: 1080px; border: 0; }
+
+/* ---------- 2. the app ---------- */
+#brandbar { position: absolute; top: 56px; left: 120px; display: flex; align-items: center; gap: 14px; }
+#brandbar .mark { width: 40px; height: 40px; }
+#brandbar img { height: 34px; }
+#lede { position: absolute; left: 120px; top: 190px; width: 820px; }
+#lede .eyebrow { margin-bottom: 18px; }
+#now { position: relative; height: 250px; }
+#now > div { position: absolute; inset: 0; }
+#now h2 { font-size: 64px; line-height: 1.04; font-weight: 650; letter-spacing: -0.03em; text-wrap: balance; }
+#now p { margin-top: 18px; font-size: 27px; line-height: 1.4; color: var(--muted); max-width: 760px; text-wrap: pretty; }
+#steps { position: absolute; left: 120px; top: 520px; width: 780px; list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 12px 28px; }
+#steps li { display: flex; align-items: center; gap: 14px; font-size: 21px; font-weight: 550; color: var(--muted); opacity: .45; }
+#steps li i { flex: none; width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--line-strong); display: grid; place-items: center; }
+#steps li i svg { width: 16px; height: 16px; opacity: 0; }
+#steps li.done { opacity: 1; }
+#steps li.done i { background: var(--brand-strong); border-color: var(--brand-strong); }
+#steps li.done i svg { opacity: 1; }
+#steps li.cur { opacity: 1; color: var(--ink); }
+#steps li.cur i { border-color: var(--action); box-shadow: 0 0 0 5px rgba(26, 117, 159, .16); }
+#chips { position: absolute; left: 120px; bottom: 70px; display: flex; gap: 12px; }
+.chip { display: inline-flex; align-items: center; gap: 9px; padding: 10px 18px; border-radius: 999px; background: var(--panel); border: 1px solid var(--line); font-size: 18px; font-weight: 600; color: var(--ink); }
+.chip b { width: 9px; height: 9px; border-radius: 50%; background: var(--brand-strong); }
+
+#phone { position: absolute; top: 50px; left: 1200px; width: 460px; height: 980px; }
+#phone .body {
+  position: absolute; inset: 0; border-radius: 82px; background: #1B1F24;
+  box-shadow: inset 0 0 0 2px #3A4048, inset 0 0 0 6px #111418, 0 40px 90px rgba(16, 41, 61, .28), 0 10px 26px rgba(16, 41, 61, .18);
+}
+#phone .btn { position: absolute; width: 5px; border-radius: 3px; background: #2A3038; }
+#phone video, #phone .screen { position: absolute; left: 14px; top: 14px; width: 432px; height: 940px; border-radius: 68px; object-fit: cover; background: #000; }
+#phone .screen { background: transparent; overflow: hidden; }
+.tap { position: absolute; border-radius: 50%; pointer-events: none; }
+.tap.dot { width: 44px; height: 44px; margin: -22px 0 0 -22px; background: rgba(16, 41, 61, .28); border: 2px solid rgba(255, 255, 255, .9); }
+.tap.ring { width: 44px; height: 44px; margin: -22px 0 0 -22px; border: 3px solid rgba(26, 117, 159, .7); }
+
+#say { position: absolute; right: 762px; top: 764px; width: 420px; padding: 22px 26px; border-radius: 28px 8px 28px 28px; background: var(--panel);
+  border: 1px solid var(--line); box-shadow: 0 24px 60px rgba(16, 41, 61, .16); transform-origin: 100% 0; }
+#say .who { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 650; color: var(--bad); letter-spacing: .06em; text-transform: uppercase; }
+#say .who i { width: 10px; height: 10px; border-radius: 50%; background: var(--bad); }
+#say .wave { display: flex; align-items: center; gap: 5px; height: 44px; margin: 12px 0 8px; }
+#say .wave span { width: 6px; border-radius: 3px; background: var(--action); }
+#say q { display: block; font-size: 36px; font-weight: 650; letter-spacing: -0.02em; quotes: "\201C" "\201D"; min-height: 44px; }
+
+/* ---------- 3. adoption ---------- */
+.head { position: absolute; left: 120px; top: 92px; width: 1100px; }
+.head .eyebrow { margin-bottom: 16px; }
+.head h2 { font-size: 60px; line-height: 1.06; font-weight: 650; letter-spacing: -0.03em; text-wrap: balance; }
+.head p { margin-top: 16px; font-size: 26px; line-height: 1.4; color: var(--muted); }
+#ten .legend { position: absolute; left: 150px; bottom: 150px; display: flex; gap: 30px; font-size: 20px; color: var(--muted); }
+#ten .legend span { display: inline-flex; align-items: center; gap: 10px; }
+#ten .legend i { width: 14px; height: 14px; border-radius: 50%; }
+#ten .foot { position: absolute; left: 150px; right: 110px; bottom: 44px; font-size: 17px; line-height: 1.45; color: var(--muted); }
+
+/* ---------- 4. people + fleets ---------- */
+#both .col { position: absolute; top: 330px; width: 540px; padding: 34px 38px; }
+#both .col h3 { display: flex; align-items: center; gap: 16px; font-size: 34px; font-weight: 650; letter-spacing: -0.02em; }
+#both .col h3 svg { width: 52px; height: 52px; flex: none; }
+#both .col p.sub { margin: 8px 0 18px; font-size: 20px; color: var(--muted); }
+#both ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 14px; }
+#both li { display: flex; gap: 14px; font-size: 23px; line-height: 1.35; }
+#both li::before { content: ""; flex: none; width: 10px; height: 10px; margin-top: 11px; border-radius: 50%; background: var(--brand-strong); }
+#engine { position: absolute; left: 810px; top: 430px; width: 300px; padding: 26px 24px; text-align: center; }
+#engine svg { width: 72px; height: 72px; }
+#engine b { display: block; margin-top: 10px; font-size: 25px; font-weight: 650; }
+#engine span { display: block; margin-top: 4px; font-size: 17px; color: var(--muted); }
+#both .punch { position: absolute; left: 0; right: 0; bottom: 92px; text-align: center; font-size: 30px; font-weight: 600; letter-spacing: -0.01em; }
+#both .punch em { font-style: normal; color: var(--brand-text); }
+
+/* ---------- 5. the problem ---------- */
+#problem ol { position: absolute; right: 110px; top: 330px; width: 640px; margin: 0; padding: 0; list-style: none; display: grid; gap: 22px; counter-reset: n; }
+#problem li { display: flex; gap: 20px; font-size: 27px; line-height: 1.35; font-weight: 550; }
+#problem li::before { counter-increment: n; content: counter(n); flex: none; width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center;
+  font-size: 20px; font-weight: 700; color: var(--bad); background: var(--bad-tint); margin-top: -3px; }
+#problem .turn { position: absolute; left: 0; right: 0; bottom: 84px; text-align: center; font-size: 40px; font-weight: 650; letter-spacing: -0.02em; }
+#problem .turn em { font-style: normal; color: var(--brand-text); }
+
+/* ---------- 6. end ---------- */
+#end { display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: radial-gradient(ellipse at 50% 44%, #FFFFFF, #E3ECDF 64%); }
+#end .mark { display: flex; align-items: center; gap: 28px; }
+#end .mark svg { width: 124px; height: 124px; }
+#end .mark img { height: 118px; }
+#end .by { margin-top: 18px; font-size: 28px; font-weight: 500; color: var(--muted); }
+#end .by b { color: var(--ink); font-weight: 600; }
+#end .tag { margin-top: 30px; font-size: 46px; font-weight: 650; letter-spacing: -0.02em;
+  background: linear-gradient(90deg, var(--action), var(--brand-strong)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+#end .url { margin-top: 18px; font-size: 26px; font-weight: 600; color: var(--action); }
+#end .built { margin-top: 64px; display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; max-width: 1300px; }
+#end .built .label { width: 100%; text-align: center; font-size: 16px; font-weight: 650; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+
+#curtain { position: absolute; inset: 0; background: var(--bg); pointer-events: none; }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <!-- web/public/logo.svg in its light colours -->
+  <symbol id="logo" viewBox="0 0 32 32" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.6">
+    <path d="M9 24 16 5l7 19" stroke="#FF4D5E" stroke-width="2" opacity=".45"/>
+    <path d="M4 24c4 0 4.5-11 8.5-11h7c4 0 4.5 11 8.5 11" stroke="#16C7B7"/>
+    <path d="M4 24c4 0 4.5-5.5 8.5-5.5h7c4 0 4.5 5.5 8.5 5.5" stroke="#2F6BFF"/>
+    <path d="M4 24h24" stroke="#10293D"/>
+    <circle cx="4" cy="24" r="3" fill="#10293D"/><circle cx="28" cy="24" r="3" fill="#16C7B7"/>
+  </symbol>
+  <symbol id="check" viewBox="0 0 16 16" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m3.5 8.5 3 3 6-7"/></symbol>
+</svg>
+
+<div id="stage">
+  <section class="scene" id="demo"><iframe id="demo-frame" title="transPEAKtation demo"></iframe></section>
+
+  <section class="scene soft" id="app">
+    <header id="brandbar"><svg class="mark"><use href="#logo"/></svg><img src="../../web/public/wordmark-light.svg" alt="transPEAKtation"></header>
+    <div id="lede">
+      <div class="eyebrow">The app · recorded live on iPhone</div>
+      <div id="now"></div>
+    </div>
+    <ol id="steps"></ol>
+    <div id="chips"><span class="chip"><b></b>No chat window</span><span class="chip"><b></b>AI you can switch off</span><span class="chip"><b></b>Live San Francisco data</span></div>
+    <div id="say"><div class="who"><i></i>Listening</div><div class="wave"></div><q></q></div>
+    <div id="phone">
+      <div class="body"></div>
+      <span class="btn" style="left:-4px;top:190px;height:34px"></span>
+      <span class="btn" style="left:-4px;top:250px;height:64px"></span>
+      <span class="btn" style="left:-4px;top:326px;height:64px"></span>
+      <span class="btn" style="right:-4px;top:280px;height:100px"></span>
+      <video id="sim" muted playsinline preload="auto"></video>
+      <div class="screen" id="taps"></div>
+    </div>
+  </section>
+
+  <section class="scene soft" id="ten">
+    <canvas class="fx" id="ten-cv"></canvas>
+    <div class="head">
+      <div class="eyebrow">Adoption</div>
+      <h2>The more people use it, the better it gets.</h2>
+      <p>From the first riders, the app beats ordinary maps. Past 80%, the whole city speeds up.</p>
+    </div>
+    <div class="legend"><span><i style="background:#9AA7B4"></i>Drivers on ordinary maps</span><span><i style="background:var(--brand-strong)"></i>transPEAKtation riders</span></div>
+    <p class="foot" id="ten-foot"></p>
+  </section>
+
+  <section class="scene soft" id="both">
+    <canvas class="fx" id="both-cv"></canvas>
+    <div class="head">
+      <div class="eyebrow">Who it helps</div>
+      <h2>One event-aware forecast. Every kind of driver.</h2>
+    </div>
+    <div class="col card" style="left:120px">
+      <h3><svg viewBox="0 0 48 48" fill="none" stroke="#1A759F" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><rect x="13" y="4" width="22" height="40" rx="5"/><path d="M21 38h6"/><path d="M19 20l4 4 7-8" stroke="#52B69A"/></svg>People</h3>
+      <p class="sub">Riders and drivers in the app</p>
+      <ul><li>A route that dodges the jam before it forms</li><li>A better time to leave, not just a way</li><li>Why, in plain words, and switches for every AI</li></ul>
+    </div>
+    <div id="engine" class="card"><svg><use href="#logo"/></svg><b>transPEAKtation</b><span>events + closures + live traffic → every road's future</span></div>
+    <div class="col card" style="right:120px">
+      <h3><svg viewBox="0 0 48 48" fill="none" stroke="#1A759F" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M7 30l4-11a4 4 0 0 1 4-3h18a4 4 0 0 1 4 3l4 11"/><rect x="5" y="30" width="38" height="9" rx="3"/><circle cx="14" cy="39" r="3"/><circle cx="34" cy="39" r="3"/><path d="M20 8h8M24 8v8" stroke="#52B69A"/></svg>Robotaxi fleets</h3>
+      <p class="sub">Autonomous fleets like Waymo</p>
+      <ul><li>Routes assigned across the fleet, so no single street floods</li><li>Pickups staged away from the crowd</li><li>Cars rebalanced ahead of the surge</li></ul>
+    </div>
+    <p class="punch">They share the same streets, so <em>spreading both keeps the whole city moving.</em></p>
+  </section>
+
+  <section class="scene soft" id="problem">
+    <canvas class="fx" id="problem-cv"></canvas>
+    <div class="head">
+      <div class="eyebrow" style="color:var(--bad)">The problem</div>
+      <h2>Every map app sends every driver down the same “fastest” road.</h2>
+    </div>
+    <ol>
+      <li>Big events release thousands of cars at the same moment.</li>
+      <li>Apps react after the jam forms, one driver at a time.</li>
+      <li>Robotaxi fleets add hundreds more cars running the same logic.</li>
+      <li>And riders can’t see what the AI does with their trip.</li>
+    </ol>
+    <p class="turn">transPEAKtation plans trips <em>together, before the jam forms.</em></p>
+  </section>
+
+  <section class="scene" id="end">
+    <div class="mark"><svg><use href="#logo"/></svg><img src="../../web/public/wordmark-light.svg" alt="transPEAKtation"></div>
+    <div class="by">by <b>YoWayMo</b></div>
+    <div class="tag">More Way to Go</div>
+    <div class="url">yowaymo.us</div>
+    <div class="built"><div class="label">Built with</div></div>
+  </section>
+
+  <div id="curtain"></div>
+</div>
+
+<script>
+(async () => {
+  // ---------- the adoption scene's numbers: SUMO, July 4 fireworks exodus, 6,000-car crowd, PPO policy ----------
+  // [share of cars on the app, riders' trip time %, ordinary drivers' trip time %, whole-city vehicle-hours %],
+  // each vs. the same cars all on their own fastest route. The 6,000 / PPO series is the one that improves at every
+  // step up in adoption. Whole-city numbers show from CITY_FROM on; below it they rise (said in the footnote).
+  const ADOPTION = [
+    [0.3, -19.1, -6.5, +37.6],
+    [0.5, -34.9, -6.7, +5.0],
+    [0.8, -57.5, -15.6, -26.5],
+    [1.0, -58.8, null, -46.4],
+  ];
+  const CITY_FROM = 0.8;
+  const ADOPTION_SOURCE = 'SUMO simulation of the July 4 fireworks exodus, 6,000-car crowd, reinforcement-learning routing (PPO). '
+    + 'Trip time of cars home by 1:00 AM, vs. the same cars all on their own fastest route. '
+    + 'Whole-city vehicle-hours fall from 80% on the app; at 30% and 50% they still rise (+38%, +5%).';
+  const BUILT_WITH = ['Google Gemini', 'ElevenLabs', 'MongoDB Atlas', 'Tiger Data', 'DigitalOcean', 'Mapbox', 'OpenStreetMap', 'SUMO', 'SwiftUI', 'Next.js'];
+
+  // The app segment: what the captions say at each tour beat (ios/Tour/Tour.swift), and how fast each stretch of
+  // the recording plays (from this beat to the next). Beats missing from marks.json are skipped.
+  const BEATS = [
+    ['boot', 3, 'A real iPhone app', 'Filmed live on the iOS simulator, from the moment it boots, against our deployed backend.'],
+    ['home', 2.2, null],
+    ['launch', 1.6, null],
+    ['map', 1, 'Tonight’s city, at a glance', 'Live events, closures and traffic across San Francisco.'],
+    ['privacy', 1.5, 'You decide what AI touches your trip', 'Every model and service is a switch, on this device. No account.'],
+    ['opt-out', 1.4, 'Opt out in one tap', 'Trip saving off: nothing about this trip is stored.'],
+    ['voice', 1, 'Just say where', 'Tap the mic and talk. Speech-to-text by ElevenLabs.'],
+    ['planning', 1, null],
+    ['routes', 1, 'Routes that know what’s coming', 'Our event-aware pick next to the regular routes, with the delay the forecast predicts on each.'],
+    ['explain', 1.1, 'Explained by Gemini', 'Why this route wins, in plain words. It never sees your address.'],
+    ['trace', 1.6, 'See where your data went', 'Stop by stop: the map service, our data, the route model, Gemini. And what was saved: nothing.'],
+    ['start', 1.6, 'Turn-by-turn to the door', 'Navigation on the forecast-aware route.'],
+    ['arrived', 1, 'Arrived', 'No chat window anywhere: the AI works inside the trip, not as the interface.'],
+    ['done', 1, null],
+  ];
+  const STEP_LABELS = { boot: 'Launch', map: 'Live map', privacy: 'Privacy switches', 'opt-out': 'Opt out', voice: 'Voice request',
+    routes: 'Event-aware routes', explain: 'Gemini explains', trace: 'Data trace', start: 'Navigate', arrived: 'Arrive' };
+  const SAY = 'Go to Chase Center';
+
+  // ---------- helpers ----------
+  const $ = s => document.querySelector(s);
+  const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
+  const smooth = (a, b, t) => { const u = clamp((t - a) / (b - a)); return u * u * (3 - 2 * u); };
+  const lerp = (a, b, u) => a + (b - a) * u;
+  const win = (t, a, b, f = 0.6) => Math.min(smooth(a - f, a, t), 1 - smooth(b, b + f, t));   // fade in at a, out at b
+  const Q = new URLSearchParams(location.search), RENDER = Q.has('render');
+
+  const marks = await fetch('footage/marks.json').then(r => r.json());
+  const simSrc = 'footage/sim.mp4';
+
+  // ---------- timeline ----------
+  const DEMO_END = 60, XF = 0.8;                         // the demo is 60 s; scenes cross-fade over XF
+  const beats = [['boot', 0], ...Object.entries(marks.beats)];
+  const beatAt = Object.fromEntries(beats);
+  const used = BEATS.filter(b => b[0] in beatAt);
+  // Recording stretches [src from, src to, speed] and where each starts in the video.
+  const SEGS = [];
+  let tv = DEMO_END;
+  used.forEach(([id, speed], i) => {
+    const a = beatAt[id], b = i + 1 < used.length ? beatAt[used[i + 1][0]] : a + 1.5;   // hold the last frame 1.5 s
+    SEGS.push({ id, a, b, speed, v: tv }); tv += (b - a) / speed;
+  });
+  const APP_END = tv;
+  const srcAt = t => {   // video second -> recording second
+    let s = SEGS[0];
+    for (const g of SEGS) if (t >= g.v) s = g;
+    return clamp(s.a + (t - s.v) * s.speed, s.a, s.b);
+  };
+  const vidAt = src => {   // recording second -> video second
+    for (const g of SEGS) if (src >= g.a && src <= g.b) return g.v + (src - g.a) / g.speed;
+    return src < SEGS[0].a ? DEMO_END : APP_END;
+  };
+  const SCENES = [['ten', 16], ['both', 13], ['problem', 15], ['end', 8]];
+  const AT = { demo: [0, DEMO_END], app: [DEMO_END, APP_END] };
+  let t0 = APP_END;
+  for (const [id, d] of SCENES) { AT[id] = [t0, t0 + d]; t0 += d; }
+  const TOTAL = t0;
+
+  // ---------- 1. demo ----------
+  const frame = $('#demo-frame');
+  frame.src = `../index.html?theme=light&paused${RENDER ? '&vt' : ''}`;
+  const demoReady = new Promise(res => {
+    const poll = () => frame.contentWindow?.player?.ready ? res() : setTimeout(poll, 100);
+    frame.addEventListener('load', poll);
+  });
+
+  // ---------- 2. app ----------
+  const sim = $('#sim');
+  sim.src = simSrc;
+  const simReady = new Promise(res => sim.readyState >= 2 ? res() : sim.addEventListener('loadeddata', res, { once: true }));
+  const nowBox = $('#now'), steps = $('#steps');
+  const captioned = used.filter(b => b[2]);
+  captioned.forEach(([id]) => {
+    const li = document.createElement('li'); li.dataset.id = id;
+    li.innerHTML = `<i><svg><use href="#check"/></svg></i>${STEP_LABELS[id] ?? id}`; steps.append(li);
+  });
+  const caps = captioned.map(([id, , h, p]) => {
+    const d = document.createElement('div'); d.innerHTML = `<h2>${h}</h2><p>${p}</p>`; nowBox.append(d);
+    // a caption shows from its beat until the next captioned beat
+    return { id, el: d, at: vidAt(beatAt[id]) };
+  });
+  caps.forEach((c, i) => { c.until = i + 1 < caps.length ? caps[i + 1].at : APP_END; });
+  const stepEls = [...steps.children];
+  // Touch ripples at the tour's taps (screen points of a 402x874 iPhone 17 Pro).
+  const tapBox = $('#taps');
+  const taps = marks.taps.map(([src, x, y]) => {
+    const dot = document.createElement('div'), ring = document.createElement('div');
+    dot.className = 'tap dot'; ring.className = 'tap ring';
+    for (const e of [dot, ring]) { e.style.left = `${x / 402 * 432}px`; e.style.top = `${y / 874 * 940}px`; tapBox.append(e); }
+    return { at: vidAt(src), dot, ring };
+  });
+  // Voice bubble, beside the mic (staged: see README).
+  const say = $('#say'), sayQ = say.querySelector('q'), wave = say.querySelector('.wave');
+  for (let i = 0; i < 26; i++) wave.append(document.createElement('span'));
+  const bars = [...wave.children];
+  const SAY_ON = 'say' in beatAt ? vidAt(beatAt.say) : Infinity, SAY_OFF = 'planning' in beatAt ? vidAt(beatAt.planning) + 0.4 : SAY_ON + 4;
+
+  function drawApp(t) {
+    // captions: slide up in, fade out
+    for (const c of caps) {
+      const a = win(t, c.at + 0.15, c.until - 0.2, 0.35);
+      c.el.style.opacity = a; c.el.style.transform = `translateY(${(1 - smooth(c.at, c.at + 0.5, t)) * 24}px)`;
+    }
+    const cur = caps.filter(c => t >= c.at).pop();
+    stepEls.forEach((li, i) => {
+      const c = caps[i];
+      li.classList.toggle('cur', c === cur); li.classList.toggle('done', t >= c.until && c !== cur);
+    });
+    // taps
+    for (const k of taps) {
+      const u = (t - k.at) / 0.55;
+      k.dot.style.opacity = u > -0.25 && u < 0.6 ? 1 - smooth(0.3, 0.6, u) : 0;
+      k.ring.style.opacity = u > 0 && u < 1 ? 1 - u : 0;
+      k.ring.style.transform = `scale(${1 + clamp(u) * 1.6})`;
+    }
+    // voice bubble: pops in, waveform while "talking", then the words type out
+    const sa = win(t, SAY_ON + 0.1, SAY_OFF, 0.25);
+    say.style.opacity = sa; say.style.transform = `scale(${0.9 + 0.1 * smooth(SAY_ON, SAY_ON + 0.35, t)})`;
+    const talk = clamp((t - SAY_ON - 0.4) / Math.max(0.8, SAY_OFF - SAY_ON - 1.2));
+    sayQ.textContent = SAY.slice(0, Math.round(SAY.length * smooth(0, 0.8, talk)));
+    bars.forEach((b, i) => {
+      const e = talk > 0 && talk < 0.9 ? 0.35 + 0.65 * Math.abs(Math.sin(t * 9 + i * 0.7) * Math.sin(t * 3.1 + i * 1.9)) : 0.12;
+      b.style.height = `${6 + 38 * e}px`;
+    });
+  }
+
+  // ---------- 3. adoption ----------
+  $('#ten-foot').textContent = ADOPTION_SOURCE;
+  const canv = id => { const c = $(id); c.width = 1920; c.height = 1080; return c.getContext('2d'); };
+  const tctx = canv('#ten-cv'), bctx = canv('#both-cv'), pctx = canv('#problem-cv');
+  const cubic = (p0, p1, p2, p3, u) => { const v = 1 - u; return [
+    v * v * v * p0[0] + 3 * v * v * u * p1[0] + 3 * v * u * u * p2[0] + u * u * u * p3[0],
+    v * v * v * p0[1] + 3 * v * v * u * p1[1] + 3 * v * u * u * p2[1] + u * u * u * p3[1]]; };
+  const O = [240, 650], D = [900, 650];
+  const PATHS = { main: [O, [460, 650], [680, 650], D], up: [O, [400, 450], [740, 450], D], down: [O, [400, 850], [740, 850], D] };
+  const along = (P, u) => cubic(...P, u);
+  const strokePath = (c, P) => { c.beginPath(); c.moveTo(...P[0]); c.bezierCurveTo(...P[1], ...P[2], ...P[3]); };
+  const mix = (a, b, u) => a.map((x, i) => Math.round(lerp(x, b[i], u)));
+  const rgb = a => `rgb(${a.join(',')})`;
+  const hash = i => { const x = Math.sin(i * 127.1 + 311.7) * 43758.5453; return x - Math.floor(x); };
+
+  // Adoption steps up 0% → 30% → 50% → 80% → 100% at these scene seconds; the chart's groups grow in step.
+  const STEP_AT = [1.2, 4.4, 7.6, 10.8];
+  const shareAt = T => ADOPTION.reduce((s, [sh], i) => lerp(s, sh, smooth(STEP_AT[i], STEP_AT[i] + 0.9, T)), 0);
+  // Cars on the main road: every ordinary driver, a third of the riders (the others take the two side roads).
+  const loadAt = T => 1 - shareAt(T) * 2 / 3;
+  const mainV = T => lerp(0.07, 0.012, smooth(0.35, 1, loadAt(T)));   // main road: jammed when loaded
+  const ALT_V = 0.07;
+  let vInt = { T: 0, main: 0 };   // ∫ main-road speed dt, so cars don't jump when it changes
+  const mainPos = T => {
+    if (T < vInt.T) vInt = { T: 0, main: 0 };
+    for (; vInt.T < T; vInt.T += 1 / 60) vInt.main += mainV(vInt.T) / 60;
+    return vInt.main;
+  };
+  function drawTen(t) {
+    const c = tctx, T = t - AT.ten[0], share = shareAt(T), load = loadAt(T), mp = mainPos(T);
+    c.clearRect(0, 0, 1920, 1080);
+    // road diagram, left
+    // traffic colours, kept pale when flowing so the green riders stay visible on them
+    const jam = rgb(load > 0.6 ? mix([233, 162, 59], [200, 49, 63], smooth(0.6, 1, load)) : mix([190, 226, 180], [233, 162, 59], smooth(0.3, 0.6, load)));
+    const side = rgb(mix([214, 222, 229], [190, 226, 180], smooth(0.05, 0.3, share)));
+    for (const [k, col, w] of [['up', side, 22], ['down', side, 22], ['main', jam, 30]]) {
+      strokePath(c, PATHS[k]); c.lineCap = 'round'; c.strokeStyle = '#FFFFFF'; c.lineWidth = w + 10; c.stroke();
+      strokePath(c, PATHS[k]); c.strokeStyle = col; c.lineWidth = w; c.stroke();
+    }
+    for (let i = 0; i < 90; i++) {
+      const h = hash(i + 500), k = ADOPTION.findIndex(([sh]) => h < sh);   // the step at which this car joins the app
+      const on = k < 0 ? 0 : smooth(STEP_AT[k], STEP_AT[k] + 1.4, T), r = hash(i + 900);
+      const road = r < 1 / 3 ? 'up' : r < 2 / 3 ? 'down' : 'main';
+      const u0 = (hash(i) + mp) % 1, u1 = (hash(i) + T * ALT_V) % 1;
+      let [x, y] = along(PATHS.main, u0);
+      y += ((i * 7) % 3 - 1) * 8;
+      if (on > 0 && road !== 'main') { const [ax, ay] = along(PATHS[road], u1); x = lerp(x, ax, on); y = lerp(y, ay, on); }
+      c.beginPath(); c.arc(x, y, 7 + 2 * on, 0, 7);
+      c.fillStyle = rgb(mix([154, 167, 180], [82, 182, 154], on)); c.fill();
+      c.lineWidth = 2; c.strokeStyle = '#FFFFFF'; c.stroke();
+    }
+    c.font = '600 22px "Instrument Sans"'; c.fillStyle = '#10293D'; c.textBaseline = 'middle';
+    c.textAlign = 'right'; c.fillText('Event', O[0] - 22, O[1]); c.textAlign = 'left'; c.fillText('Downtown', D[0] + 22, D[1]);
+    c.textBaseline = 'alphabetic';
+    // adoption counter
+    c.textAlign = 'left'; c.font = '650 84px "Instrument Sans"'; c.fillStyle = '#23735C';
+    c.fillText(`${Math.round(share * 100)}%`, 150, 400);
+    c.font = '500 24px "Instrument Sans"'; c.fillStyle = '#4F6577';
+    c.fillText('of drivers on transPEAKtation', 150, 436);
+
+    // chart card, right: shorter trips per adoption level, riders vs ordinary drivers
+    const X0 = 1070, Y0 = 290, W = 740, H = 600, base = Y0 + 450, per = 5.4;   // px per % shorter
+    c.save(); c.shadowColor = 'rgba(16,41,61,0.08)'; c.shadowBlur = 50; c.shadowOffsetY = 18;
+    c.fillStyle = '#FFFFFF'; c.beginPath(); c.roundRect(X0, Y0, W, H, 24); c.fill(); c.restore();
+    c.strokeStyle = 'rgba(24,78,119,0.12)'; c.lineWidth = 1; c.beginPath(); c.roundRect(X0 + 0.5, Y0 + 0.5, W - 1, H - 1, 24); c.stroke();
+    c.fillStyle = '#10293D'; c.font = '650 26px "Instrument Sans"'; c.fillText('How much shorter trips get', X0 + 34, Y0 + 52);
+    c.fillStyle = '#4F6577'; c.font = '500 18px "Instrument Sans"'; c.fillText('vs. everyone on their own fastest route', X0 + 34, Y0 + 82);
+    c.strokeStyle = 'rgba(24,78,119,0.18)'; c.beginPath(); c.moveTo(X0 + 34, base + 0.5); c.lineTo(X0 + W - 34, base + 0.5); c.stroke();
+    ADOPTION.forEach(([sh, rider, other, city], i) => {
+      const cx = X0 + 120 + i * 168, g = smooth(STEP_AT[i], STEP_AT[i] + 0.9, T), cur = T >= STEP_AT[i] && (i === ADOPTION.length - 1 || T < STEP_AT[i + 1]);
+      if (cur) { c.fillStyle = 'rgba(153,217,140,0.16)'; c.beginPath(); c.roundRect(cx - 70, Y0 + 104, 140, base - Y0 - 104 + 76, 14); c.fill(); }
+      c.textAlign = 'center';
+      for (const [v, col, dx] of [[rider, '#52B69A', -30], [other, '#9AA7B4', 30]]) {
+        if (v === null) { c.globalAlpha = g; c.fillStyle = '#4F6577'; c.font = '500 15px "Instrument Sans"'; c.fillText('all on', cx + dx, base - 26); c.fillText('the app', cx + dx, base - 8); c.globalAlpha = 1; continue; }
+        const h = -v * per * g;
+        c.fillStyle = col; c.beginPath(); c.roundRect(cx + dx - 25, base - h, 50, h, [8, 8, 0, 0]); c.fill();
+        c.globalAlpha = g; c.fillStyle = col === '#52B69A' ? '#23735C' : '#4F6577'; c.font = '650 22px "Instrument Sans"';
+        c.fillText(`${Math.round(-v)}%`, cx + dx, base - h - 12); c.globalAlpha = 1;
+      }
+      c.fillStyle = '#10293D'; c.font = '650 24px "Instrument Sans"'; c.fillText(`${Math.round(sh * 100)}%`, cx, base + 36);
+      if (sh >= CITY_FROM && city < 0) {
+        c.globalAlpha = g; c.fillStyle = '#F1F8EA'; c.beginPath(); c.roundRect(cx - 66, base + 52, 132, 34, 17); c.fill();
+        c.fillStyle = '#23735C'; c.font = '650 16px "Instrument Sans"'; c.fillText(`city −${Math.round(-city)}% veh-h`, cx, base + 75); c.globalAlpha = 1;
+      }
+    });
+    c.textAlign = 'left'; c.fillStyle = '#4F6577'; c.font = '500 16px "Instrument Sans"';
+    c.fillText('share of drivers on the app', X0 + 34, Y0 + H - 22);
+  }
+
+  // ---------- 4. people + fleets ----------
+  function drawBoth(t) {
+    const c = bctx, T = t - AT.both[0];
+    c.clearRect(0, 0, 1920, 1080);
+    const L = [[810, 560], [720, 560], [760, 560], [660, 560]], R = [[1110, 560], [1200, 560], [1160, 560], [1260, 560]];
+    for (const [P, col] of [[L, '#1A759F'], [R, '#52B69A']]) {
+      strokePath(c, P); c.setLineDash([2, 14]); c.lineCap = 'round'; c.lineWidth = 5; c.strokeStyle = 'rgba(24,78,119,0.25)'; c.stroke(); c.setLineDash([]);
+      for (let k = 0; k < 4; k++) {
+        const u = ((T * 0.55 + k / 4) % 1), [x, y] = along(P, u);
+        c.globalAlpha = smooth(0.8, 1.6, T) * Math.sin(Math.PI * u);
+        c.beginPath(); c.arc(x, y, 8, 0, 7); c.fillStyle = col; c.fill();
+      }
+      c.globalAlpha = 1;
+    }
+    document.querySelectorAll('#both .col').forEach((e, i) => { const a = smooth(0.6 + i * 0.5, 1.2 + i * 0.5, T); e.style.opacity = a; e.style.transform = `translateY(${(1 - a) * 20}px)`; });
+    document.querySelectorAll('#both li').forEach((e, i) => { e.style.opacity = smooth(1.6 + (i % 3) * 0.6 + Math.floor(i / 3) * 0.3, 2.1 + (i % 3) * 0.6 + Math.floor(i / 3) * 0.3, T); });
+    $('#engine').style.opacity = smooth(0.2, 0.8, T);
+    $('#both .punch').style.opacity = smooth(6.5, 7.3, T);
+  }
+
+  // ---------- 5. the problem ----------
+  // Cars from all over funnel onto one "fastest" road, which fills and stops; two empty streets run beside it.
+  const ENTRY = [640, 680], EXIT = [1120, 680], NCAR = 90;
+  const origins = Array.from({ length: NCAR }, (_, i) => [120 + hash(i) * 380, 380 + hash(i + 99) * 580]);
+  function drawProblem(t) {
+    const c = pctx, T = t - AT.problem[0];
+    c.clearRect(0, 0, 1920, 1080);
+    for (const y of [520, 840]) {
+      c.lineCap = 'round'; c.strokeStyle = '#FFFFFF'; c.lineWidth = 26; c.beginPath(); c.moveTo(ENTRY[0], y); c.lineTo(EXIT[0], y); c.stroke();
+      c.strokeStyle = '#D5DEE5'; c.lineWidth = 18; c.stroke();
+      c.font = '500 18px "Instrument Sans"'; c.fillStyle = '#4F6577'; c.textAlign = 'center'; c.fillText('empty', (ENTRY[0] + EXIT[0]) / 2, y - 22);
+    }
+    const fill = clamp(T / 7);
+    c.strokeStyle = '#FFFFFF'; c.lineWidth = 40; c.beginPath(); c.moveTo(...ENTRY); c.lineTo(...EXIT); c.stroke();
+    c.strokeStyle = rgb(mix([233, 162, 59], [200, 49, 63], smooth(0.15, 0.6, fill))); c.lineWidth = 30; c.stroke();
+    c.font = '600 22px "Instrument Sans"'; c.fillStyle = '#10293D'; c.textAlign = 'center'; c.fillText('the “fastest” road', (ENTRY[0] + EXIT[0]) / 2, ENTRY[1] - 34);
+    // each car drives to the entry, then crawls along the road; nobody passes the car ahead
+    let front = EXIT[0] - 10;
+    for (let i = 0; i < NCAR; i++) {
+      const start = 0.4 + i * 0.075, u = clamp((T - start) / 1.6), [ox, oy] = origins[i];
+      if (T < start) continue;
+      let x, y;
+      if (u < 1) { const e = smooth(0, 1, u); x = lerp(ox, ENTRY[0], e); y = lerp(oy, ENTRY[1], e); }
+      else {
+        const free = ENTRY[0] + (T - start - 1.6) * lerp(160, 18, smooth(0.1, 0.5, fill));
+        x = Math.min(free, front); front = x - 17; y = ENTRY[1] + ((i % 3) - 1) * 8;
+        if (x < ENTRY[0]) { x = ENTRY[0] - (ENTRY[0] - x) * 0.6; }
+      }
+      c.beginPath(); c.arc(x, y, 7, 0, 7); c.fillStyle = u >= 1 && fill > 0.35 ? '#C8313F' : '#10293D'; c.fill();
+      c.lineWidth = 2; c.strokeStyle = '#FFFFFF'; c.stroke();
+    }
+    document.querySelectorAll('#problem li').forEach((e, i) => { const a = smooth(1.5 + i * 1.6, 2.1 + i * 1.6, T); e.style.opacity = a; e.style.transform = `translateX(${(1 - a) * 18}px)`; });
+    $('#problem .turn').style.opacity = smooth(9.6, 10.4, T);
+  }
+
+  // ---------- 6. end ----------
+  const built = $('#end .built');
+  built.insertAdjacentHTML('beforeend', BUILT_WITH.map(b => `<span class="chip">${b}</span>`).join(''));
+  function drawEnd(t) {
+    const T = t - AT.end[0];
+    [['#end .mark', 0.2], ['#end .by', 0.5], ['#end .tag', 0.8], ['#end .url', 1.1], ['#end .built', 1.6]].forEach(([s, d]) => {
+      const a = smooth(d, d + 0.8, T), e = $(s); e.style.opacity = a; e.style.transform = `translateY(${(1 - a) * 14}px)`;
+    });
+  }
+
+  // ---------- one frame ----------
+  const scenes = Object.fromEntries(['demo', 'app', ...SCENES.map(s => s[0])].map(id => [id, $('#' + id)]));
+  const curtain = $('#curtain');
+  let lastSimSeek = -1;
+  function render(t) {
+    for (const [id, [a, b]] of Object.entries(AT)) {
+      const first = id === 'demo', last = id === 'end';
+      const o = id === 'demo' ? 1 - smooth(b - 0.7, b - 0.1, t)            // demo → app: dip through the page colour
+        : id === 'app' ? Math.min(smooth(a, a + 0.6, t), 1 - smooth(b - XF / 2, b + XF / 2, t))
+        : Math.min(smooth(a - XF / 2, a + XF / 2, t), last ? 1 : 1 - smooth(b - XF / 2, b + XF / 2, t));
+      scenes[id].style.opacity = o; scenes[id].classList.toggle('on', o > 0.001);
+    }
+    curtain.style.opacity = 1 - smooth(0, 0.5, t);   // fade up from the page colour
+    if (t < DEMO_END + XF) frame.contentWindow?.seek?.(Math.min(t, DEMO_END - 0.001));
+    if (t > DEMO_END - XF && t < APP_END + XF) drawApp(t);
+    if (t > AT.ten[0] - XF && t < AT.ten[1] + XF) drawTen(t);
+    if (t > AT.both[0] - XF && t < AT.both[1] + XF) drawBoth(t);
+    if (t > AT.problem[0] - XF && t < AT.problem[1] + XF) drawProblem(t);
+    if (t > AT.end[0] - XF) drawEnd(t);
+  }
+  // The phone video: exact seeks when rendering, a normal playing video (resynced when it drifts) in preview.
+  function simTo(t, exact) {
+    const s = srcAt(Math.min(Math.max(t, DEMO_END), APP_END));
+    if (exact) {
+      if (Math.abs(s - lastSimSeek) < 1e-4) return Promise.resolve();
+      lastSimSeek = s; sim.currentTime = s;
+      return new Promise(r => sim.requestVideoFrameCallback(() => r()));
+    }
+    const seg = SEGS.findLast(g => t >= g.v);
+    if (t < DEMO_END - XF || t > APP_END + XF || paused) { sim.pause(); if (Math.abs(sim.currentTime - s) > 0.05) sim.currentTime = s; return; }
+    sim.playbackRate = seg ? seg.speed : 1;
+    if (Math.abs(sim.currentTime - s) > 0.3) sim.currentTime = s;
+    if (sim.paused) sim.play().catch(() => {});
+  }
+
+  // ---------- stage + playback ----------
+  const stage = $('#stage');
+  const fit = () => {
+    const S = Math.min(innerWidth / 1920, innerHeight / 1080);
+    stage.style.transform = `scale(${S})`;
+    stage.style.left = `${(innerWidth - 1920 * S) / 2}px`; stage.style.top = `${(innerHeight - 1080 * S) / 2}px`;
+  };
+  fit(); addEventListener('resize', fit);
+  await Promise.all([demoReady, simReady, document.fonts.ready,
+    ...['500 16px "Instrument Sans"', '600 16px "Instrument Sans"', '650 16px "Instrument Sans"'].map(f => document.fonts.load(f))]);
+
+  let T = clamp(+Q.get('t') || 0, 0, TOTAL), paused = false, last = null;
+  window.pitch = {
+    total: TOTAL, app: Object.fromEntries(beats.map(([k, v]) => [k, +vidAt(v).toFixed(2)])),
+    beats: Object.fromEntries(Object.entries(AT).map(([k, v]) => [k, v.map(x => +x.toFixed(2))])),
+    /** render.mjs: show second t exactly, then advance the demo's clock (timers, CSS transitions) by dt. */
+    async seek(t, dt) {
+      T = t; render(t);
+      frame.contentWindow.__vt?.(dt * 1000);
+      await simTo(t, true);
+    },
+  };
+  if (RENDER) { window.pitch.ready = true; return; }
+  const loop = now => {
+    if (last !== null && !paused) T = Math.min(TOTAL, T + (now - last) / 1000);
+    last = now; render(T); simTo(T, false); requestAnimationFrame(loop);
+  };
+  addEventListener('keydown', e => {
+    if (e.key === ' ') paused = !paused;
+    else if (e.key === 'ArrowRight') T = Math.min(TOTAL, T + 5);
+    else if (e.key === 'ArrowLeft') T = Math.max(0, T - 5);
+    else if (e.key === 'r' || e.key === 'R') T = 0;
+  });
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

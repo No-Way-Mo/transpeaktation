@@ -168,6 +168,24 @@ canvas { position: absolute; inset: 0; width: 1920px; height: 1080px; transition
 #endcard.on p { animation: rise 1.2s .45s cubic-bezier(.2, .8, .2, 1) both; }
 @keyframes rise { from { opacity: 0; transform: translateY(14px); } }
 
+/* ?theme=light: the web app's light palette (web/app/globals.css), used by the pitch video (demo/video/). */
+:root[data-theme="light"] {
+  --bay: #E9F0E6; --land: #F4F7F2; --fog: #10293D; --mist: #4F6577;
+  --signal: #1A759F; --signal-2: #52B69A; --free: #52B69A; --slow: #E9A23B; --heavy: #E07B4F; --jam: #C8313F;
+  --glass: rgba(255, 255, 255, 0.88); --line: rgba(24, 78, 119, 0.14);
+}
+[data-theme="light"] body { background: #E9F0E6; }
+[data-theme="light"] .scrim.top { background: linear-gradient(rgba(244, 247, 242, .88), rgba(244, 247, 242, 0)); }
+[data-theme="light"] .scrim.bottom { background: linear-gradient(rgba(244, 247, 242, 0), rgba(244, 247, 242, .95)); }
+[data-theme="light"] #vignette { background: radial-gradient(ellipse at 58% 42%, transparent 45%, rgba(200, 49, 63, .2) 100%); }
+[data-theme="light"] #curtain { background: #E9F0E6; }
+[data-theme="light"] #assign .track, [data-theme="light"] #forecast .bar { background: rgba(24, 78, 119, .09); }
+[data-theme="light"] #compare .col.w b { color: #B42331; }
+[data-theme="light"] #compare .col.r b { color: #1A759F; }
+[data-theme="light"] #compare .cell em { color: #FFFFFF; }
+[data-theme="light"] #endcard { background: radial-gradient(ellipse at 50% 46%, #FFFFFF, #E3ECDF 62%); }
+[data-theme="light"] #endcard .mark svg, [data-theme="light"] #stage.rr #brand svg:not(.word) { filter: none; }
+
 @media (prefers-reduced-motion: reduce) {
   #mode.rr i, #rw.on { animation: none; }
 }
@@ -567,7 +585,20 @@ const SIM = (() => {
 
   // ---------- palette ----------
   const COL = { bay: '#060C17', land: '#141E30', park: '#0F2023', park2: '#132A2B', road: '#1C283E', casing: '#060C16',
-    fog: '#E7EDF6', mist: '#8C9AB3', signal: '#2F6BFF', bridge: '#E4572E', jam: '#FF4D5E', gold: '#FFC857' };
+    fog: '#E7EDF6', mist: '#8C9AB3', signal: '#2F6BFF', bridge: '#E4572E', jam: '#FF4D5E', gold: '#FFC857',
+    slow: '#F2D14B', heavy: '#FF9245', car: '#F4F7FF', trail: 'rgba(191,212,255,0.3)', halo: 'rgba(6,12,22,0.9)',
+    grid: 'rgba(231,237,246,0.1)', arrived: '#3DDC97', stage: '6,12,22', add: 'lighter' };
+  // ?theme=light: the web app's light palette (CSS above), a light basemap, dark cars.
+  const LIGHT = new URLSearchParams(location.search).get('theme') === 'light';
+  if (LIGHT) {
+    document.documentElement.dataset.theme = 'light';
+    Object.assign(COL, { bay: '#E9F0E6', fog: '#10293D', mist: '#4F6577', signal: '#1A759F', jam: '#C8313F', gold: '#B7791F',
+      slow: '#E9A23B', heavy: '#E07B4F', car: '#10293D', trail: 'rgba(24,78,119,0.28)', halo: 'rgba(255,255,255,0.92)',
+      grid: 'rgba(24,78,119,0.12)', arrived: '#52B69A', stage: '233,240,230', add: 'source-over' });
+    // Logo + wordmark in their light versions (web/public/wordmark-light.svg); CSS can't reach into the <symbol>.
+    const INK = { '#E7EDF6': '#10293D', '#EAF4EC': '#10293D', '#99D98C': '#52B69A', '#3FA9D0': '#168AAD' };
+    for (const a of ['fill', 'stroke']) document.querySelectorAll(`[${a}]`).forEach(n => { const v = INK[n.getAttribute(a)]; if (v) n.setAttribute(a, v); });
+  }
   const RAMP = [[0, [61, 220, 151]], [0.35, [242, 209, 75]], [0.62, [255, 146, 69]], [0.85, [255, 77, 94]], [1, [255, 77, 94]]];
   const RAMP_STR = Array.from({ length: 41 }, (_, i) => {
     const x = i / 40, j = RAMP.findIndex(r => r[0] >= x), [a, ca] = RAMP[Math.max(0, j - 1)], [b, cb] = RAMP[j];
@@ -714,7 +745,7 @@ const SIM = (() => {
     const START = 19.2, EVERY = 0.24, LIFE = 1.7;
     if (t < START) return;
     const c = ctx, k1 = Math.floor((t - START) / EVERY);
-    c.globalCompositeOperation = 'lighter';
+    c.globalCompositeOperation = COL.add;
     for (let k = Math.max(0, k1 - 8); k <= k1; k++) {
       const age = t - (START + k * EVERY + hash(k) * 0.1);
       if (age < 0 || age > LIFE) continue;
@@ -848,7 +879,7 @@ const SIM = (() => {
     const x = -300 + smooth(27, 28.6, T) * 2600, c = ctx;
     const g = c.createLinearGradient(x - 320, 0, x, 0);
     g.addColorStop(0, 'rgba(47,107,255,0)'); g.addColorStop(0.85, 'rgba(47,107,255,0.3)'); g.addColorStop(1, 'rgba(214,228,255,0.7)');
-    c.globalCompositeOperation = 'lighter'; c.fillStyle = g; c.fillRect(x - 320, 0, 322, 1080); c.globalCompositeOperation = 'source-over';
+    c.globalCompositeOperation = LIGHT ? 'multiply' : 'lighter'; c.fillStyle = g; c.fillRect(x - 320, 0, 322, 1080); c.globalCompositeOperation = 'source-over';
   }
 
   // ---------- act 1: the SUMO baseline run (baseline.data.js) on the web app's Esri basemap ----------
@@ -907,10 +938,41 @@ const SIM = (() => {
   const tiles = new Map();
   const tile = key => {
     let im = tiles.get(key);
-    if (!im) { im = new Image(); im.src = `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/${key}`; tiles.set(key, im); }
+    if (!im) {
+      im = new Image();
+      if (LIGHT) { im.crossOrigin = 'anonymous'; im.onload = () => paintTile(im); }
+      im.src = `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_${LIGHT ? 'Light' : 'Dark'}_Gray_Base/MapServer/tile/${key}`; tiles.set(key, im);
+    }
     return im;
   };
-  const ready = im => im && im.complete && im.naturalWidth > 0;
+  const ready = im => im && im.complete && im.naturalWidth > 0 && (!LIGHT || im.painted);
+  // Light: water and parks repainted in the web app's map colours, picked out of Esri's own flat fills
+  // (web/lib/water.ts paintBasemap, without its tone curve, which is near-identity in light).
+  function paintTile(im) {
+    if (im.painted) return;
+    const cv = document.createElement('canvas'), c = cv.getContext('2d', { willReadFrequently: true }), w = cv.width = cv.height = 256;
+    c.drawImage(im, 0, 0, w, w);
+    const d = c.getImageData(0, 0, w, w), px = d.data, n = w * w, cast = new Float32Array(n), box = new Float32Array(n);
+    const ramp = (v, lo, hi) => v <= lo ? 0 : v >= hi ? 1 : (v - lo) / (hi - lo);
+    const near = (r, g, b, f) => 1 - ramp(Math.max(Math.abs(r - f[0]), Math.abs(g - f[1]), Math.abs(b - f[2])), 4, 12);
+    for (let i = 0; i < n; i++) cast[i] = px[i * 4 + 1] - (px[i * 4] + px[i * 4 + 2]) / 2;
+    const pass = (src, dst, dx, dy) => {   // 5x5 box blur of the green cast, edges clamped
+      for (let y = 0; y < w; y++) for (let x = 0; x < w; x++) {
+        let t = 0;
+        for (let k = -2; k <= 2; k++) t += src[Math.min(w - 1, Math.max(0, y + k * dy)) * w + Math.min(w - 1, Math.max(0, x + k * dx))];
+        dst[y * w + x] = t / 5;
+      }
+    };
+    pass(cast, box, 1, 0); pass(box, cast, 0, 1);
+    for (let i = 0, o = 0; i < n; i++, o += 4) {
+      const r = px[o], g = px[o + 1], b = px[o + 2];
+      const wa = near(r, g, b, [0xD0, 0xCF, 0xD4]) * ramp(b - (r + g) / 2, 1.5, 3.5);
+      const pa = wa > 0 ? 0 : near(r, g, b, [0xE1, 0xE7, 0xE1]) * ramp(cast[i], 2, 4);
+      const a = Math.max(wa, pa), to = wa > 0 ? [0x9D, 0xD5, 0xE5] : [0xB9, 0xD7, 0xA8];
+      for (let k = 0; k < 3; k++) px[o + k] = Math.round(px[o + k] + (to[k] - px[o + k]) * a);
+    }
+    c.putImageData(d, 0, 0); im.painted = cv;
+  }
   // Tiles covering the stage rect (x0, y0, w, h) for camera [mx, my, zoom], at the zoom that fits the screen's pixels.
   function tilesFor([cx, cy, z], x0, y0, w, h) {
     const kW = 256 * 2 ** z, tz = Math.max(3, Math.min(16, Math.round(z + Math.log2(S * DPR)))), ts = kW / 2 ** tz;
@@ -927,15 +989,17 @@ const SIM = (() => {
     c.fillStyle = COL.bay; c.fillRect(x0, y0, w, h);
     for (const [tz, tx, ty, px, py, ts] of tilesFor(cam, x0, y0, w, h)) {
       const im = tile(`${tz}/${ty}/${tx}`);
-      if (ready(im)) { c.drawImage(im, px, py, ts + 0.5, ts + 0.5); continue; }
+      if (ready(im)) { c.drawImage(im.painted || im, px, py, ts + 0.5, ts + 0.5); continue; }
       for (let d = 1; d <= 4; d++) {
         const par = tiles.get(`${tz - d}/${ty >> d}/${tx >> d}`), f = 2 ** d, sw = 256 / f;
-        if (ready(par)) { c.drawImage(par, (tx % f) * sw, (ty % f) * sw, sw, sw, px, py, ts + 0.5, ts + 0.5); break; }
+        if (ready(par)) { c.drawImage(par.painted || par, (tx % f) * sw, (ty % f) * sw, sw, sw, px, py, ts + 0.5, ts + 0.5); break; }
       }
     }
-    // Esri's dark gray, tinted to the stage's navy: keep luminance, take the hue.
-    c.globalCompositeOperation = 'color'; c.fillStyle = '#23456E'; c.fillRect(x0, y0, w, h);
-    c.globalCompositeOperation = 'multiply'; c.fillStyle = '#8FA3C8'; c.fillRect(x0, y0, w, h);
+    // Esri's dark gray, tinted to the stage's navy: keep luminance, take the hue. (Light: painted per tile, above.)
+    if (!LIGHT) {
+      c.globalCompositeOperation = 'color'; c.fillStyle = '#23456E'; c.fillRect(x0, y0, w, h);
+      c.globalCompositeOperation = 'multiply'; c.fillStyle = '#8FA3C8'; c.fillRect(x0, y0, w, h);
+    }
     c.globalCompositeOperation = 'source-over';
 
     // SUMO edgeData for this minute: road speed as a share of its limit, x20.
@@ -951,7 +1015,7 @@ const SIM = (() => {
     };
     c.lineCap = c.lineJoin = 'round';
     roads(0, 5); c.globalAlpha = 0.28; c.strokeStyle = COL.jam; c.lineWidth = lw * 3; c.stroke(); c.globalAlpha = 1;
-    for (const [lo, hi, col] of [[10, 15, '#F2D14B'], [5, 10, '#FF9245'], [0, 5, COL.jam]]) { roads(lo, hi); c.strokeStyle = col; c.lineWidth = lw; c.stroke(); }
+    for (const [lo, hi, col] of [[10, 15, COL.slow], [5, 10, COL.heavy], [0, 5, COL.jam]]) { roads(lo, hi); c.strokeStyle = col; c.lineWidth = lw; c.stroke(); }
 
     // App riders: a short trail, then a dot (white = moving, red = stopped).
     const t = Math.floor(s), on = V.cars.filter(v => t >= v.t0 && t < v.t1), r = 2.4 * zs;
@@ -962,7 +1026,7 @@ const SIM = (() => {
       for (let j = a + 3; j < i; j += 3) c.lineTo(X(v.mx[j]), Y(v.my[j]));
       c.lineTo(X(v.mx[i]), Y(v.my[i]));
     }
-    c.strokeStyle = 'rgba(191,212,255,0.3)'; c.lineWidth = 1.4; c.stroke();
+    c.strokeStyle = COL.trail; c.lineWidth = 1.4; c.stroke();
     for (const halted of [0, 1]) {
       c.beginPath();
       for (const v of on) {
@@ -971,7 +1035,7 @@ const SIM = (() => {
         const x = X(v.mx[i]), y = Y(v.my[i]);
         c.moveTo(x + r, y); c.arc(x, y, r, 0, 7);
       }
-      c.fillStyle = halted ? COL.jam : '#F4F7FF'; c.fill();
+      c.fillStyle = halted ? COL.jam : COL.car; c.fill();
       c.lineWidth = 1.2; c.strokeStyle = COL.bay; c.stroke();   // ring keeps stopped cars visible on red roads
     }
 
@@ -983,7 +1047,7 @@ const SIM = (() => {
         const x = X(p.m[0]), y = Y(p.m[1]), ly = y + (i % 2 ? 20 : -18), q = (T * 0.8 + p.m[0] * 1e3) % 1;
         c.globalAlpha = sa * (1 - q) * 0.8; c.strokeStyle = COL.gold; c.lineWidth = 1.5; c.beginPath(); c.arc(x, y, 6 + q * 20, 0, 7); c.stroke();
         c.globalAlpha = sa; c.fillStyle = COL.gold; c.beginPath(); c.arc(x, y, 4.5, 0, 7); c.fill();
-        c.lineWidth = 4; c.strokeStyle = 'rgba(6,12,22,0.9)'; c.strokeText(p.name, x, ly); c.fillStyle = COL.fog; c.fillText(p.name, x, ly);   // alternate above / below
+        c.lineWidth = 4; c.strokeStyle = COL.halo; c.strokeText(p.name, x, ly); c.fillStyle = COL.fog; c.fillText(p.name, x, ly);   // alternate above / below
       });
       c.globalAlpha = 1;
     }
@@ -1008,14 +1072,14 @@ const SIM = (() => {
     if (CV.width !== Math.round(CW * k)) { CV.width = Math.round(CW * k); CV.height = Math.round(CH * k); }
     const c = cctx;
     c.setTransform(k, 0, 0, k, 0, 0); c.clearRect(0, 0, CW, CH);
-    c.font = '500 12px "Instrument Sans"'; c.fillStyle = COL.mist; c.strokeStyle = 'rgba(231,237,246,0.1)'; c.lineWidth = 1;
+    c.font = '500 12px "Instrument Sans"'; c.fillStyle = COL.mist; c.strokeStyle = COL.grid; c.lineWidth = 1;
     c.textAlign = 'right'; c.textBaseline = 'middle';
     for (const v of [0, CMAX / 2, CMAX]) { const y = Math.round(yOf(v)) + 0.5; c.beginPath(); c.moveTo(pl, y); c.lineTo(CW, y); c.stroke(); c.fillText(num(v), pl - 6, y); }
     c.textAlign = 'center'; c.textBaseline = 'alphabetic';
     for (const [t, l] of [[0, '9 PM'], [3600, '10'], [7200, '11'], [10800, '12'], [14400, '1 AM']]) c.fillText(l, Math.min(CW - 16, Math.max(pl + 12, xOf(t))), CH - 4);
     c.save(); c.beginPath(); c.rect(pl, 0, xOf(s) - pl, CH); c.clip();
     let lo = new Float64Array(CB.moving.length);
-    for (const [key, col] of [['moving', '#E7EDF6'], ['stopped', COL.jam], ['enter', COL.mist], ['arrived', '#3DDC97']]) {
+    for (const [key, col] of [['moving', COL.fog], ['stopped', COL.jam], ['enter', COL.mist], ['arrived', COL.arrived]]) {
       const hi = lo.map((v, i) => v + CB[key][i]);
       c.beginPath(); hi.forEach((v, i) => c.lineTo(xOf((i + 0.5) * 60), yOf(v)));
       for (let i = lo.length - 1; i >= 0; i--) c.lineTo(xOf((i + 0.5) * 60), yOf(lo[i]));
@@ -1037,13 +1101,13 @@ const SIM = (() => {
     for (let T = 0; T <= ACT2; T += 0.25) want.push(...tilesFor(sumoCam(T), 0, 0, 1920, 1080));
     want.push(...tilesFor(CMP_CAM, PANEL.xs[0], PANEL.y, PANEL.w, PANEL.h));
     const ims = [...new Set(want.map(([tz, tx, ty]) => `${tz}/${ty}/${tx}`))].map(tile);
-    return Promise.all(ims.map(im => im.decode().catch(() => {})));
+    return Promise.all(ims.map(im => im.decode().then(() => LIGHT && paintTile(im)).catch(() => {})));
   }
 
   const PANEL = { w: 880, h: 467, y: 176, xs: [64, 976], crop: [330, 250, 1320] };
   const CMP_CAM = [JAM[0], JAM[1], 14.9 - Math.log2(1920 / PANEL.w)];
   function drawCompare(T, k) {
-    ctx.fillStyle = '#060C16'; ctx.fillRect(0, 0, 1920, 1080);
+    ctx.fillStyle = LIGHT ? COL.bay : '#060C16'; ctx.fillRect(0, 0, 1920, 1080);
     const sc = PANEL.w / PANEL.crop[2], [xw, xr] = PANEL.xs, y0 = PANEL.y;
     ctx.save(); ctx.beginPath(); ctx.roundRect(xw, y0, PANEL.w, PANEL.h, 20); ctx.clip();
     drawSumo(PEAK, CMP_CAM, xw, y0, PANEL.w, PANEL.h, T);
@@ -1055,10 +1119,10 @@ const SIM = (() => {
       drawWorld(T, frameAt(R, 22), 22, { labels: 0.6, zoneA: 0.8, zoneRgb: BLUE, fcA: 0, corA: 0, pinsA: 0.8, bargeA: 1 });
     }
     ctx.restore();
-    for (const [x, col] of [[xw, 'rgba(255,77,94,0.45)'], [xr, 'rgba(47,107,255,0.55)']]) {
+    for (const [x, col] of LIGHT ? [[xw, 'rgba(200,49,63,0.5)'], [xr, 'rgba(26,117,159,0.6)']] : [[xw, 'rgba(255,77,94,0.45)'], [xr, 'rgba(47,107,255,0.55)']]) {
       ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.roundRect(x, y0, PANEL.w, PANEL.h, 20); ctx.stroke();
     }
-    ctx.fillStyle = `rgba(6,12,22,${1 - smooth(51.5, 52.4, T)})`; ctx.fillRect(0, 0, 1920, 1080);
+    ctx.fillStyle = `rgba(${COL.stage},${1 - smooth(51.5, 52.4, T)})`; ctx.fillRect(0, 0, 1920, 1080);
   }
 
   // ---------- HTML overlay ----------
