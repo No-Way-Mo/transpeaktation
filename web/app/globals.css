@@ -437,9 +437,6 @@ input::placeholder { color: var(--muted); }
 .mob .trip-note { border-radius: 14px; }
 
 /* ---------- AI & privacy ---------- */
-/* One line under the transPEAKtation card: who picked, who wrote it, whether it was kept. Opens the panel. */
-.trace-strip { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 6px 10px 6px 12px; border-radius: 10px; background: var(--fill); font-size: 13px; font-weight: 550; line-height: 1.35; text-align: left; }
-.trace-strip .lead:first-child { color: var(--action-text); }
 
 .aip { display: flex; flex-direction: column; gap: 28px; outline: none; }
 .aip-lede { margin: 0; font-size: 14px; line-height: 1.45; color: var(--muted); text-wrap: pretty; }
@@ -502,10 +499,8 @@ input::placeholder { color: var(--muted); }
 .mob .aip-switch .name { font-size: 16px; }
 .mob .aip-switch .sub, .mob .stop-did { font-size: 14px; }
 .mob .stop-head b { font-size: 15px; }
-.mob .trace-strip { min-height: 44px; border-radius: 12px; font-size: 14px; }
 .mob .aip-stale .pill-btn { height: 40px; }
 @media (hover: hover) {
-  .trace-strip:hover { background: var(--fill-2); }
   .aip-switch:not(:disabled):hover { background: var(--fill); }
 }
 
@@ -553,6 +548,10 @@ input::placeholder { color: var(--muted); }
 .choice-list { display: flex; flex-direction: column; border-radius: 14px; background: var(--fill); overflow: hidden; }
 .choice-row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; cursor: pointer; }
 .choice-row + .choice-row { border-top: 1px solid var(--line); }
+.choice-or { margin: 14px 0 8px; padding: 0 2px; }
+.theme-opts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.theme-opt { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 10px 14px; border-radius: 12px; border: 1.5px solid var(--line); font-size: 14px; font-weight: 600; cursor: pointer; }
+.theme-opt:has(input:checked) { border-color: var(--action-edge); background: var(--action-tint); color: var(--action-text); }
 .set-stack { display: flex; flex-direction: column; gap: 20px; }
 .set-foot { margin: 10px 0 0; padding: 0 2px; line-height: 1.45; text-wrap: pretty; }
 .set-stack .set-foot { margin-top: 0; }
@@ -581,6 +580,7 @@ input::placeholder { color: var(--muted); }
 .dialog.full .settings-tab { min-height: 56px; padding: 12px 14px; border-radius: 0; font-size: 17px; }
 .dialog.full .settings-tab + .settings-tab { border-top: 1px solid var(--line); }
 .dialog.full .choice-row { min-height: 52px; }
+.dialog.full .theme-opt { min-height: 52px; font-size: 16px; }
 .dialog.full .name { font-size: 16px; }
 .dialog.full .aip-switch { padding: 14px; }
 .dialog.full .aip-switch .sub, .dialog.full .stop-did { font-size: 14px; }
@@ -593,7 +593,7 @@ input::placeholder { color: var(--muted); }
 .empty b { font-size: 16px; }
 .empty p { margin: 0; max-width: 38ch; color: var(--muted); }
 @media (hover: hover) {
-  .menu-item:hover, .settings-tab:not([aria-current='page']):hover, .choice-row:hover { background: var(--fill); }
+  .menu-item:hover, .settings-tab:not([aria-current='page']):hover, .choice-row:hover, .theme-opt:not(:has(input:checked)):hover { background: var(--fill); }
   .logo-btn:hover { background: var(--fill); }
   .layers-btn:hover { background: var(--raised); }
 }

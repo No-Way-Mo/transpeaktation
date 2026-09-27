@@ -219,23 +219,32 @@ function SectionBody({ s, p }: { s: Section; p: Planner }) {
   return <Notifications />;
 }
 
-const THEMES: { id: ThemePref; label: string; sub: string }[] = [
-  { id: 'system', label: 'System', sub: 'Match this device’s light or dark setting.' },
-  { id: 'light', label: 'Light', sub: '' },
-  { id: 'dark', label: 'Dark', sub: '' },
+const SYSTEM_THEME = { id: 'system', label: 'System', sub: 'Match this device’s light or dark setting.' } as const;
+const MANUAL_THEMES: { id: ThemePref; label: string; icon: IconName }[] = [
+  { id: 'light', label: 'Light', icon: 'sun' },
+  { id: 'dark', label: 'Dark', icon: 'moon' },
 ];
 
+/** System on its own row, then Light / Dark side by side. One radio group, so arrow keys move through all three. */
 function Appearance() {
   const { pref, setPref } = useTheme();
   const name = useId();
+  const radio = (id: ThemePref) => <input type="radio" name={name} value={id} checked={pref === id} onChange={() => setPref(id)} />;
   return (
     <fieldset className="choice">
       <legend className="eyebrow">Theme</legend>
       <div className="choice-list">
-        {THEMES.map(t => (
-          <label key={t.id} className="choice-row">
-            <input type="radio" name={name} value={t.id} checked={pref === t.id} onChange={() => setPref(t.id)} />
-            <span className="stack grow"><span className="name">{t.label}</span>{t.sub && <span className="sub">{t.sub}</span>}</span>
+        <label className="choice-row">
+          {radio(SYSTEM_THEME.id)}
+          <span className="stack grow"><span className="name">{SYSTEM_THEME.label}</span><span className="sub">{SYSTEM_THEME.sub}</span></span>
+        </label>
+      </div>
+      <p className="sub choice-or">or choose manually</p>
+      <div className="theme-opts">
+        {MANUAL_THEMES.map(t => (
+          <label key={t.id} className="theme-opt">
+            {radio(t.id)}
+            <Icon name={t.icon} size={18} /><span>{t.label}</span>
           </label>
         ))}
       </div>

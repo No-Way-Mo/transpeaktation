@@ -69,7 +69,7 @@ export default function Desktop() {
                       <span className="title">Routes to {p.to?.label}</span>
                     </div>
                     <TripNote note={p.trip.note} />
-                    <RouteList p={p} onTrace={() => n.open('settings', 'privacy')} action={
+                    <RouteList p={p} action={
                       <button className="pill-btn" onClick={e => { e.stopPropagation(); setSteps(true); setStep(-1); }}>Directions</button>
                     } />
                   </>
