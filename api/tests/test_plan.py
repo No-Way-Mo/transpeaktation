@@ -62,28 +62,29 @@ class EventImpact(unittest.TestCase):
         self.assertEqual(p["tag"], "Events on the way")
         # the pick's note: what's on it; no "faster"/"avoids", since api/'s estimate for AROUND (11) beats PAST's (20)
         self.assertEqual(p["note"], "Passes Giants vs. Dodgers at Oracle Park.")
-        self.assertEqual(p["preds"][0]["note"], "10 min slower: Giants vs. Dodgers at Oracle Park.")
-        self.assertEqual(p["preds"][1]["note"], "1 min slower: longer or busier roads.")
+        self.assertEqual(p["preds"][0]["note"], "Might take extra 10 minutes due to: Giants vs. Dodgers at Oracle Park.")
+        self.assertEqual(p["preds"][1]["note"], "No events or closures on it.")
         tie = model.plan([AROUND, AROUND], [at(12)] * 2, "depart", CTX, now=now)  # same time: nothing slows them
         self.assertEqual(([x["note"] for x in tie["preds"]], tie["note"]),
                          (["No events or closures on it."] * 2, "No events or closures on it."))
         self.assertEqual(model.plan([PAST, AROUND], [at(12)] * 2, "depart", CTX, now=now)["tag"], "Clear")
 
-    def test_normal_route_note_sums_up_its_congestion(self):
-        def note(*why, slower=3, slow=0, coverage=1.0, blocked=False):
-            return model.route_note({"blocked": blocked, "estimate": {"why": list(why)},
-                                     "traffic": {"slow_segments": slow, "coverage": coverage}}, slower)
+    def test_normal_route_note_says_what_it_might_add_to_the_eta(self):
+        def note(*why, delay=180, slow=0, coverage=1.0, blocked=False):
+            return model.route_note({"blocked": blocked, "estimate": {"why": list(why), "delay": delay},
+                                     "traffic": {"slow_segments": slow, "coverage": coverage}})
         self.assertEqual(note("LIVE Spinal Manual Therapy Course", "Catawba and Cherokee American Revolution Symposium",
-                              "Other"), "3 min slower: LIVE Spinal Manual Therapy Course +2 more.")
+                              "Other"), "Might take extra 3 minutes due to: LIVE Spinal Manual Therapy Course +2 more.")
         self.assertEqual(note("Catawba and Cherokee American Revolution Symposium at Moscone West"),
-                         "3 min slower: Catawba and Cherokee American Revolution…")  # whole words only
-        self.assertEqual(note("Giants vs. Dodgers", slow=4), "3 min slower: Giants vs. Dodgers, 4 slow stretches.")
-        self.assertEqual(note(slow=1, slower=0), "1 slow stretch of traffic.")
-        self.assertEqual(note(slow=4, coverage=0.0), "3 min slower: longer or busier roads.")  # no traffic data: no claim
-        self.assertEqual(note("Giants vs. Dodgers", slower=0), "Giants vs. Dodgers.")
-        self.assertEqual(note("Road closure on King St", slower=25, blocked=True),  # the minutes are the penalty
+                         "Might take extra 3 minutes due to: Catawba and Cherokee American Revolution…")  # whole words
+        self.assertEqual(note("Giants vs. Dodgers", slow=4), "Might take extra 3 minutes due to: Giants vs. Dodgers, 4 slow stretches.")
+        self.assertEqual(note(delay=60), "Might take extra 1 minute due to: Predicted traffic.")  # ml/'s forecast only
+        self.assertEqual(note(slow=1, delay=0), "1 slow stretch of traffic.")
+        self.assertEqual(note("Giants vs. Dodgers", delay=40), "Giants vs. Dodgers.")  # under a minute: no lead
+        self.assertEqual(note(delay=0), "No events or closures on it.")
+        self.assertEqual(note("Road closure on King St", delay=1200, blocked=True),  # the minutes are the penalty
                          "Crosses a road closure when you'd get there.")
-        self.assertLessEqual(len(note("x" * 200, "y", slow=12, slower=99)), model.NOTE_MAX)
+        self.assertLessEqual(len(note("x" * 200, "y", slow=12, delay=99 * 60)), model.NOTE_MAX)
 
     def test_special_event_closure_counts_like_any_event(self):
         # shaped like store.find_closure_events (what /events shows): a multi-day event right on the route
@@ -391,10 +392,9 @@ class PlanEndpoint(unittest.TestCase):
                     mock.patch.dict(main.state, {"http": httpx.AsyncClient(transport=httpx.MockTransport(handler))}):
                 return self.plan(FakeStore(), depart).json()
 
-        good = lambda r: f"{r['minutes_slower']} min slower: a longer way round." if "minutes_slower" in r \
-            else "Nothing slowing it."  # noqa: E731
+        good = lambda r: "Nothing slowing it."  # noqa: E731
         body = run(good, lambda rec: "1 min faster than the next best route, and nothing on the way")
-        self.assertEqual([p["note"] for p in body["plan"]["preds"]], ["Nothing slowing it.", "1 min slower: a longer way round."])
+        self.assertEqual([p["note"] for p in body["plan"]["preds"]], ["Nothing slowing it."] * 2)
         self.assertEqual(body["plan"]["note"], "1 min faster than the next best route, and nothing on the way.")  # tidied
         self.assertEqual(body["data"]["note"], "gemini:gemini-3.5-flash-lite")
         self.assertEqual(sent[0].headers["x-goog-api-key"], "k")
@@ -405,19 +405,18 @@ class PlanEndpoint(unittest.TestCase):
         for made_up in (lambda r: "Saves 987 min by taking the ferry.", lambda r: "Saves eleven minutes.",
                         lambda r: "Slow. " * 45,
                         lambda r: "11 min slower: a longer way round.",  # a number in the facts, but not the delay
-                        lambda r: "1 min slower." if "minutes_slower" not in r else good(r)):  # not slower at all
+                        lambda r: "A longer way round."):  # the card shows the ETA: never "slower/longer"
             with self.assertLogs("app.advice", "WARNING"):  # a rejected note is logged, not only in data.note
                 body = run(made_up)
             self.assertEqual(body["plan"]["note"], "1 min faster than the next best route.")  # the pick's still Gemini's
             notes = [p["note"] for p in body["plan"]["preds"]]
-            self.assertIn(notes[1], ("1 min slower: longer or busier roads.", "1 min slower: a longer way round."))
-            self.assertNotEqual(notes, [made_up(r) for r in ({}, {"minutes_slower": 1})])  # each wrong one: template
+            self.assertEqual(notes, ["No events or closures on it."] * 2)  # each wrong one: template
         for wrong in ("Avoids the Giants crowd.",  # nothing to avoid on the other route
                       "5 min faster than the next best route."):  # not the minutes the facts give
             with self.assertLogs("app.advice", "WARNING"):
                 body = run(good, lambda rec: wrong)
             self.assertEqual(body["plan"]["note"], "1 min faster than the next best route.")  # the template
-            self.assertEqual(body["plan"]["preds"][1]["note"], "1 min slower: a longer way round.")  # notes still Gemini's
+            self.assertEqual(body["plan"]["preds"][1]["note"], "Nothing slowing it.")  # notes still Gemini's
 
     def test_ml_reasons_stay_on_the_pick_and_gemini_only_words_the_normal_routes(self):
         depart = at(12) + timedelta(days=(datetime.now(SF).date() - DAY.date()).days + 1)
@@ -440,15 +439,16 @@ class PlanEndpoint(unittest.TestCase):
         route = {"events_on_it": [{"name": "Giants vs. Dodgers at Oracle Park", "when": "7:15 PM to 10:15 PM",
                                    "crowd_when_you_pass": "arriving", "adds_about_min": 10, "passes_within_m": 150}],
                  "closures_and_incidents_on_it": [{"name": "Road closure on King St", "until": "11:00 PM"}],
-                 "crosses_a_closure": False, "slow_stretches": 3, "minutes_slower": 7}
-        ok = ("7 min slower: Giants game, 3 slow stretches.", "7 minutes slower: Giants crowd until 10:15 PM.",
-              "7 min slower: the Giants crowd will be arriving, 150 m off the route, adding about 10 min.")
-        bad = ("7 min slower: Bay to Breakers race.",  # an event it made up
-               "7 min slower: road closure on King St.",  # a real one, but not the worst
-               "15 min slower: Giants game.",  # a number from the facts (10:15), not the delay
-               "10 min slower: Giants game, adding about 7 min.",  # the two minutes swapped
-               "7 min slower: Giants game, adding about 15 min.",  # an event delay that isn't there
-               "7 min slower: Giants game ends 9 PM.")  # a time that isn't there
+                 "crosses_a_closure": False, "slow_stretches": 3, "extra_min": 12}
+        ok = ("Giants game, 3 slow stretches.", "Giants crowd until 10:15 PM.",
+              "Giants crowd arriving, 150 m off the route, adding about 10 min.")
+        bad = ("Bay to Breakers race.",  # an event it made up
+               "Road closure on King St.",  # a real one, but not the worst
+               "Giants game, adding about 15 min.",  # an event delay that isn't there
+               "Giants game ends 9 PM.",  # a time that isn't there
+               "7 min slower: Giants game.",  # the card shows the ETA: the lead says the extra, never "slower"
+               "Might take extra 12 minutes due to: Giants game.",  # the api writes the lead
+               "Giants crowd arriving at Oracle Park, 150 m off the route, adding about 10 min on King.")  # too long with the lead
         self.assertEqual([advice.check(t, route) for t in ok], list(ok))
         self.assertEqual([advice.check(t, route) for t in bad], [None] * len(bad))
         clear = {"events_on_it": [], "closures_and_incidents_on_it": [], "crosses_a_closure": False, "slow_stretches": 0}

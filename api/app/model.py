@@ -277,13 +277,12 @@ def plan(routes: list[dict], departs: list[datetime], mode: str, ctx: dict, *, n
     saved = first["dur"] - p["dur"]
     tag = ("Closure ahead" if p["blocked"] else f"Saves ~{mins(saved)} min" if saved >= 60
            else "Events on the way" if p["events"] or p["incidents"] else "Clear")
-    # Normal cards: the congestion on each when you'd drive it. transPEAKtation's card: why this pick (ml/'s reasons
-    # when it gave some). Gemini rewords both (main.py).
-    tp_min = mins(p["dur"])
+    # Normal cards: the provider ETA, and a note on the extra time api/'s estimate adds and why. transPEAKtation's
+    # card: why this pick (ml/'s reasons when it gave some). Gemini rewords both (main.py).
     for r, x in zip(routes, preds):
         if r.get("by") == "ml":  # ml/'s own route is never shown as a normal route
             continue
-        x["note"] = route_note(x, minutes_slower(x, tp_min))
+        x["note"] = route_note(x)
     note = " ".join(ml["reasons"]) if ml and ml.get("reasons") else pick_note(pick_facts(routes, preds, best))
     return {"best": best, "preds": preds, "tag": tag, "note": note, "advice": None}
 
@@ -329,29 +328,37 @@ def pick_note(f: dict) -> str:
 NOTE_MAX = 110  # 2 lines on a phone or the desktop sidebar; Gemini aims for 80-100
 
 
-def minutes_slower(x: dict, tp_min: int) -> int:
-    """How many whole minutes a normal route's estimate is over the transPEAKtation card's time (0 if not)."""
-    return max(0, mins(x["estimate"]["dur"]) - tp_min)
-
-
 def slow_stretches(x: dict) -> int:
     return x["traffic"]["slow_segments"] if x["traffic"]["coverage"] else 0
 
 
-def route_note(x: dict, slower: int) -> str:
-    """The congestion on a normal route when you'd drive it, led by how many minutes it is slower than
-    transPEAKtation's (if it is), in at most NOTE_MAX characters."""
-    if x["blocked"]:  # its minutes are mostly CLOSURE_PENALTY_S, not a real delay: no number
+def extra_min(x: dict) -> int:
+    """Whole minutes api/'s estimate adds on top of a normal route's provider ETA; 0 under a minute or when blocked
+    (a closed route's minutes are mostly CLOSURE_PENALTY_S, not a real delay)."""
+    return 0 if x["blocked"] or x["estimate"]["delay"] < 60 else mins(x["estimate"]["delay"])
+
+
+def extra_lead(n: int | None) -> str:
+    """What a normal card's note starts with when its route may take longer than the ETA shown on it."""
+    return f"Might take extra {n} minute{'s' if n > 1 else ''} due to: " if n else ""
+
+
+def route_note(x: dict) -> str:
+    """A normal route's note, in at most NOTE_MAX characters: the extra minutes api/'s estimate adds to the ETA on
+    the card and why (extra_lead), or what's on the route when nothing adds a minute."""
+    if x["blocked"]:
         return "Crosses a road closure when you'd get there."
-    why, slow = x["estimate"]["why"], slow_stretches(x)  # why: worst event first, then closures/incidents
+    why, slow, extra = x["estimate"]["why"], slow_stretches(x), extra_min(x)  # why: worst event first, then incidents
+    lead = extra_lead(extra)
     stretches = f"{slow} slow stretch{'es' if slow > 1 else ''}"
     if why:
-        body = shorten(why[0], 45) + (f" +{len(why) - 1} more" if len(why) > 1 else "") + (f", {stretches}" if slow else "")
+        room = NOTE_MAX - len(lead) - 30  # the name gets what's left after the lead and "+N more, N slow stretches."
+        body = shorten(why[0], min(45, room)) + (f" +{len(why) - 1} more" if len(why) > 1 else "") + (f", {stretches}" if slow else "")
     elif slow:
         body = f"{stretches} of traffic"
     else:
-        body = "longer or busier roads" if slower else "no events or closures on it"
-    text = f"{slower} min slower: {body}" if slower else body[0].upper() + body[1:]
+        body = "predicted traffic" if extra else "no events or closures on it"
+    text = lead + body[0].upper() + body[1:]
     return text if text.endswith("…") else text + "."
 
 
