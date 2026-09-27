@@ -1,6 +1,6 @@
 """transPEAKtation API: place search, traffic-aware routes with OSM road-segment IDs, the event-aware trip plan
-(routes + what ingest/ stored + the model), voice → trip intent, and read-only views of ingested data (events,
-road conditions, segment traffic) from Mongo / Tiger.
+(routes + what ingest/ stored + the model), voice → trip intent, read-only views of ingested data (events,
+road conditions, segment traffic) from Mongo / Tiger, and community events hosted by riders.
 
     cd api && .venv/bin/uvicorn app.main:app --reload    # http://localhost:8000/docs
 """
@@ -27,7 +27,7 @@ load_dotenv(_API_DIR / ".env")  # api/.env; real env vars win
 # Local dev: reuse keys already in ingest/.env (e.g. its MAPBOX_TOKEN) instead of copying them. Never overrides.
 load_dotenv(_API_DIR.parent / "ingest" / ".env")
 
-from . import advice, coordination, directions, ml, model, providers, rewards, voice
+from . import advice, community, coordination, directions, ml, model, providers, rewards, voice
 from . import store as ingested  # map views (find_*); `store` below is the planner's Store
 from .segments import Segments
 from .store import Store
@@ -51,7 +51,7 @@ app = FastAPI(title="transPEAKtation API", version="0.1.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[o.strip() for o in os.environ.get("ALLOWED_ORIGINS", "http://localhost:3000").split(",") if o.strip()],
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PUT"],  # PUT: edit a community event
     allow_headers=["Content-Type"],  # JSON bodies (POST /trips/{id}/reward)
 )
 
@@ -506,6 +506,95 @@ async def events_today(date: str | None) -> dict:
     found = await asyncio.to_thread(store.events_between, start, start + timedelta(days=1))
     evs = [e for e in (model.from_mongo(x) for x in found or []) if e] if found is not None else model.demo_events(start)
     return _store(key, 300, {"events": [model.event_view(e) for e in evs], "source": "mongo" if found is not None else "demo"})
+
+
+def _write(fn, *args) -> Any:
+    """Mongo write for community events: a missing or failing database is a 503 without driver details."""
+    try:
+        return fn(ingested.mongo_db(), *args)
+    except ingested.StoreUnavailable as e:
+        raise HTTPException(503, f"event store unavailable: {e}")
+    except Exception as e:
+        raise HTTPException(503, f"event store unavailable ({type(e).__name__})")
+
+
+def _checked(e: community.EventIn) -> None:
+    if not in_area((e.lon, e.lat)):
+        raise HTTPException(400, "outside the San Francisco service area")
+    try:
+        e.check_time(datetime.now(timezone.utc))
+    except ValueError as err:
+        raise HTTPException(400, str(err))
+
+
+def _events_changed() -> None:
+    """A new or edited community event must show on the next /events call, not after the 60 s cache."""
+    for k in [k for k in _cache if k[0] == "events"]:
+        _cache.pop(k, None)
+
+
+@app.post("/community/events", status_code=201)
+async def create_community_event(e: community.EventIn):
+    """A rider puts an event on the map (contracts/community_event.md). Map-only: the trip planner doesn't use
+    community events. Returns the MapEvent and a `host_key`, shown this once: whoever holds it can edit the event."""
+    _checked(e)
+    key, now = community.new_key(), datetime.now(timezone.utc)
+    ev = await asyncio.to_thread(_write, ingested.insert_community_event, community.new_doc(e, key, now))
+    _events_changed()
+    return {"event": ev, "host_key": key}
+
+
+@app.post("/community/events/mine")
+async def my_community_events(mine: community.Mine):
+    """My Events: the community events these host keys own (keys in the body, so they stay out of URLs and logs)."""
+    if not mine.keys:
+        return {"events": []}
+    return {"events": await asyncio.to_thread(_write, ingested.community_events, mine.keys)}
+
+
+EVENT_ID = PathParam(pattern=r"^[A-Za-z0-9_:@.+\-]{1,200}$", description="MapEvent.id")
+COMMUNITY_ID = PathParam(pattern="^evt_[0-9a-f]{16}$")
+
+
+@app.post("/events/lookup")
+async def lookup_events(q: community.Lookup):
+    """Events by id, still listed (Saved Events, shared links). Unknown / removed ids are just missing."""
+    ids = [i for i in q.ids if 0 < len(i) <= 200]
+    return {"events": await asyncio.to_thread(_write, ingested.lookup_events, ids) if ids else []}
+
+
+@app.post("/events/{event_id}/report", status_code=201)
+async def report_event(r: community.Report, event_id: str = EVENT_ID):
+    """Report any event (doesn't exist, incorrect info, spam, inappropriate, other) for review. Stores the event id,
+    reason, details and time only: who reported isn't recorded, and a report never hides or deletes the event."""
+    await asyncio.to_thread(_write, ingested.insert_report, event_id, r.reason, r.details, datetime.now(timezone.utc))
+    return {"event_id": event_id, "status": "received"}
+
+
+@app.post("/community/events/{event_id}/delete")
+async def delete_community_event(k: community.HostKey, event_id: str = COMMUNITY_ID):
+    """The host removes their event (key in the body, never the URL). It leaves the map and My Events."""
+    got = await asyncio.to_thread(_write, ingested.delete_community_event, event_id, k.host_key, datetime.now(timezone.utc))
+    if got == "not_found":
+        raise HTTPException(404, "no such community event")
+    if got == "forbidden":
+        raise HTTPException(403, "that host key doesn't match this event")
+    _events_changed()
+    return {"event_id": event_id, "status": "deleted"}
+
+
+@app.put("/community/events/{event_id}")
+async def update_community_event(u: community.Update, event_id: str = COMMUNITY_ID):
+    """Edit a community event; needs its host key. Promotion can't be changed here."""
+    _checked(u)
+    got = await asyncio.to_thread(_write, ingested.update_community_event, event_id, u.host_key,
+                                  community.fields(u), datetime.now(timezone.utc))
+    if got == "not_found":
+        raise HTTPException(404, "no such community event")
+    if got == "forbidden":
+        raise HTTPException(403, "that host key doesn't match this event")
+    _events_changed()
+    return {"event": got}
 
 
 @app.get("/road-conditions")
