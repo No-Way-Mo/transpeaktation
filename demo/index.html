@@ -1000,6 +1000,7 @@ const SIM = (() => {
     return b;
   };
   V1.cb = curveBins(TT); if (ML) V2.cb = curveBins(V2.tt);
+  const REFCB = ML && D.ml_reference ? curveBins(D.ml_reference.totals) : null;   // act 2's own fastest-route run
   const CMAX = ALL;   // groups add up to every car, so the gap above the stack = cars that haven't left yet
   function drawCurve(s, V = V1) {
     const CB = V.cb;
@@ -1020,8 +1021,8 @@ const SIM = (() => {
       for (let i = lo.length - 1; i >= 0; i--) c.lineTo(xOf((i + 0.5) * 60), yOf(lo[i]));
       c.fillStyle = col; c.fill(); lo = hi;
     }
-    if (V !== V1) {   // act 2: where the arrived band starts with fastest routes for everyone
-      const b = V1.cb;
+    if (V !== V1) {   // act 2: where the arrived band starts with fastest routes for everyone (same setup as act 2 if given)
+      const b = REFCB || V1.cb;
       c.beginPath(); b.moving.forEach((m, i) => c.lineTo(xOf((i + 0.5) * 60), yOf(m + b.stopped[i] + b.enter[i])));
       c.setLineDash([4, 4]); c.strokeStyle = COL.jam; c.lineWidth = 1.5; c.stroke(); c.setLineDash([]);
     }
@@ -1080,12 +1081,17 @@ const SIM = (() => {
   ];
   if (ML) {   // act 2 from the ML run, same video-second pacing as act 1 (SKEYS shifted by ACT2)
     const MP = allAt(V2.tt, PEAK, ALL), ME = allAt(V2.tt, SEND, ALL);
+    // act 2 is transPEAKtation's own SUMO setup: compare it with the fastest-route run of that same setup (ml_reference)
+    const REF = D.ml_reference ? D.ml_reference.totals : null, RP = REF && allAt(REF, PEAK, ALL), RE = REF && allAt(REF, SEND, ALL);
     CAPTIONS.splice(CAPTIONS.findIndex(c => c[0] >= ACT2), Infinity,
-      [27, 'Now with transPEAKtation.', `Same night, same ${num(ALL)} cars. The model routes the ${num(D.users)} app riders; the other ${num(ALL - D.users)} drive as before.`],
+      [27, 'Now with transPEAKtation.', D.ml_setup ? `Same night on transPEAKtation's road network: the same ${num(D.users)} app riders and a ${num(ALL - D.users)}-car crowd leaving the same viewing sites, all on the app. It routes every car; the dots are the ${num(D.users)} riders.`
+        : `Same night, same ${num(ALL)} cars, all on the app. transPEAKtation routes every car; the dots are ${num(D.users)} of them.`],
       [31, 'It routes the crowd, not just one car.', 'Most map apps send everyone going from A to B down the same fastest route. transPEAKtation knows where all its riders are headed.'],
-      [34.5, '9:45 PM. The crowd leaves again.', 'This time riders are split across several routes, each only minutes slower than the fastest, so no single street jams.'],
-      [39.5, 'The same moment as before.', `${num(MP.stopped)} cars stopped instead of ${num(GP.stopped)}. ${num(MP.enter)} can't pull out instead of ${num(GP.enter)}.`],
-      [49, `1:00 AM. ${num(ME.arrived)} of ${num(ALL)} cars have arrived.`, `With the fastest route for everyone: ${num(GEND.arrived)}.`]);
+      [34.5, '9:45 PM. The crowd leaves again.', 'This time cars are split across several routes, each predicted to be at most 5 minutes slower than the fastest, so fewer streets jam.'],
+      [39.5, 'The same moment as before.', REF ? `${num(MP.stopped)} cars stopped. With the fastest route for everyone on this setup: ${num(RP.stopped)}.`
+        : `${num(MP.stopped)} cars stopped instead of ${num(GP.stopped)}. ${num(MP.enter)} can't pull out instead of ${num(GP.enter)}.`],
+      [49, `1:00 AM. ${num(ME.arrived)} of ${num(ALL)} cars have arrived.`, REF ? `With the fastest route for everyone on the same setup: ${num(RE.arrived)}.`
+        : `With the fastest route for everyone: ${num(GEND.arrived)}.`]);
   }
   const el = id => document.getElementById(id);
   const ui = {};
@@ -1113,12 +1119,15 @@ const SIM = (() => {
       + cell(mall ? mins(mall.mean) : '–', 'min', `average trip for cars that arrived${mall ? ` · p95 ${mins(mall.p95)} min` : ''}`)
       + cell(num(ME.enter), '', 'never got out of their spot');
     document.querySelector('#compare .tag[style*="996"]').lastChild.textContent = 'transPEAKtation · simulation';
-    document.querySelector('#compare .foot').lastChild.textContent = `The July 4 date, fireworks time and PredictHQ attendance forecast are real inputs; the traffic is simulated, not measured. Both panels: same cars, streets, signals and seed; only the app riders' routes differ.`;
+    document.querySelector('#compare .foot').lastChild.textContent = `The July 4 date, fireworks time and PredictHQ attendance forecast are real inputs; the traffic is simulated, not measured. `
+      + (D.ml_reference ? `Left: the original SUMO run. Right: transPEAKtation's own SUMO setup (its road network; cars stuck over 5 minutes are moved on), every car on the app. `
+        + `Different setups: on the right's setup, the fastest route for everyone got ${num(allAt(D.ml_reference.totals, SEND, ALL).arrived)} of ${num(ALL)} cars home by 1:00 AM.`
+        : `Both panels: same cars, streets, signals and seed, everyone on the app; only the routes differ.`);
   } else el('cmp-r').classList.add('next'), el('cmp-r').innerHTML = cell('Next', '', `Rerun this simulation with transPEAKtation routes: the same ${num(ALL)} cars, streets, signals, seed and hours. We claim no improvement until that run is in.`);
   el('prov').textContent = `Run ${D.run} · scenario ${D.scenario_sha256.slice(0, 12)} · OSM ${D.osm_snapshot.slice(0, 10)} (net ${D.network_sha256.slice(0, 12)})`
-    + ` · seed ${D.seed} · 9 PM–1 AM PDT · ${num(D.users)} app riders + ${num(D.crowd.count)} other cars (assumed) · ${ML ? `right: ${MLABEL}` : 'fixed fastest routes, no ML'}`;
+    + ` · seed ${D.seed} · 9 PM–1 AM PDT · ${num(D.users)} app riders + ${num(D.crowd.count)} other cars (assumed) · ${ML ? `right: ${MLABEL}${D.ml_setup ? ' on transPEAKtation net_v3 (' + D.ml_setup.run.split(' vs ')[1] + ')' : ''}` : 'fixed fastest routes, no ML'}`;
   const NOTE1 = `Simulation on OpenStreetMap streets · synthetic trips, crowd size assumed · dots: ${num(D.users)} app riders, road colour: all ${num(ALL)} cars`;
-  const NOTE2 = ML ? `${NOTE1} · app riders on transPEAKtation routes (${MLABEL})` : 'Concept animation: illustrative traffic model';
+  const NOTE2 = ML ? `${D.ml_reference ? "SUMO simulation on transPEAKtation's road network · synthetic trips, crowd size assumed" : NOTE1} · every car on transPEAKtation routes (${MLABEL})` : 'Concept animation: illustrative traffic model';
   const fmtClock = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', hour: 'numeric', minute: '2-digit' });
   const fmtDate = new Intl.DateTimeFormat('en-US', { timeZone: 'America/Los_Angeles', weekday: 'long', month: 'long', day: 'numeric' });
 
@@ -1145,7 +1154,7 @@ const SIM = (() => {
     const mode = T < 24.5 ? 'w' : T < 27 ? 'rw' : 'rr';
     N.mode.classList.toggle('rw', mode === 'rw'); N.mode.classList.toggle('rr', mode === 'rr');
     setText(N.modeText, 'mode', { w: 'Today: fastest route for everyone', rw: 'Rewinding', rr: ML ? 'transPEAKtation routes' : 'transPEAKtation on' }[mode]);
-    setText(N.curveP, 'cp', T >= ACT2 && ML ? 'transPEAKtation routes · dashed: fastest routes' : 'Every simulated second');
+    setText(N.curveP, 'cp', T >= ACT2 && ML ? `transPEAKtation routes · dashed: fastest routes${REFCB ? ' (same setup)' : ''}` : 'Every simulated second');
     setText(N.note, 'note', T < ACT2 ? NOTE1 : T < 51.5 ? NOTE2 : '');
 
     if (T < ACT2 || ML) {   // SUMO clock and all-car counts (act 1, and act 2 once the ML run exists)
