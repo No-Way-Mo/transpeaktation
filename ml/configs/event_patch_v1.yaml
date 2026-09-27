@@ -1,0 +1,50 @@
+# First event-conditioned patch forecasting experiment (b3_verify, v3 network). Starting settings, not tuned optima.
+name: event_patch_v1
+data:
+  sim_root: data/sf_citywide
+  batch: b3_verify
+  network: net_v3              # b3_verify was simulated on net_v3; never mix with v2 (net/) outputs
+  dataset_id: b3_verify_v3net_ep1
+  out_root: data/forecast
+  bucket_min: 10
+  history_steps: 6             # 60 min of completed buckets
+  horizon_steps: 6             # next 60 min
+  max_ffill: 2
+  phases: [demand]             # warmup and no-departure drain excluded from every window bucket
+  excluded_batches: [calib_v3]
+  split_salt: event_patch_v1
+  n_val_groups: 1
+  n_test_groups: 1
+graph:
+  patch_size: 128
+events:
+  context_radius_m: 3000
+  distance_scales_m: [300, 1000, 3000]
+  max_hops: 8
+  clip_hours: 6
+  near_radius_m: 1000
+model:
+  hidden: 64
+  heads: 4
+  blocks: 3
+  dropout: 0.1
+  use_events: true
+  event_hops: 2
+train:
+  seed: 0
+  lr: 0.001
+  weight_decay: 0.0001
+  grad_clip: 1.0
+  max_epochs: 40
+  patience: 8
+  amp: true
+  device: auto
+  origins_per_family: 24
+  huber_delta: 1.0
+  congestion_loss_weight: 0.0
+eval:
+  # declared before evaluation: a build-up is a target bucket with congestion_ratio >= 0.5 on a road whose last
+  # causal history value (issue time, <= 2-bucket fill) was < 0.3 or missing
+  buildup_congestion: 0.5
+  buildup_prior_max: 0.3
+  headline_horizons: [10, 30, 60]

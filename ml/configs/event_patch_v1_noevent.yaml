@@ -1,0 +1,5 @@
+# Ablation: identical backbone, data, split and training settings; the event-conditioning branch is disabled.
+inherit: event_patch_v1.yaml
+name: event_patch_v1_noevent
+model:
+  use_events: false

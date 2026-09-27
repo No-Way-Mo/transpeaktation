@@ -42,6 +42,7 @@ Mongo = long-lived entities / nested JSON. Tiger = time-series + fast-changing n
 | `road_segments` | road graph edges; `segment_id` = OSM edge `u-v-key`, `cnn` = DataSF street ID | `segment_id` unique, `cnn`, `geometry` 2dsphere |
 | `vehicles` | AV fleet identity + config | `vehicle_id` unique |
 | `road_incidents` | closures, permits, crashes, dispatch | `source+source_id` unique, `location` 2dsphere, `start_time+end_time`, `road_segment_ids` |
+| `forecast_runs` | one per congestion map (ml): `status` ready, exact `closures`, coverage, model identity (`contracts/congestion_map.md`) | `_id` = `model_version|issued_at` |
 
 **Tiger Data**: service `transPEAKtation` (`dp0coukufh`, us-east-1), db `tsdb`. Schema: `contracts/tiger_schema.sql` (idempotent). Connect with `TIGER_DATABASE_URL`; setup: `README.md` step 3. Apply schema: `psql "$TIGER_DATABASE_URL" -f contracts/tiger_schema.sql`.
 
@@ -50,7 +51,7 @@ Mongo = long-lived entities / nested JSON. Tiger = time-series + fast-changing n
 | `traffic_metrics` | segment × time × source | `speed_mph`, `free_flow_speed_mph`, `congestion_ratio` |
 | `av_positions` | vehicle × time | `lat`, `lon`, `status`, `battery_pct`, `trip_id` |
 | `demand_metrics` | zone × time | `trip_requests`, `available_vehicles`, `event_id` |
-| `prediction_metrics` | segment × time × model | `predicted_speed_mph`, `predicted_delay_sec`, `predicted_demand`, `confidence` |
+| `prediction_metrics` | segment × time × model × issue time (congestion map, `contracts/congestion_map.md`) | `issued_at`, `predicted_travel_time_sec`, `predicted_speed_mph`, `predicted_congestion_ratio`, `availability`, `predicted_delay_sec`, `confidence` (NULL) |
 | `simulation_metrics` | run × segment × time | `avg_speed_mph`, `avg_delay_sec`, `throughput_vph` |
 
 ## Traffic data normalization (raw feeds → `traffic_metrics`)
@@ -73,6 +74,10 @@ Forecast models need one fixed road list, one unit, and one time step. Raw feeds
 - ingest HTTP trigger (on-demand refresh, same code as `worker schedule`; `INGEST_TOKEN` in `ingest/.env`, localhost only by default, never called by `web/`): `cd ingest && .venv/Scripts/python -m worker serve` → `POST http://localhost:8100/ingest/refresh` with `Authorization: Bearer $INGEST_TOKEN` (202 + job id), poll `GET /ingest/status/<id>`
 - ingest DataSF live check: `cd ingest && python -m datasf` · test: `cd ingest && python -m unittest discover -s tests -t .`
 - ingest data sources plan + backlog: `ingest/TODO.md`
+- ml (synthetic event model, `ml/README.md`): `cd ml && pip install -e .` · run stages: `python -m eventsim {prepare|network|scenarios|simulate|check|dataset|train|evaluate|replay|export} --event castro` · test: `python -m unittest discover -s tests -t .`
+- ml forecasting (citywide event-conditioned patch model, `ml/forecast/README.md`): `cd ml && pip install -e .[forecast]` · `python -m forecast {audit|prepare|rebuild-cache|sanity|train|evaluate|report|snapshot|predict|finetune-preflight|finetune|evaluate-events}` (`--config configs/event_patch_v1.yaml` or `--checkpoint …`) · test: `python -m unittest tests.test_forecast tests.test_event_finetune`
+- ml coordinated routing POC (`ml/coordination/README.md`; runs on a labeled FIXTURE forecast until a real forecast export exists): `cd ml && pip install -e .[coordination,solver]` · `python -m coordination {fixture|audit|route|demo|serve}` (`--config configs/coordinated_routing_v2.yaml`) → service http://127.0.0.1:8100/v1/health · test: `python -m unittest tests.test_coordination tests.test_coordination_deploy` · deployed (live Tiger/Mongo congestion map on demand, heuristic/batch): `bash deploy/forecast_do.sh && bash deploy/coordination_do.sh`, see `ml/deploy/README.md` · test: `python -m unittest tests.test_live_routing`
+- ml RL route selection (MaskablePPO / masked Double DQN on SUMO, `ml/coordination/README.md`): `cd ml && pip install -e .[rl]` (keep numpy 1.26.4 / protobuf 4.25.5 / torch pinned) · `python -m coordination {env-check|prewarm|train-rl --algo ppo|ddqn [--resume]|benchmark --suite static|profile|screening|heldout} --config configs/coordinated_routing_rl_main.yaml` · test: `python -m unittest tests.test_coordination_rl tests.test_coordination_env tests.test_coordination_benchmark`
 - api: `cd api && python3 -m venv .venv && .venv/bin/pip install -e .[test]` · run: `.venv/bin/uvicorn app.main:app --reload` → http://localhost:8000/docs · test: `.venv/bin/python -m unittest discover -s tests -t .`
 - web: `cd web && npm install && npm run dev` → http://localhost:3000 (≤760px wide = mobile layout) · test: `npm test` · build: `npm run build` · replay demo (past dates allowed; `/plan?replay=true` uses the traffic/closures stored for then): `NEXT_PUBLIC_REPLAY=1 npm run dev`
 - ios: start web first, then `open ios/Transpeaktation.xcodeproj` and Run on a simulator. Web URL = `WEB_APP_URL` in `ios/project.yml`; after editing that file run `cd ios && xcodegen`.

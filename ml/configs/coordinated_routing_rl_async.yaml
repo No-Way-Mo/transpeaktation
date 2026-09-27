@@ -1,0 +1,60 @@
+# ASYNC RL training (coordination/rl/async_train.py) on b3_main with the event_patch_v2_main forecaster, at
+# participation 0.9 (the app's expected 80-100% share; up to 5000 routed drivers per 30-min window). Derived from
+# coordinated_routing_rl_main.yaml (the coordination loader has no inheritance). Starting settings, not tuned.
+# Starting settings, not tuned optima. Sized for one 192-core cloud node: PPO and Double DQN train side by side
+# with 48 SUMO environments each, then the benchmark runs every policy on the same scenarios.
+name: coordinated_routing_rl_async
+seed: 0
+network:
+  segments: data/sf_citywide/batches/b3_main/export/segments.parquet
+forecast:
+  path: data/forecast/exports/b3_main_snapshot.parquet     # serving/route CLI only; episodes refresh their own
+env:
+  batch: b3_main
+  splits: data/forecast/datasets/b3_main_v3net_ep2/splits.json   # test = portola, val = bearrison
+  history_s: 3600
+  decision_window_s: 1800
+  max_drain_s: 1800
+  participation: 0.9
+  max_participants: 5000
+  compliance: 1.0
+  forecast_mode: model
+  forecast_checkpoint: data/forecast/experiments/event_patch_v2_main/best.pt
+  forecast_device: cpu
+  warm_state_cache: true
+rl:
+  k: 5
+  checkpoint: data/coordination/rl/runs_async/appo_async_s0/best
+  device: cpu
+  n_envs: 90                  # async actors per algorithm
+  ppo_lr: 0.0003
+  n_steps: 256                 # per environment: 12,288 decisions per PPO update
+  batch_size: 256
+  n_epochs: 5
+  clip_range: 0.2
+  ent_coef: 0.01
+  gamma: 1.0
+  gae_lambda: 1.0
+  buffer_size: 200000
+  dqn_batch_size: 128
+  learning_starts: 2000
+  target_update: 2000
+  eps_decay_decisions: 40000
+  max_decisions: 500000
+  wall_hours: 2.0
+  eval_every_decisions: 40000
+  eval_episodes: 2
+  save_every_decisions: 20000
+  run_dir: data/coordination/rl/runs_async
+benchmark:
+  policies: [forecast_only, heuristic, batch, rl_ppo, rl_ddqn]
+  checkpoints:
+    rl_ppo: data/coordination/rl/runs_async/appo_async_s0/best
+    rl_ddqn: data/coordination/rl/runs_async/ddqn_async_s0/best
+  screening_split: val
+  screening_scenarios: 3
+  heldout_split: test
+  heldout_scenarios: 6
+  seeds: [0, 1]
+  batch_window_s: 60
+  out_dir: data/coordination/benchmark_async

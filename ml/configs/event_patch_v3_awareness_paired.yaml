@@ -1,0 +1,21 @@
+# Paired-impact ablation (plan §7): identical to event_patch_v3_awareness plus 0.5 x paired event-control loss. Event-awareness fine-tuning of event_patch_v2_main (ml/EVENT_AWARENESS_FINETUNING_PLAN.md). Settings fixed before
+# looking at any new test result. Stage A trains only events.*; the decoder stage runs only if Stage A fails the
+# validation rule. Parsed by forecast/finetune.py (not the ordinary experiment Config).
+parent: data/forecast/experiments/event_patch_v2_main/best.pt
+noevent_reference: data/forecast/experiments/event_patch_v2_main_noevent/best.pt
+output: event_patch_v3_awareness_paired
+lr_event: 0.0001
+stage_b_lr_event: 0.00005
+stage_b_lr_decoder: 0.00001
+weight_decay: 0.0001
+grad_clip: 1.0
+max_epochs: 8
+patience: 3
+stage_b_max_epochs: 4
+stage_b_patience: 2
+per_family: 8
+seed: 0
+weights: {global: 1.0, event_near: 1.0, anticipation: 2.0, preserve: 0.5, pair: 0.5}
+phase_targets: {pre_start: 0.5, pre_end: 0.25, other: 0.25}
+val_stride: 1
+guardrails: {citywide_max_rel: 0.02, control_max_rel: 0.02, severe_max_rel: 0.02, antic_min_gain: 0.05, precision_max_drop: 0.02}

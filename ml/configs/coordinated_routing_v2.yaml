@@ -1,0 +1,34 @@
+# Coordinated routing POC (ROUTING_IMPLEMENTATION_V2.md). Starting settings, not tuned optima.
+# The forecast below is a labeled FIXTURE (python -m coordination fixture) until a real
+# `python -m forecast predict` export exists; point forecast.path at that export then.
+name: coordinated_routing_v2
+seed: 0
+network:
+  sim_root: data/sf_citywide
+  network: net_v3
+  segments: data/sf_citywide/batches/b3_verify/export/segments.parquet
+  patch: data/sf_citywide/prepared/patch.json
+  max_snap_m: 75
+forecast:
+  path: data/coordination/fixtures/forecast_fixture.parquet
+  max_issue_age_min: 20
+candidates:
+  k: 5
+  max_searches: 12
+  detour_abs_s: 180
+  detour_rel: 0.15
+ledger:
+  bin_min: 5
+  spread: [1.0]
+  provisional_ttl_s: 60
+  db_path: data/coordination/ledger.sqlite
+score:
+  lam: 60.0
+batch:
+  max_requests: 32
+  max_wait_ms: 250
+  solve_ms: 250
+service:
+  host: 127.0.0.1
+  port: 8100
+  selector: heuristic

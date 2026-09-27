@@ -1,0 +1,28 @@
+# 3-hour forecasts (18 x 10-min buckets) by full-model transfer of event_patch_v2_main (ML LONG_HORIZON_RETRAINING_PLAN.md).
+# Same network, road order, split salt and 6-bucket history as v2; new long-lead batch b4_long_event (issue times from
+# 3 h before public start/end to 30 min after). Trained with `python -m forecast retrain` (not `train`).
+inherit: event_patch_v2_main.yaml
+name: event_patch_v4_h18_full
+data:
+  batch: b4_long_event
+  dataset_id: b4_long_h18_v1
+  horizon_steps: 18
+eval:
+  headline_horizons: [10, 30, 60, 120, 180]
+retrain:
+  lr_backbone: 0.0001          # inherited backbone / decoder
+  lr_event: 0.0003             # events.* and the horizon embedding
+  weight_decay: 0.0001
+  grad_clip: 1.0
+  max_epochs: 30
+  patience: 5
+  per_family: 24               # windows per training family per epoch (half event, half control runs)
+  seed: 0
+  new_row_noise: 0.01          # horizon rows 7..18 = parent's last row + N(0, noise)
+  weights: {global: 1.0, event_near: 1.0, anticipation: 2.0}
+  horizon_groups: [[0, 6, 0.5], [6, 18, 0.5]]   # [first, end) bucket index, weight: first hour keeps half
+  lead_bands_min: [0, 60, 120, 180]
+  other_share: 0.25            # sampling share of windows outside every lead band; the bands split the rest equally
+  val_stride: 2
+  prefetch: 6
+  guardrails: {first_hour_citywide_max_rel: 0.02, first_hour_control_max_rel: 0.02, first_hour_severe_max_rel: 0.02}

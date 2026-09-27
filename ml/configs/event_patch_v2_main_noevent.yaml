@@ -1,0 +1,9 @@
+# Ablation of event_patch_v2_main: identical data, split and training; the event-conditioning branch is disabled.
+# (inherit resolves one level, so this repeats the v2_main data overrides on top of event_patch_v1.)
+inherit: event_patch_v1.yaml
+name: event_patch_v2_main_noevent
+data:
+  batch: b3_main
+  dataset_id: b3_main_v3net_ep2
+model:
+  use_events: false

@@ -1,0 +1,43 @@
+# Deployed coordinator (ml/deploy/coordination_do.sh): heuristic load balancer, batch (CP-SAT) selectable per request.
+# Input is REPLAY: the forecast service on the same droplet forecasts one held-out recorded synthetic run
+# (b3_main portola, test split of the served model) under a replay clock. Not live traffic.
+# Settings are the POC starting values (coordinated_routing_v2.yaml), not tuned optima.
+name: coordinated_routing_deploy
+seed: 0
+network:
+  sim_root: data/sf_citywide
+  network: net_v3
+  segments: data/sf_citywide/batches/b3_verify/export/segments.parquet
+  patch: data/sf_citywide/prepared/patch.json
+  cache_dir: /var/lib/transpeaktation/coordination/network_cache
+  max_snap_m: 75
+forecast:
+  bucket_min: 10
+  horizons: 6                       # event_patch_v2_main: 6 x 10 min
+  max_issue_age_min: 20
+candidates:
+  k: 5
+  max_searches: 12
+  detour_abs_s: 180
+  detour_rel: 0.15
+ledger:
+  bin_min: 5
+  spread: [1.0]
+  provisional_ttl_s: 60
+score:
+  lam: 60.0
+batch:
+  max_requests: 32
+  max_wait_ms: 250
+  solve_ms: 250
+service:
+  host: 0.0.0.0                     # token required (COORDINATION_API_TOKEN); firewall limits who can connect
+  port: 8100
+  selector: heuristic
+  allowed_selectors: [forecast_only, heuristic, batch]
+replay:
+  run: data/coordination/replay/b3_main_portola_full_f025_s0_event.parquet
+  context: data/coordination/replay/b3_main_portola_full_f025_s0_event.context.json
+  forecast_url: http://127.0.0.1:8200
+  state_dir: /var/lib/transpeaktation/coordination
+  start_offset_min: 0
